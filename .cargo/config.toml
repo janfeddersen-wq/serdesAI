@@ -1,0 +1,56 @@
+# Cargo configuration for fast builds and development
+
+[build]
+# Use all available CPU cores
+jobs = -1
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "link-arg=-fuse-ld=lld",
+    "-C", "split-debuginfo=unpacked",
+]
+linker = "clang"
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = [
+    "-C", "link-arg=-fuse-ld=lld",
+    "-C", "split-debuginfo=unpacked",
+]
+linker = "clang"
+
+[target.x86_64-apple-darwin]
+rustflags = [
+    "-C", "split-debuginfo=unpacked",
+]
+
+[target.aarch64-apple-darwin]
+rustflags = [
+    "-C", "split-debuginfo=unpacked",
+]
+
+[alias]
+t = "test"
+b = "build"
+c = "check"
+cl = "clippy"
+fmt = "fmt"
+doc = "doc --no-deps --document-private-items"
+test-all = "test --workspace --all-features"
+check-all = "check --workspace --all-features"
+clippy-all = "clippy --workspace --all-features -- -D warnings"
+
+[env]
+# Enable backtraces by default in development
+RUST_BACKTRACE = "1"
+
+[term]
+quiet = false
+verbose = false
+color = "auto"
+
+[net]
+retry = 3
+git-fetch-with-cli = true
+
+[registries.crates-io]
+protocol = "sparse"

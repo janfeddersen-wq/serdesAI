@@ -1,0 +1,30 @@
+[package]
+name = "serdes-ai-ui"
+version = "0.1.0"
+edition = "2021"
+description = "UI protocol adapters for serdesAI (Vercel AI SDK, AG-UI)"
+license = "MIT"
+repository = "https://github.com/serdes-ai/serdes-ai"
+keywords = ["ai", "llm", "vercel", "ui", "streaming"]
+categories = ["api-bindings", "web-programming"]
+
+[features]
+default = ["vercel"]
+vercel = []
+ag-ui = []
+full = ["vercel", "ag-ui"]
+
+[dependencies]
+serdes-ai-core = { path = "../serdes-ai-core" }
+serdes-ai-streaming = { path = "../serdes-ai-streaming" }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+erased-serde = "0.4"
+futures = "0.3"
+tokio = { version = "1", features = ["sync"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

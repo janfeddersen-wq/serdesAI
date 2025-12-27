@@ -1,0 +1,33 @@
+[package]
+name = "serdes-ai-evals"
+description = "Evaluation framework for testing and benchmarking serdes-ai agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "evaluation", "testing", "benchmark"]
+categories = ["development-tools::testing"]
+
+[features]
+default = []
+html-report = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+regex = "1.10"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }

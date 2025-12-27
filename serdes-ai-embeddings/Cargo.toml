@@ -1,0 +1,33 @@
+[package]
+name = "serdes-ai-embeddings"
+description = "Embedding models and vector operations for serdes-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "embeddings", "vectors", "rag"]
+categories = ["api-bindings"]
+
+[features]
+default = ["openai"]
+full = ["openai", "cohere"]
+
+# Provider implementations
+openai = []
+cohere = []
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }

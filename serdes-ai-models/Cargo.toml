@@ -1,0 +1,61 @@
+[package]
+name = "serdes-ai-models"
+description = "Model trait and provider implementations for serdes-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "models", "openai", "anthropic"]
+categories = ["api-bindings"]
+
+[features]
+default = ["openai"]
+full = ["openai", "anthropic", "google", "mistral", "groq", "ollama", "bedrock", "azure", "openrouter", "huggingface", "cohere"]
+
+# Provider implementations
+openai = []
+anthropic = []
+google = []
+gemini = ["google"]  # Alias
+mistral = []
+groq = []
+ollama = []
+bedrock = ["dep:aws-config", "dep:aws-sdk-bedrockruntime"]
+azure = []
+openrouter = ["openai"]  # OpenRouter uses OpenAI's stream parser
+huggingface = []
+cohere = []
+
+[dependencies]
+serdes-ai-core = { workspace = true }
+serdes-ai-tools = { workspace = true }
+serdes-ai-output = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+url = { workspace = true }
+base64 = { workspace = true }
+derive_builder = { workspace = true }
+chrono = { workspace = true }
+pin-project-lite = { workspace = true }
+tokio-stream = "0.1"
+
+# Optional AWS dependencies for Bedrock
+aws-config = { version = "1.1", optional = true }
+aws-sdk-bedrockruntime = { version = "1.15", optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+wiremock = { workspace = true }
+mockall = { workspace = true }
+rstest = { workspace = true }

@@ -1,0 +1,31 @@
+[package]
+name = "serdes-ai-toolsets"
+description = "Toolset abstractions for grouping and managing tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "toolset", "function-calling"]
+categories = ["development-tools"]
+
+[features]
+default = []
+
+[dependencies]
+serdes-ai-core = { workspace = true }
+serdes-ai-tools = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+indexmap = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }

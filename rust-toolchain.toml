@@ -1,0 +1,11 @@
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy", "rust-analyzer"]
+profile = "default"
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "aarch64-apple-darwin"]
+
+# Minimum supported Rust version: 1.75.0
+# This is required for:
+# - async fn in traits (AFIT) stabilization
+# - impl Trait in type aliases
+# - let-else stabilization improvements

@@ -1,0 +1,67 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Cargo.lock - included for reproducibility (uncomment if pure library)
+# Cargo.lock
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+.fleet/
+
+# OS files
+.DS_Store
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Coverage reports
+lcov.info
+*.profraw
+*.profdata
+coverage/
+tarpaulin-report.html
+cobertura.xml
+
+# Benchmarks
+criterion/
+flamegraph.svg
+perf.data*
+
+# Documentation build
+/docs/build/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor backups and temp files
+*~
+*.swp
+*.swo
+*.bak
+\#*\#
+.#*
+
+# Rust-specific
+**/*.rs.bk
+Cargo.lock.bak
+
+# Build system
+.cargo/registry
+.cargo/git
+
+# Generated files
+*.generated.rs
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+test-output/

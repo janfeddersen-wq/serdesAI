@@ -1,0 +1,39 @@
+[package]
+name = "serdes-ai-mcp"
+description = "Model Context Protocol (MCP) implementation for serdes-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "mcp", "protocol", "context"]
+categories = ["api-bindings"]
+
+[features]
+default = ["client"]
+client = []
+server = []
+full = ["client", "server"]
+
+[dependencies]
+serdes-ai-core = { workspace = true }
+serdes-ai-tools = { workspace = true }
+serdes-ai-toolsets = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+url = { workspace = true }
+base64 = { workspace = true }
+parking_lot = { workspace = true }
+reqwest = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }

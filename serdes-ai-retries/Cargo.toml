@@ -1,0 +1,27 @@
+[package]
+name = "serdes-ai-retries"
+description = "Retry strategies and error handling for serdes-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "retry", "backoff", "resilience"]
+categories = ["asynchronous"]
+
+[features]
+default = []
+
+[dependencies]
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }

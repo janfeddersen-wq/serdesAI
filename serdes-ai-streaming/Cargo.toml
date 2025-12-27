@@ -1,0 +1,37 @@
+[package]
+name = "serdes-ai-streaming"
+description = "Streaming support for serdes-ai (SSE, WebSocket, async streams)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "streaming", "sse", "async"]
+categories = ["asynchronous"]
+
+[features]
+default = []
+websocket = ["dep:tokio-tungstenite"]
+
+[dependencies]
+serdes-ai-core = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+pin-project-lite = { workspace = true }
+bytes = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+parking_lot = { workspace = true }
+
+# Optional WebSocket support
+tokio-tungstenite = { version = "0.21", optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }

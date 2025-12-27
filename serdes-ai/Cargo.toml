@@ -1,0 +1,95 @@
+[package]
+name = "serdes-ai"
+description = "Type-safe, production-ready AI agent framework for Rust - a full port of pydantic-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["openai", "macros"]
+
+# All features
+full = [
+    "openai",
+    "anthropic",
+    "gemini",
+    "mistral",
+    "groq",
+    "ollama",
+    "bedrock",
+    "azure",
+    "mcp",
+    "embeddings",
+    "graph",
+    "evals",
+    "macros",
+    "tracing-integration",
+    "otel",
+]
+
+# Model providers
+openai = ["serdes-ai-models/openai"]
+anthropic = ["serdes-ai-models/anthropic"]
+gemini = ["serdes-ai-models/gemini"]
+mistral = ["serdes-ai-models/mistral"]
+groq = ["serdes-ai-models/groq"]
+ollama = ["serdes-ai-models/ollama"]
+bedrock = ["serdes-ai-models/bedrock"]
+azure = ["serdes-ai-models/azure"]
+
+# Optional components
+mcp = ["dep:serdes-ai-mcp"]
+embeddings = ["dep:serdes-ai-embeddings"]
+graph = ["dep:serdes-ai-graph"]
+evals = ["dep:serdes-ai-evals"]
+macros = ["dep:serdes-ai-macros"]
+
+# Observability
+tracing-integration = [
+    "serdes-ai-core/tracing-integration",
+    "serdes-ai-agent/tracing-integration",
+]
+otel = ["serdes-ai-core/otel"]
+
+[dependencies]
+# Core crates (always included)
+serdes-ai-core = { workspace = true }
+serdes-ai-agent = { workspace = true }
+serdes-ai-models = { workspace = true }
+serdes-ai-providers = { workspace = true }
+serdes-ai-tools = { workspace = true }
+serdes-ai-toolsets = { workspace = true }
+serdes-ai-output = { workspace = true }
+serdes-ai-streaming = { workspace = true }
+serdes-ai-retries = { workspace = true }
+
+# Optional crates
+serdes-ai-mcp = { workspace = true, optional = true }
+serdes-ai-embeddings = { workspace = true, optional = true }
+serdes-ai-graph = { workspace = true, optional = true }
+serdes-ai-evals = { workspace = true, optional = true }
+serdes-ai-macros = { workspace = true, optional = true }
+
+# For direct module
+thiserror = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tokio-test = { workspace = true }
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
+wiremock = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

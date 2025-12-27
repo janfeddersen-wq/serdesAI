@@ -1,0 +1,124 @@
+[workspace]
+resolver = "2"
+members = [
+    "serdes-ai",
+    "serdes-ai-core",
+    "serdes-ai-agent",
+    "serdes-ai-models",
+    "serdes-ai-providers",
+    "serdes-ai-tools",
+    "serdes-ai-toolsets",
+    "serdes-ai-output",
+    "serdes-ai-streaming",
+    "serdes-ai-mcp",
+    "serdes-ai-embeddings",
+    "serdes-ai-retries",
+    "serdes-ai-graph",
+    "serdes-ai-evals",
+    "serdes-ai-macros",
+    "serdes-ai-ui",
+    "serdes-ai-a2a"
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["serdes-ai contributors"]
+repository = "https://github.com/janfeddersen-wq/serdesAI"
+homepage = "https://github.com/janfeddersen-wq/serdesAI"
+documentation = "https://docs.rs/serdes-ai"
+readme = "README.md"
+keywords = ["ai", "llm", "agent", "serde", "pydantic"]
+categories = ["development-tools", "api-bindings", "asynchronous"]
+rust-version = "1.75.0"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async Runtime
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+pin-project-lite = "0.2"
+
+# Error Handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# HTTP Client
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.22"
+opentelemetry = "0.21"
+opentelemetry_sdk = "0.21"
+opentelemetry-otlp = "0.14"
+
+# Data Types
+bytes = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+url = { version = "2.5", features = ["serde"] }
+mime = "0.3"
+indexmap = { version = "2.0", features = ["serde"] }
+
+# Code Generation & Builders
+derive_builder = "0.20"
+
+# Concurrency
+parking_lot = "0.12"
+
+# Proc Macros
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+darling = "0.20"
+
+# Testing
+tokio-test = "0.4"
+mockall = "0.12"
+wiremock = "0.6"
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+rstest = "0.18"
+pretty_assertions = "1.4"
+
+# Internal crates
+serdes-ai-core = { path = "serdes-ai-core", version = "0.1.0" }
+serdes-ai-agent = { path = "serdes-ai-agent", version = "0.1.0" }
+serdes-ai-models = { path = "serdes-ai-models", version = "0.1.0" }
+serdes-ai-providers = { path = "serdes-ai-providers", version = "0.1.0" }
+serdes-ai-tools = { path = "serdes-ai-tools", version = "0.1.0" }
+serdes-ai-toolsets = { path = "serdes-ai-toolsets", version = "0.1.0" }
+serdes-ai-output = { path = "serdes-ai-output", version = "0.1.0" }
+serdes-ai-streaming = { path = "serdes-ai-streaming", version = "0.1.0" }
+serdes-ai-mcp = { path = "serdes-ai-mcp", version = "0.1.0" }
+serdes-ai-embeddings = { path = "serdes-ai-embeddings", version = "0.1.0" }
+serdes-ai-retries = { path = "serdes-ai-retries", version = "0.1.0" }
+serdes-ai-graph = { path = "serdes-ai-graph", version = "0.1.0" }
+serdes-ai-evals = { path = "serdes-ai-evals", version = "0.1.0" }
+serdes-ai-macros = { path = "serdes-ai-macros", version = "0.1.0" }
+serdes-ai-a2a = { path = "serdes-ai-a2a", version = "0.1.0" }
+
+[profile.dev]
+split-debuginfo = "unpacked"
+opt-level = 0
+debug = true
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.bench]
+inherits = "release"
+debug = true

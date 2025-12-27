@@ -1,0 +1,47 @@
+[package]
+name = "serdes-ai-providers"
+description = "Provider abstractions and registry for serdes-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "providers", "openai", "anthropic"]
+categories = ["api-bindings"]
+
+[features]
+default = ["openai", "anthropic", "google"]
+full = ["openai", "anthropic", "google", "azure", "groq", "mistral", "cohere", "ollama", "together", "fireworks", "deepseek", "openrouter", "bedrock"]
+
+# Individual providers
+openai = []
+anthropic = []
+google = []
+azure = []
+groq = []
+mistral = []
+cohere = []
+ollama = []
+together = []
+fireworks = []
+deepseek = []
+openrouter = []
+bedrock = []
+
+[dependencies]
+serdes-ai-core = { workspace = true }
+serdes-ai-models = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }

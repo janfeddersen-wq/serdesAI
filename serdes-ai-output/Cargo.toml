@@ -1,0 +1,39 @@
+[package]
+name = "serdes-ai-output"
+description = "Output schema validation and structured output support for serdes-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+keywords = ["ai", "llm", "schema", "validation", "json-schema"]
+categories = ["development-tools"]
+
+[features]
+default = []
+strict-validation = ["dep:jsonschema"]
+
+[dependencies]
+serdes-ai-core = { workspace = true }
+serdes-ai-tools = { workspace = true }
+serdes-ai-toolsets = { workspace = true }
+serdes-ai-macros = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+regex = "1.10"
+parking_lot = { workspace = true }
+
+# Optional strict validation
+jsonschema = { version = "0.18", optional = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+rstest = { workspace = true }
+pretty_assertions = { workspace = true }
