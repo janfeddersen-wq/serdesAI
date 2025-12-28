@@ -106,21 +106,15 @@ impl ToolCallArgs {
 
     /// Try to get as JSON object.
     #[must_use]
-    pub fn as_object(&self) -> Option<&serde_json::Map<String, serde_json::Value>> {
+    pub fn as_object(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
         match self {
-            Self::Json(serde_json::Value::Object(obj)) => Some(obj),
-            Self::String(s) => {
-                // Try to parse
-                serde_json::from_str::<serde_json::Value>(s)
-                    .ok()
-                    .and_then(|v| {
-                        if let serde_json::Value::Object(_) = &v {
-                            None // Can't return reference to temporary
-                        } else {
-                            None
-                        }
-                    })
-            }
+            Self::Json(serde_json::Value::Object(obj)) => Some(obj.clone()),
+            Self::String(s) => serde_json::from_str::<serde_json::Value>(s)
+                .ok()
+                .and_then(|value| match value {
+                    serde_json::Value::Object(map) => Some(map),
+                    _ => None,
+                }),
             _ => None,
         }
     }
@@ -137,11 +131,14 @@ impl ToolCallArgs {
     }
 
     /// Convert to JSON string.
-    #[must_use]
-    pub fn to_json_string(&self) -> String {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization fails.
+    pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
         match self {
-            Self::Json(v) => serde_json::to_string(v).unwrap_or_default(),
-            Self::String(s) => s.clone(),
+            Self::Json(v) => serde_json::to_string(v),
+            Self::String(s) => Ok(s.clone()),
         }
     }
 
@@ -259,8 +256,11 @@ impl ToolCallPart {
     }
 
     /// Get arguments as JSON string.
-    #[must_use]
-    pub fn args_as_json_str(&self) -> String {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization fails.
+    pub fn args_as_json_str(&self) -> Result<String, serde_json::Error> {
         self.args.to_json_string()
     }
 
@@ -645,8 +645,11 @@ impl BuiltinToolCallPart {
     }
 
     /// Get arguments as JSON string.
-    #[must_use]
-    pub fn args_as_json_str(&self) -> String {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization fails.
+    pub fn args_as_json_str(&self) -> Result<String, serde_json::Error> {
         self.args.to_json_string()
     }
 
@@ -1068,7 +1071,7 @@ mod tests {
     fn test_tool_call_args_from_json() {
         let args = ToolCallArgs::json(serde_json::json!({"location": "NYC"}));
         assert!(args.is_valid_json());
-        assert_eq!(args.to_json_string(), r#"{"location":"NYC"}"#);
+        assert_eq!(args.to_json_string().unwrap(), r#"{"location":"NYC"}"#);
     }
 
     #[test]

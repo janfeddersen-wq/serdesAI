@@ -743,7 +743,7 @@ impl ModelResponsePartsManager {
                 // Already have complete tool call, just update args
                 if let Some(delta) = args_delta {
                     // Append to existing args
-                    let current_args = tool_call.args.to_json_string();
+                    let current_args = tool_call.args.to_json_string().unwrap_or_default();
                     let new_args = format!("{}{}", current_args, delta);
                     tool_call.args = new_args.into();
 
@@ -880,7 +880,7 @@ impl ModelResponsePartsManager {
                 // Already have complete builtin call, just update args
                 if let Some(delta) = args_delta {
                     // Append to existing args
-                    let current_args = builtin_call.args.to_json_string();
+                    let current_args = builtin_call.args.to_json_string().unwrap_or_default();
                     let new_args = format!("{}{}", current_args, delta);
                     builtin_call.args = new_args.into();
 

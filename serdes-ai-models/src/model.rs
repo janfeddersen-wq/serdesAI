@@ -20,8 +20,8 @@ use crate::profile::ModelProfile;
 /// Parameters for a model request.
 #[derive(Debug, Clone, Default)]
 pub struct ModelRequestParameters {
-    /// Tool definitions to include.
-    pub tools: Vec<ToolDefinition>,
+    /// Tool definitions to include (wrapped in Arc to avoid cloning on every step).
+    pub tools: Arc<Vec<ToolDefinition>>,
     /// Output schema for structured output.
     pub output_schema: Option<ObjectJsonSchema>,
     /// Output mode (text, native, prompted, tool).
@@ -44,6 +44,13 @@ impl ModelRequestParameters {
     /// Add tool definitions.
     #[must_use]
     pub fn with_tools(mut self, tools: Vec<ToolDefinition>) -> Self {
+        self.tools = Arc::new(tools);
+        self
+    }
+
+    /// Add tool definitions from an Arc (zero-copy for cached tools).
+    #[must_use]
+    pub fn with_tools_arc(mut self, tools: Arc<Vec<ToolDefinition>>) -> Self {
         self.tools = tools;
         self
     }

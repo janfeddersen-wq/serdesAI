@@ -423,7 +423,10 @@ impl ToolCallPartDelta {
     pub fn apply(&self, part: &mut ToolCallPart) {
         if !self.args_delta.is_empty() {
             // Append to existing args string representation
-            let current = part.args.to_json_string();
+            let current = part
+                .args
+                .to_json_string()
+                .unwrap_or_else(|_| part.args.to_json().to_string());
             let new_args = format!("{}{}", current, self.args_delta);
             part.args = ToolCallArgs::String(new_args);
         }
@@ -595,7 +598,10 @@ impl BuiltinToolCallPartDelta {
     pub fn apply(&self, part: &mut BuiltinToolCallPart) {
         if !self.args_delta.is_empty() {
             // Append to existing args string representation
-            let current = part.args.to_json_string();
+            let current = part
+                .args
+                .to_json_string()
+                .unwrap_or_else(|_| part.args.to_json().to_string());
             let new_args = format!("{}{}", current, self.args_delta);
             part.args = ToolCallArgs::String(new_args);
         }
@@ -766,7 +772,7 @@ mod tests {
         
         assert_eq!(part.tool_call_id, Some("call_123".to_string()));
         // Args should have the delta appended
-        assert!(part.args.to_json_string().contains("city"));
+        assert!(part.args.to_json_string().unwrap().contains("city"));
     }
 
     #[test]
@@ -944,7 +950,7 @@ mod tests {
         delta.apply(&mut part);
         
         assert_eq!(part.tool_call_id, Some("call_456".to_string()));
-        assert!(part.args.to_json_string().contains("test"));
+        assert!(part.args.to_json_string().unwrap().contains("test"));
     }
 
     #[test]
@@ -1030,7 +1036,7 @@ mod tests {
         assert!(delta.apply(&mut part));
         
         if let ModelResponsePart::BuiltinToolCall(ref builtin) = part {
-            assert!(builtin.args.to_json_string().contains("rust"));
+            assert!(builtin.args.to_json_string().unwrap().contains("rust"));
         } else {
             panic!("Expected BuiltinToolCall part");
         }

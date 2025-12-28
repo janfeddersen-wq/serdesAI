@@ -133,6 +133,22 @@ pub mod cohere;
 #[cfg(feature = "cohere")]
 pub use cohere::CohereModel;
 
+/// ChatGPT OAuth models (Codex API with OAuth tokens).
+#[cfg(feature = "chatgpt-oauth")]
+#[cfg_attr(docsrs, doc(cfg(feature = "chatgpt-oauth")))]
+pub mod chatgpt_oauth;
+
+#[cfg(feature = "chatgpt-oauth")]
+pub use chatgpt_oauth::ChatGptOAuthModel;
+
+/// Claude Code OAuth models (Anthropic API with OAuth tokens).
+#[cfg(feature = "claude-code-oauth")]
+#[cfg_attr(docsrs, doc(cfg(feature = "claude-code-oauth")))]
+pub mod claude_code_oauth;
+
+#[cfg(feature = "claude-code-oauth")]
+pub use claude_code_oauth::ClaudeCodeOAuthModel;
+
 // Mock for testing
 pub mod mock;
 

@@ -8,6 +8,18 @@ use serde::Serialize;
 use std::time::Duration;
 use tracing::debug;
 
+impl From<reqwest::Error> for RetryableError {
+    fn from(err: reqwest::Error) -> Self {
+        if err.is_timeout() {
+            RetryableError::Timeout
+        } else if err.is_connect() {
+            RetryableError::Connection(err.to_string())
+        } else {
+            RetryableError::Other(err.into())
+        }
+    }
+}
+
 /// HTTP client wrapper with automatic retries.
 #[derive(Debug, Clone)]
 pub struct RetryClient {
@@ -105,10 +117,7 @@ impl RetryClient {
                     request = request.json(&b);
                 }
 
-                let response = request
-                    .send()
-                    .await
-                    .map_err(|e| RetryableError::connection(e.to_string()))?;
+                let response = request.send().await.map_err(RetryableError::from)?;
 
                 check_response(response).await
             }

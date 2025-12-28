@@ -58,7 +58,6 @@ pub mod backoff;
 pub mod config;
 pub mod error;
 pub mod executor;
-pub mod policy;
 pub mod strategy;
 pub mod transport;
 
@@ -67,7 +66,6 @@ pub use backoff::{ExponentialBackoff, ExponentialBackoffBuilder, FixedDelay, Lin
 pub use config::{RetryCondition, RetryConfig, WaitStrategy};
 pub use error::{RetryResult, RetryableError};
 pub use executor::{with_retry, with_retry_state, AttemptInfo, Retry, RetryState};
-pub use policy::RetryPolicy;
 pub use strategy::{NoRetry, RetryStrategy};
 pub use transport::{RetryClient, RetryClientBuilder};
 

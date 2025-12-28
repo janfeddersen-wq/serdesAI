@@ -3,12 +3,13 @@
 use crate::case::Case;
 use crate::dataset::Dataset;
 use crate::error::{EvalError, EvalResult};
-use crate::evaluator::{Evaluator, EvaluatorContext, EvaluatorSet, NamedEvaluationResult};
+use crate::evaluator::{EvaluationResult, Evaluator, EvaluatorSet, NamedEvaluationResult};
 use crate::report::{CaseResult, EvaluationReport};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
+use tokio::time::timeout;
 
 /// Options for running evaluations.
 #[derive(Debug, Clone)]
@@ -115,35 +116,95 @@ impl EvalRunner {
         Fut: Future<Output = TaskOutput> + Send,
         TaskOutput: AsRef<str> + Clone + Send + Sync,
     {
+        let options = &self.options;
+        let evaluators = &self.evaluators;
+        let task = &task;
+
         let mut results = Vec::new();
 
-        for (idx, case) in dataset.cases.iter().enumerate() {
-            let name = case.display_name(idx);
-            let start = Instant::now();
-
-            // Run the task
-            let output = task(&case.inputs).await;
-            let duration = start.elapsed();
-
-            // Get expected output as string
-            let expected_str = case.expected_output.as_ref().map(|e| e.as_ref());
-
-            // Run evaluators
-            let evaluations = self
-                .evaluators
-                .evaluate(output.as_ref(), expected_str)
-                .await;
-
-            results.push(CaseResult::new(name, idx, output, evaluations, duration));
-
-            // Check fail-fast
-            if self.options.fail_fast && results.last().map(|r| r.failed()).unwrap_or(false) {
-                break;
+        if options.fail_fast {
+            for (idx, case) in dataset.cases.iter().enumerate() {
+                let result = self
+                    .run_single_case(idx, case, task, options, evaluators)
+                    .await;
+                let failed = result.failed();
+                results.push(result);
+                if failed {
+                    break;
+                }
             }
+        } else {
+            let semaphore = Arc::new(Semaphore::new(options.concurrency.max(1)));
+
+            let tasks: Vec<_> = dataset
+                .cases
+                .iter()
+                .enumerate()
+                .map(|(idx, case)| {
+                    let sem = semaphore.clone();
+                    async move {
+                        let _permit = sem.acquire().await.expect("Semaphore closed");
+                        self.run_single_case(idx, case, task, options, evaluators)
+                            .await
+                    }
+                })
+                .collect();
+
+            results = futures::future::join_all(tasks).await;
         }
 
-        let report = EvaluationReport::new(results);
-        Ok(report)
+        Ok(EvaluationReport::new(results))
+    }
+
+    /// Helper to run a single case evaluation.
+    async fn run_single_case<Inputs, Output, Metadata, F, Fut, TaskOutput>(
+        &self,
+        idx: usize,
+        case: &Case<Inputs, Output, Metadata>,
+        task: &F,
+        options: &EvalOptions,
+        evaluators: &EvaluatorSet,
+    ) -> CaseResult<TaskOutput>
+    where
+        Inputs: Send + Sync,
+        Output: AsRef<str> + Send + Sync,
+        Metadata: Send + Sync,
+        F: Fn(&Inputs) -> Fut + Send + Sync,
+        Fut: Future<Output = TaskOutput> + Send,
+        TaskOutput: AsRef<str> + Clone + Send + Sync,
+    {
+        let name = case.display_name(idx);
+        let start = Instant::now();
+
+        let output = task(&case.inputs).await;
+
+        if options.skip_without_expected && case.expected_output.is_none() {
+            let duration = start.elapsed();
+            return CaseResult::new(name, idx, output, Vec::new(), duration);
+        }
+
+        let expected_str = case.expected_output.as_ref().map(|e| e.as_ref());
+        let eval_future = evaluators.evaluate(output.as_ref(), expected_str);
+
+        let evaluations = if let Some(timeout_duration) = options.timeout {
+            match timeout(timeout_duration, eval_future).await {
+                Ok(results) => results,
+                Err(_) => vec![NamedEvaluationResult::new(
+                    "Timeout",
+                    EvaluationResult::Error {
+                        error: format!(
+                            "Evaluation exceeded timeout of {:?}",
+                            timeout_duration
+                        ),
+                    },
+                )],
+            }
+        } else {
+            eval_future.await
+        };
+
+        let duration = start.elapsed();
+        CaseResult::new(name, idx, output, evaluations, duration)
     }
 
     /// Run evaluation on string inputs/outputs.
@@ -156,28 +217,90 @@ impl EvalRunner {
         F: Fn(&str) -> Fut + Send + Sync,
         Fut: Future<Output = String> + Send,
     {
+        let options = &self.options;
+        let evaluators = &self.evaluators;
+        let task = &task;
+
         let mut results = Vec::new();
 
-        for (idx, (input, expected)) in cases.iter().enumerate() {
-            let name = format!("case_{}", idx);
-            let start = Instant::now();
-
-            let output = task(input).await;
-            let duration = start.elapsed();
-
-            let evaluations = self
-                .evaluators
-                .evaluate(&output, expected.as_deref())
-                .await;
-
-            results.push(CaseResult::new(name, idx, output, evaluations, duration));
-
-            if self.options.fail_fast && results.last().map(|r| r.failed()).unwrap_or(false) {
-                break;
+        if options.fail_fast {
+            for (idx, (input, expected)) in cases.iter().enumerate() {
+                let result = self
+                    .run_simple_case(idx, input, expected, task, options, evaluators)
+                    .await;
+                let failed = result.failed();
+                results.push(result);
+                if failed {
+                    break;
+                }
             }
+        } else {
+            let semaphore = Arc::new(Semaphore::new(options.concurrency.max(1)));
+
+            let tasks: Vec<_> = cases
+                .iter()
+                .enumerate()
+                .map(|(idx, (input, expected))| {
+                    let sem = semaphore.clone();
+                    async move {
+                        let _permit = sem.acquire().await.expect("Semaphore closed");
+                        self.run_simple_case(idx, input, expected, task, options, evaluators)
+                            .await
+                    }
+                })
+                .collect();
+
+            results = futures::future::join_all(tasks).await;
         }
 
         Ok(EvaluationReport::new(results))
+    }
+
+    /// Helper to run a single simple case evaluation.
+    async fn run_simple_case<F, Fut>(
+        &self,
+        idx: usize,
+        input: &str,
+        expected: &Option<String>,
+        task: &F,
+        options: &EvalOptions,
+        evaluators: &EvaluatorSet,
+    ) -> CaseResult<String>
+    where
+        F: Fn(&str) -> Fut + Send + Sync,
+        Fut: Future<Output = String> + Send,
+    {
+        let name = format!("case_{}", idx);
+        let start = Instant::now();
+
+        let output = task(input).await;
+
+        if options.skip_without_expected && expected.is_none() {
+            let duration = start.elapsed();
+            return CaseResult::new(name, idx, output, Vec::new(), duration);
+        }
+
+        let eval_future = evaluators.evaluate(&output, expected.as_deref());
+
+        let evaluations = if let Some(timeout_duration) = options.timeout {
+            match timeout(timeout_duration, eval_future).await {
+                Ok(results) => results,
+                Err(_) => vec![NamedEvaluationResult::new(
+                    "Timeout",
+                    EvaluationResult::Error {
+                        error: format!(
+                            "Evaluation exceeded timeout of {:?}",
+                            timeout_duration
+                        ),
+                    },
+                )],
+            }
+        } else {
+            eval_future.await
+        };
+
+        let duration = start.elapsed();
+        CaseResult::new(name, idx, output, evaluations, duration)
     }
 }
 

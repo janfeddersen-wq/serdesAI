@@ -5,6 +5,18 @@
 use crate::schema::{Artifact, Message};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+/// Errors related to task operations.
+#[derive(Debug, Error)]
+pub enum TaskError {
+    /// Invalid state transition attempted.
+    #[error("Invalid state transition from {from} to {to}")]
+    InvalidStateTransition {
+        from: TaskStatus,
+        to: TaskStatus,
+    },
+}
 
 /// Unique identifier for a task.
 pub type TaskId = String;
@@ -43,14 +55,16 @@ pub struct Task {
 
 impl Task {
     /// Create a new task.
+    ///
+    /// The original message is automatically added to the messages list.
     pub fn new(thread_id: impl Into<String>, message: Message) -> Self {
         let now = Utc::now();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             thread_id: thread_id.into(),
             status: TaskStatus::Pending,
-            message,
-            messages: Vec::new(),
+            message: message.clone(),
+            messages: vec![message], // Include the original message
             artifacts: Vec::new(),
             created_at: now,
             updated_at: now,
@@ -60,14 +74,16 @@ impl Task {
     }
 
     /// Create a new task with a specific ID.
+    ///
+    /// The original message is automatically added to the messages list.
     pub fn with_id(id: impl Into<String>, thread_id: impl Into<String>, message: Message) -> Self {
         let now = Utc::now();
         Self {
             id: id.into(),
             thread_id: thread_id.into(),
             status: TaskStatus::Pending,
-            message,
-            messages: Vec::new(),
+            message: message.clone(),
+            messages: vec![message], // Include the original message
             artifacts: Vec::new(),
             created_at: now,
             updated_at: now,
@@ -105,27 +121,81 @@ impl Task {
     }
 
     /// Mark the task as running.
-    pub fn start(&mut self) {
+    ///
+    /// # Errors
+    ///
+    /// Returns `TaskError::InvalidStateTransition` if the task is not pending.
+    pub fn start(&mut self) -> Result<(), TaskError> {
+        if self.status != TaskStatus::Pending {
+            return Err(TaskError::InvalidStateTransition {
+                from: self.status,
+                to: TaskStatus::Running,
+            });
+        }
         self.status = TaskStatus::Running;
         self.updated_at = Utc::now();
+        Ok(())
     }
 
     /// Mark the task as completed.
-    pub fn complete(&mut self) {
+    ///
+    /// # Errors
+    ///
+    /// Returns `TaskError::InvalidStateTransition` if the task is not running.
+    pub fn complete(&mut self) -> Result<(), TaskError> {
+        if self.status != TaskStatus::Running {
+            return Err(TaskError::InvalidStateTransition {
+                from: self.status,
+                to: TaskStatus::Completed,
+            });
+        }
         self.status = TaskStatus::Completed;
         self.updated_at = Utc::now();
+        Ok(())
     }
 
     /// Mark the task as failed.
-    pub fn fail(&mut self, error: impl Into<String>) {
+    ///
+    /// # Errors
+    ///
+    /// Returns `TaskError::InvalidStateTransition` if the task is not running.
+    pub fn fail(&mut self, error: impl Into<String>) -> Result<(), TaskError> {
+        if self.status != TaskStatus::Running {
+            return Err(TaskError::InvalidStateTransition {
+                from: self.status,
+                to: TaskStatus::Failed,
+            });
+        }
         self.status = TaskStatus::Failed;
         self.error = Some(error.into());
         self.updated_at = Utc::now();
+        Ok(())
     }
 
     /// Mark the task as cancelled.
-    pub fn cancel(&mut self) {
+    ///
+    /// Cancellation is allowed from pending or running states.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TaskError::InvalidStateTransition` if the task is already completed.
+    pub fn cancel(&mut self) -> Result<(), TaskError> {
+        if self.is_completed() {
+            return Err(TaskError::InvalidStateTransition {
+                from: self.status,
+                to: TaskStatus::Cancelled,
+            });
+        }
         self.status = TaskStatus::Cancelled;
+        self.updated_at = Utc::now();
+        Ok(())
+    }
+
+    /// Force set status without validation (for internal/recovery use).
+    ///
+    /// Use with caution - this bypasses state transition validation.
+    pub fn force_status(&mut self, status: TaskStatus) {
+        self.status = status;
         self.updated_at = Utc::now();
     }
 
@@ -263,13 +333,32 @@ mod tests {
     }
 
     #[test]
+    fn test_task_includes_original_message() {
+        let task = Task::new("thread-1", Message::user("Hello"));
+        
+        // Original message should be in the messages list
+        assert_eq!(task.messages.len(), 1);
+        assert_eq!(task.messages[0].text_content(), "Hello");
+        assert_eq!(task.message.text_content(), "Hello");
+    }
+
+    #[test]
+    fn test_task_with_id_includes_original_message() {
+        let task = Task::with_id("my-id", "thread-1", Message::user("Test"));
+        
+        assert_eq!(task.id, "my-id");
+        assert_eq!(task.messages.len(), 1);
+        assert_eq!(task.messages[0].text_content(), "Test");
+    }
+
+    #[test]
     fn test_task_lifecycle() {
         let mut task = Task::new("thread-1", Message::user("Hello"));
 
-        task.start();
+        task.start().unwrap();
         assert!(task.is_running());
 
-        task.complete();
+        task.complete().unwrap();
         assert!(task.is_completed());
         assert!(task.is_success());
     }
@@ -278,11 +367,77 @@ mod tests {
     fn test_task_failure() {
         let mut task = Task::new("thread-1", Message::user("Hello"));
 
-        task.start();
-        task.fail("Something went wrong");
+        task.start().unwrap();
+        task.fail("Something went wrong").unwrap();
 
         assert!(task.is_failed());
         assert_eq!(task.error, Some("Something went wrong".to_string()));
+    }
+
+    #[test]
+    fn test_invalid_state_transition_start_from_running() {
+        let mut task = Task::new("thread-1", Message::user("Hello"));
+        task.start().unwrap();
+        
+        let result = task.start();
+        assert!(result.is_err());
+        match result {
+            Err(TaskError::InvalidStateTransition { from, to }) => {
+                assert_eq!(from, TaskStatus::Running);
+                assert_eq!(to, TaskStatus::Running);
+            }
+            _ => panic!("Expected InvalidStateTransition error"),
+        }
+    }
+
+    #[test]
+    fn test_invalid_state_transition_complete_from_pending() {
+        let mut task = Task::new("thread-1", Message::user("Hello"));
+        
+        let result = task.complete();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_invalid_state_transition_complete_after_cancel() {
+        let mut task = Task::new("thread-1", Message::user("Hello"));
+        task.cancel().unwrap();
+        
+        // Can't complete an already cancelled task
+        let result = task.complete();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cancel_from_pending() {
+        let mut task = Task::new("thread-1", Message::user("Hello"));
+        assert!(task.cancel().is_ok());
+        assert_eq!(task.status, TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_cancel_from_running() {
+        let mut task = Task::new("thread-1", Message::user("Hello"));
+        task.start().unwrap();
+        assert!(task.cancel().is_ok());
+        assert_eq!(task.status, TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_cannot_cancel_completed_task() {
+        let mut task = Task::new("thread-1", Message::user("Hello"));
+        task.start().unwrap();
+        task.complete().unwrap();
+        
+        let result = task.cancel();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_force_status() {
+        let mut task = Task::new("thread-1", Message::user("Hello"));
+        task.force_status(TaskStatus::Completed);
+        assert_eq!(task.status, TaskStatus::Completed);
     }
 
     #[test]

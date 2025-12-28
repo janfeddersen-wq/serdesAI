@@ -276,12 +276,9 @@ impl RetryCondition {
 
 /// Generate a random jitter factor between -1.0 and 1.0.
 fn random_jitter() -> f64 {
-    use std::time::SystemTime;
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    ((nanos % 2000) as f64 / 1000.0) - 1.0
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    rng.gen_range(-1.0..1.0)
 }
 
 #[cfg(test)]

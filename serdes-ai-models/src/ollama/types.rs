@@ -12,6 +12,9 @@ pub struct ChatRequest {
     /// Tools.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    /// Tool choice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<String>,
     /// Stream.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,

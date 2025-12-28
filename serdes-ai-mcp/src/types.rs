@@ -63,9 +63,9 @@ impl JsonRpcRequest {
     }
 
     /// Set parameters.
-    pub fn with_params<T: Serialize>(mut self, params: T) -> Self {
-        self.params = Some(serde_json::to_value(params).unwrap_or(JsonValue::Null));
-        self
+    pub fn with_params<T: Serialize>(mut self, params: T) -> Result<Self, serde_json::Error> {
+        self.params = Some(serde_json::to_value(params)?);
+        Ok(self)
     }
 }
 
@@ -92,10 +92,20 @@ impl JsonRpcNotification {
     }
 
     /// Set parameters.
-    pub fn with_params<T: Serialize>(mut self, params: T) -> Self {
-        self.params = Some(serde_json::to_value(params).unwrap_or(JsonValue::Null));
-        self
+    pub fn with_params<T: Serialize>(mut self, params: T) -> Result<Self, serde_json::Error> {
+        self.params = Some(serde_json::to_value(params)?);
+        Ok(self)
     }
+}
+
+/// JSON-RPC message (request or notification).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum JsonRpcMessage {
+    /// JSON-RPC request.
+    Request(JsonRpcRequest),
+    /// JSON-RPC notification.
+    Notification(JsonRpcNotification),
 }
 
 /// JSON-RPC response.
@@ -637,7 +647,9 @@ mod tests {
 
     #[test]
     fn test_json_rpc_request() {
-        let req = JsonRpcRequest::new(1, "test").with_params(serde_json::json!({"key": "value"}));
+        let req = JsonRpcRequest::new(1, "test")
+            .with_params(serde_json::json!({"key": "value"}))
+            .unwrap();
 
         assert_eq!(req.jsonrpc, "2.0");
         assert_eq!(req.method, "test");

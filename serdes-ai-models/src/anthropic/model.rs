@@ -7,6 +7,7 @@ use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{anthropic_claude_profile, ModelProfile};
 use async_trait::async_trait;
 use base64::Engine;
+use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serdes_ai_core::messages::{
     DocumentContent, ImageContent, RetryPromptPart, TextPart, ThinkingPart,
@@ -529,14 +530,22 @@ impl AnthropicModel {
         })
     }
 
+    fn parse_retry_after(headers: &HeaderMap) -> Option<Duration> {
+        headers
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_secs)
+    }
+
     /// Handle API error response.
-    fn handle_error_response(&self, status: u16, body: &str) -> ModelError {
+    fn handle_error_response(&self, status: u16, body: &str, headers: &HeaderMap) -> ModelError {
         if let Ok(err) = serde_json::from_str::<AnthropicError>(body) {
             let code = err.error.error_type.clone();
 
             match status {
                 401 => return ModelError::auth(err.error.message),
-                429 => return ModelError::rate_limited(None),
+                429 => return ModelError::rate_limited(Self::parse_retry_after(headers)),
                 404 => return ModelError::NotFound(err.error.message),
                 400 => {
                     if code == "invalid_request_error" {
@@ -553,6 +562,10 @@ impl AnthropicModel {
                 message: err.error.message,
                 code: Some(code),
             };
+        }
+
+        if status == 429 {
+            return ModelError::rate_limited(Self::parse_retry_after(headers));
         }
 
         ModelError::http(status, body)
@@ -605,8 +618,9 @@ impl Model for AnthropicModel {
 
         let status = response.status().as_u16();
         if !response.status().is_success() {
+            let headers = response.headers().clone();
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error_response(status, &body));
+            return Err(self.handle_error_response(status, &body, &headers));
         }
 
         let resp: MessagesResponse = response
@@ -647,8 +661,9 @@ impl Model for AnthropicModel {
 
         let status = response.status().as_u16();
         if !response.status().is_success() {
+            let headers = response.headers().clone();
             let body = response.text().await.unwrap_or_default();
-            return Err(self.handle_error_response(status, &body));
+            return Err(self.handle_error_response(status, &body, &headers));
         }
 
         let byte_stream = response.bytes_stream();

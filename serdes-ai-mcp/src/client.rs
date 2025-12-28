@@ -191,7 +191,7 @@ impl McpClient {
         method: &str,
         params: P,
     ) -> McpResult<R> {
-        let request = JsonRpcRequest::new(self.next_id(), method).with_params(params);
+        let request = JsonRpcRequest::new(self.next_id(), method).with_params(params)?;
 
         let response = self.transport.request(&request).await?;
 
@@ -207,7 +207,7 @@ impl McpClient {
     }
 
     async fn notify<P: Serialize>(&self, method: &str, params: P) -> McpResult<()> {
-        let notification = JsonRpcNotification::new(method).with_params(params);
+        let notification = JsonRpcNotification::new(method).with_params(params)?;
         self.transport.notify(&notification).await
     }
 }

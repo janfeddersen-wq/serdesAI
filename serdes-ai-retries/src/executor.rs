@@ -63,11 +63,17 @@ where
     Fut: Future<Output = RetryResult<T>>,
 {
     let mut state = RetryState::default();
+    let max_attempts = config.max_retries.saturating_add(1);
 
     loop {
         state.attempt += 1;
 
-        debug!(attempt = state.attempt, max = config.max_retries, "Executing retry attempt");
+        debug!(
+            attempt = state.attempt,
+            max_attempts,
+            max_retries = config.max_retries,
+            "Executing retry attempt"
+        );
 
         match operation().await {
             Ok(result) => {
@@ -80,8 +86,8 @@ where
                 return Ok(result);
             }
             Err(error) => {
-                let should_retry =
-                    state.attempt <= config.max_retries && config.retry_on.should_retry(&error);
+                let should_retry = state.attempt < max_attempts
+                    && config.retry_on.should_retry(&error);
 
                 if !should_retry {
                     warn!(
@@ -126,6 +132,7 @@ where
     Fut: Future<Output = RetryResult<T>>,
 {
     let mut state = RetryState::default();
+    let max_attempts = config.max_retries.saturating_add(1);
 
     loop {
         state.attempt += 1;
@@ -141,8 +148,8 @@ where
                 return (Ok(result), state);
             }
             Err(error) => {
-                let should_retry =
-                    state.attempt <= config.max_retries && config.retry_on.should_retry(&error);
+                let should_retry = state.attempt < max_attempts
+                    && config.retry_on.should_retry(&error);
 
                 if !should_retry {
                     return (Err(error), state);

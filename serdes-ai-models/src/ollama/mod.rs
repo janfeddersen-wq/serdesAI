@@ -35,12 +35,13 @@ use reqwest::Client;
 use std::time::Duration;
 
 use crate::error::ModelError;
-use crate::model::{Model, ModelRequestParameters, StreamedResponse};
+use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::ModelProfile;
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
     ModelSettings, RequestUsage, TextPart, ToolCallPart, UserContent, UserContentPart,
 };
+use serdes_ai_core::messages::ImageContent;
 
 /// Ollama model client.
 #[derive(Debug, Clone)]
@@ -126,9 +127,13 @@ impl OllamaModel {
         messages: &[ModelRequest],
         settings: &ModelSettings,
         params: &ModelRequestParameters,
-    ) -> types::ChatRequest {
-        let api_messages = self.convert_messages(messages);
+    ) -> Result<types::ChatRequest, ModelError> {
+        let api_messages = self.convert_messages(messages)?;
         let tools = self.convert_tools(params);
+        let tool_choice = params
+            .tool_choice
+            .as_ref()
+            .map(|choice| self.convert_tool_choice(choice));
 
         let options = types::Options {
             temperature: settings.temperature.map(|t| t as f64),
@@ -142,19 +147,23 @@ impl OllamaModel {
             repeat_last_n: None,
         };
 
-        types::ChatRequest {
+        Ok(types::ChatRequest {
             model: self.model_name.clone(),
             messages: api_messages,
             tools: if tools.is_empty() { None } else { Some(tools) },
+            tool_choice,
             stream: Some(false),
             options: Some(options),
             keep_alive: self.keep_alive.clone(),
             format: None,
-        }
+        })
     }
 
     /// Convert messages to Ollama format.
-    fn convert_messages(&self, messages: &[ModelRequest]) -> Vec<types::Message> {
+    fn convert_messages(
+        &self,
+        messages: &[ModelRequest],
+    ) -> Result<Vec<types::Message>, ModelError> {
         let mut result = Vec::new();
 
         for request in messages {
@@ -169,7 +178,7 @@ impl OllamaModel {
                         });
                     }
                     ModelRequestPart::UserPrompt(up) => {
-                        let (content, images) = self.convert_user_content(&up.content);
+                        let (content, images) = self.convert_user_content(&up.content)?;
                         result.push(types::Message {
                             role: "user".to_string(),
                             content,
@@ -207,45 +216,53 @@ impl OllamaModel {
             }
         }
 
-        result
+        Ok(result)
     }
 
     /// Convert user content, extracting images.
-    fn convert_user_content(&self, content: &UserContent) -> (String, Option<Vec<String>>) {
+    fn convert_user_content(
+        &self,
+        content: &UserContent,
+    ) -> Result<(String, Option<Vec<String>>), ModelError> {
         match content {
-            UserContent::Text(t) => (t.clone(), None),
+            UserContent::Text(t) => Ok((t.clone(), None)),
             UserContent::Parts(parts) => {
                 let mut text = String::new();
                 let mut images = Vec::new();
 
                 for part in parts {
                     match part {
-                        UserContentPart::Text { text: t } => {
-                            text.push_str(t);
+                        UserContentPart::Text { text: text_part } => {
+                            text.push_str(text_part);
                         }
                         UserContentPart::Image { image } => {
-                            // Ollama expects base64-encoded images
+                            if !self.profile.supports_images {
+                                return Err(ModelError::unsupported_content("images"));
+                            }
+
                             match image {
-                                serdes_ai_core::messages::ImageContent::Binary(binary) => {
-                                    // Already have binary data, encode to base64
+                                ImageContent::Binary(binary) => {
                                     use base64::Engine;
                                     let encoded = base64::engine::general_purpose::STANDARD
                                         .encode(&binary.data);
                                     images.push(encoded);
                                 }
-                                serdes_ai_core::messages::ImageContent::Url(url) => {
-                                    // For URLs, include the URL as-is (Ollama may not support this)
-                                    // Skip for now
-                                    let _ = url;
+                                ImageContent::Url(_) => {
+                                    return Err(ModelError::unsupported_content("image URLs"));
                                 }
                             }
                         }
-                        _ => {}
+                        UserContentPart::Document { .. } => {
+                            return Err(ModelError::unsupported_content("documents"));
+                        }
+                        _ => {
+                            return Err(ModelError::unsupported_content("non-text content"));
+                        }
                     }
                 }
 
                 let images = if images.is_empty() { None } else { Some(images) };
-                (text, images)
+                Ok((text, images))
             }
         }
     }
@@ -265,6 +282,16 @@ impl OllamaModel {
                 },
             })
             .collect()
+    }
+
+    /// Convert tool choice to Ollama format.
+    fn convert_tool_choice(&self, choice: &ToolChoice) -> String {
+        match choice {
+            ToolChoice::Auto => "auto".to_string(),
+            ToolChoice::Required => "required".to_string(),
+            ToolChoice::None => "none".to_string(),
+            ToolChoice::Specific(name) => name.clone(),
+        }
     }
 
     /// Parse response from Ollama.
@@ -343,7 +370,7 @@ impl Model for OllamaModel {
         settings: &ModelSettings,
         params: &ModelRequestParameters,
     ) -> Result<ModelResponse, ModelError> {
-        let body = self.build_request(messages, settings, params);
+        let body = self.build_request(messages, settings, params)?;
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
         let response = self

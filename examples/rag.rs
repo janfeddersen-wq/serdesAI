@@ -9,7 +9,6 @@
 //! ```
 
 use serdes_ai::prelude::*;
-use std::collections::HashMap;
 
 /// A simple document store.
 #[derive(Debug, Clone)]
@@ -158,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
         .build()?;
 
     for query in queries {
-        println!("\n" .repeat(1));
+        println!();
         println!("=".repeat(60));
         println!("💬 Query: {}\n", query);
 

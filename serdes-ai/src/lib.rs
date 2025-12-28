@@ -322,7 +322,7 @@ pub use serdes_ai_models::bedrock::BedrockModel;
 
 // Tools
 pub use serdes_ai_tools::{
-    ObjectJsonSchema, PropertySchema, SchemaBuilder, Tool, ToolDefinition,
+    ObjectJsonSchema, SchemaBuilder, Tool, ToolDefinition,
     ToolRegistry, ToolResult,
 };
 

@@ -6,6 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
 use thiserror::Error;
 
 /// The main error type for serdes-ai operations.
@@ -21,11 +22,11 @@ pub enum SerdesAiError {
 
     /// API error from the model provider.
     #[error(transparent)]
-    ModelAPI(#[from] ModelAPIError),
+    ModelApi(#[from] ModelApiError),
 
     /// HTTP-level error.
     #[error(transparent)]
-    ModelHTTP(#[from] ModelHTTPError),
+    ModelHttp(#[from] ModelHttpError),
 
     /// User-defined error from tools or validators.
     #[error(transparent)]
@@ -155,7 +156,7 @@ impl ModelRetry {
 
 /// API error from the model provider.
 #[derive(Error, Debug, Clone)]
-pub struct ModelAPIError {
+pub struct ModelApiError {
     /// HTTP status code.
     pub status_code: u16,
     /// Response body.
@@ -172,7 +173,7 @@ pub struct ModelAPIError {
     pub retry_after: Option<u64>,
 }
 
-impl fmt::Display for ModelAPIError {
+impl fmt::Display for ModelApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Model API error (status {})", self.status_code)?;
         if let Some(ref msg) = self.message {
@@ -185,7 +186,7 @@ impl fmt::Display for ModelAPIError {
     }
 }
 
-impl ModelAPIError {
+impl ModelApiError {
     /// Create a new API error.
     pub fn new(status_code: u16, body: impl Into<String>) -> Self {
         Self {
@@ -232,68 +233,92 @@ impl ModelAPIError {
     }
 }
 
-/// HTTP-level error (connection, timeout, etc.).
-#[derive(Error, Debug, Clone)]
-pub struct ModelHTTPError {
-    /// Error message.
-    pub message: String,
-    /// Whether this is a timeout.
-    pub is_timeout: bool,
-    /// Whether this is a connection error.
-    pub is_connection_error: bool,
-    /// URL that was being accessed.
-    pub url: Option<String>,
+#[deprecated(note = "Use ModelApiError instead")]
+pub type ModelAPIError = ModelApiError;
+
+/// HTTP error classification for model requests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HttpErrorKind {
+    /// Request timed out.
+    Timeout,
+    /// Connection failure.
+    Connection,
+    /// Request construction or transport error.
+    Request,
+    /// Response error with optional status code.
+    Response {
+        /// HTTP status code if available.
+        status: Option<u16>,
+    },
 }
 
-impl fmt::Display for ModelHTTPError {
+/// HTTP-level error (connection, timeout, etc.).
+#[derive(Error, Debug, Clone)]
+pub struct ModelHttpError {
+    /// Error kind classification.
+    pub kind: HttpErrorKind,
+    /// Error message.
+    pub message: String,
+    /// Retry-after duration if provided by the server.
+    pub retry_after: Option<Duration>,
+}
+
+impl fmt::Display for ModelHttpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_timeout {
-            write!(f, "Request timeout: {}", self.message)
-        } else if self.is_connection_error {
-            write!(f, "Connection error: {}", self.message)
-        } else {
-            write!(f, "HTTP error: {}", self.message)
+        match self.kind {
+            HttpErrorKind::Timeout => write!(f, "Request timeout: {}", self.message),
+            HttpErrorKind::Connection => write!(f, "Connection error: {}", self.message),
+            HttpErrorKind::Request => write!(f, "HTTP request error: {}", self.message),
+            HttpErrorKind::Response { status } => {
+                if let Some(status) = status {
+                    write!(f, "HTTP response error (status {}): {}", status, self.message)
+                } else {
+                    write!(f, "HTTP response error: {}", self.message)
+                }
+            }
         }
     }
 }
 
-impl ModelHTTPError {
+impl ModelHttpError {
     /// Create a new HTTP error.
-    pub fn new(message: impl Into<String>) -> Self {
+    pub fn new(kind: HttpErrorKind, message: impl Into<String>) -> Self {
         Self {
+            kind,
             message: message.into(),
-            is_timeout: false,
-            is_connection_error: false,
-            url: None,
+            retry_after: None,
         }
     }
 
     /// Create a timeout error.
     pub fn timeout(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            is_timeout: true,
-            is_connection_error: false,
-            url: None,
-        }
+        Self::new(HttpErrorKind::Timeout, message)
     }
 
     /// Create a connection error.
     pub fn connection(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            is_timeout: false,
-            is_connection_error: true,
-            url: None,
-        }
+        Self::new(HttpErrorKind::Connection, message)
     }
 
-    /// Set the URL.
-    pub fn with_url(mut self, url: impl Into<String>) -> Self {
-        self.url = Some(url.into());
+    /// Create a request error.
+    pub fn request(message: impl Into<String>) -> Self {
+        Self::new(HttpErrorKind::Request, message)
+    }
+
+    /// Create a response error with an optional status code.
+    pub fn response(status: Option<u16>, message: impl Into<String>) -> Self {
+        Self::new(HttpErrorKind::Response { status }, message)
+    }
+
+    /// Set the retry-after duration.
+    pub fn with_retry_after(mut self, retry_after: Duration) -> Self {
+        self.retry_after = Some(retry_after);
         self
     }
 }
+
+#[deprecated(note = "Use ModelHttpError instead")]
+pub type ModelHTTPError = ModelHttpError;
 
 /// User-defined error from tools or validators.
 #[derive(Error, Debug, Clone, Serialize, Deserialize)]
@@ -668,7 +693,7 @@ mod tests {
 
     #[test]
     fn test_api_error_is_rate_limit() {
-        let err = ModelAPIError::new(429, "Rate limited");
+        let err = ModelApiError::new(429, "Rate limited");
         assert!(err.is_rate_limit());
         assert!(err.retryable);
     }

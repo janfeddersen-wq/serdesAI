@@ -95,16 +95,33 @@ where
     }
 
     // Add nodes
-    for name in graph.node_names() {
+    for (name, node) in &graph.nodes {
         let safe_id = sanitize_id(name);
-        output.push_str(&format!("    {}[{}]\n", safe_id, name));
+        let label = if options.include_descriptions {
+            format!("{}[\"{}\\n{}\"]", safe_id, name, node.node.type_name())
+        } else {
+            format!("{}[{}]", safe_id, name)
+        };
+        output.push_str(&format!("    {}\n", label));
     }
 
     output.push('\n');
 
-    // Add edges (we can't access the edges directly, so we'd need to track them)
-    // For now, we'll just show the nodes
-    // In a real implementation, we'd also store edge info
+    // Add edges
+    for edge in graph.edges() {
+        let from_id = sanitize_id(&edge.from);
+        let to_id = sanitize_id(&edge.to);
+        let arrow = if options.curved_edges { "-..->" } else { "-->" };
+
+        if let Some(label) = &edge.label {
+            output.push_str(&format!(
+                "    {} {}|{}| {}\n",
+                from_id, arrow, label, to_id
+            ));
+        } else {
+            output.push_str(&format!("    {} {} {}\n", from_id, arrow, to_id));
+        }
+    }
 
     output
 }

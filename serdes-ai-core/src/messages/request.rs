@@ -63,50 +63,62 @@ impl ModelRequest {
 
     /// Get all system prompts.
     #[must_use]
-    pub fn system_prompts(&self) -> Vec<&SystemPromptPart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelRequestPart::SystemPrompt(s) => Some(s),
-                _ => None,
-            })
-            .collect()
+    pub fn system_prompts(&self) -> impl Iterator<Item = &SystemPromptPart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelRequestPart::SystemPrompt(s) => Some(s),
+            _ => None,
+        })
     }
 
     /// Get all user prompts.
     #[must_use]
-    pub fn user_prompts(&self) -> Vec<&UserPromptPart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelRequestPart::UserPrompt(u) => Some(u),
-                _ => None,
-            })
-            .collect()
+    pub fn user_prompts(&self) -> impl Iterator<Item = &UserPromptPart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelRequestPart::UserPrompt(u) => Some(u),
+            _ => None,
+        })
     }
 
     /// Get all tool returns.
     #[must_use]
-    pub fn tool_returns(&self) -> Vec<&ToolReturnPart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelRequestPart::ToolReturn(t) => Some(t),
-                _ => None,
-            })
-            .collect()
+    pub fn tool_returns(&self) -> impl Iterator<Item = &ToolReturnPart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelRequestPart::ToolReturn(t) => Some(t),
+            _ => None,
+        })
     }
 
     /// Get all builtin tool returns.
     #[must_use]
-    pub fn builtin_tool_returns(&self) -> Vec<&BuiltinToolReturnPart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelRequestPart::BuiltinToolReturn(b) => Some(b),
-                _ => None,
-            })
-            .collect()
+    pub fn builtin_tool_returns(&self) -> impl Iterator<Item = &BuiltinToolReturnPart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelRequestPart::BuiltinToolReturn(b) => Some(b),
+            _ => None,
+        })
+    }
+
+    /// Get all system prompts as a vector.
+    #[deprecated(note = "Use system_prompts() iterator instead")]
+    pub fn system_prompts_vec(&self) -> Vec<&SystemPromptPart> {
+        self.system_prompts().collect()
+    }
+
+    /// Get all user prompts as a vector.
+    #[deprecated(note = "Use user_prompts() iterator instead")]
+    pub fn user_prompts_vec(&self) -> Vec<&UserPromptPart> {
+        self.user_prompts().collect()
+    }
+
+    /// Get all tool returns as a vector.
+    #[deprecated(note = "Use tool_returns() iterator instead")]
+    pub fn tool_returns_vec(&self) -> Vec<&ToolReturnPart> {
+        self.tool_returns().collect()
+    }
+
+    /// Get all builtin tool returns as a vector.
+    #[deprecated(note = "Use builtin_tool_returns() iterator instead")]
+    pub fn builtin_tool_returns_vec(&self) -> Vec<&BuiltinToolReturnPart> {
+        self.builtin_tool_returns().collect()
     }
 
     /// Add a builtin tool return.
@@ -502,8 +514,8 @@ mod tests {
         req.add_user_prompt("Hello!");
         
         assert_eq!(req.len(), 2);
-        assert_eq!(req.system_prompts().len(), 1);
-        assert_eq!(req.user_prompts().len(), 1);
+        assert_eq!(req.system_prompts().count(), 1);
+        assert_eq!(req.user_prompts().count(), 1);
     }
 
     #[test]
@@ -557,9 +569,9 @@ mod tests {
         req.add_builtin_tool_return(part);
 
         assert_eq!(req.len(), 1);
-        assert_eq!(req.builtin_tool_returns().len(), 1);
-        
-        let returns = req.builtin_tool_returns();
+        assert_eq!(req.builtin_tool_returns().count(), 1);
+
+        let returns: Vec<_> = req.builtin_tool_returns().collect();
         assert_eq!(returns[0].tool_name, "web_search");
         assert_eq!(returns[0].tool_call_id, "call_123");
     }
@@ -597,6 +609,6 @@ mod tests {
         let parsed: ModelRequest = serde_json::from_str(&json).unwrap();
         
         assert_eq!(req.len(), parsed.len());
-        assert_eq!(parsed.builtin_tool_returns().len(), 1);
+        assert_eq!(parsed.builtin_tool_returns().count(), 1);
     }
 }

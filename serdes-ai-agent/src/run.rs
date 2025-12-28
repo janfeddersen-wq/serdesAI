@@ -3,7 +3,7 @@
 //! This module contains the core execution logic for agent runs.
 
 use crate::agent::{Agent, EndStrategy};
-use crate::context::{generate_run_id, RunContext, RunUsage};
+use crate::context::{generate_run_id, RunContext, RunUsage, UsageLimits};
 use crate::errors::{AgentRunError, OutputParseError, OutputValidationError};
 use chrono::Utc;
 use serdes_ai_core::messages::{RetryPromptPart, ToolReturnPart, UserContent, ToolReturnContent};
@@ -90,6 +90,7 @@ pub struct AgentRun<'a, Deps, Output> {
     deps: Arc<Deps>,
     state: AgentRunState<Output>,
     ctx: RunContext<Deps>,
+    run_usage_limits: Option<UsageLimits>,
 }
 
 struct AgentRunState<Output> {
@@ -101,6 +102,7 @@ struct AgentRunState<Output> {
     output_retries: u32,
     final_output: Option<Output>,
     finished: bool,
+    finish_reason: Option<FinishReason>,
 }
 
 /// Result of a single step.
@@ -177,8 +179,10 @@ where
                 output_retries: 0,
                 final_output: None,
                 finished: false,
+                finish_reason: None,
             },
             ctx,
+            run_usage_limits: options.usage_limits,
         })
     }
 
@@ -204,12 +208,17 @@ where
             limits.check_time(self.ctx.elapsed_seconds() as u64)?;
         }
 
-        // Prepare tool definitions
-        let tool_defs: Vec<_> = self.agent.tools.iter().map(|t| t.definition.clone()).collect();
+        if let Some(limits) = &self.run_usage_limits {
+            limits.check(&self.state.usage)?;
+            limits.check_time(self.ctx.elapsed_seconds() as u64)?;
+        }
+
+        // Get cached tool definitions (pre-computed at build time - no cloning!)
+        let tool_defs = self.agent.tool_definitions();
 
         // Build request parameters
         let params = ModelRequestParameters::new()
-            .with_tools(tool_defs)
+            .with_tools_arc(tool_defs)
             .with_allow_text(true);
 
         // Process message history
@@ -228,6 +237,9 @@ where
         }
 
         // Store response
+        if response.finish_reason.is_some() {
+            self.state.finish_reason = response.finish_reason.clone();
+        }
         self.state.responses.push(response.clone());
 
         // Process response
@@ -457,7 +469,7 @@ where
             responses: self.state.responses,
             usage: self.state.usage,
             run_id: self.state.run_id,
-            finish_reason: FinishReason::Stop,
+            finish_reason: self.state.finish_reason.unwrap_or(FinishReason::Stop),
             metadata: self.ctx.metadata.clone(),
         })
     }

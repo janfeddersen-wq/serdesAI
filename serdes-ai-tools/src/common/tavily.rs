@@ -33,8 +33,9 @@ use serde_json::Value as JsonValue;
 use std::env;
 
 use crate::{
-    definition::{ObjectJsonSchema, PropertySchema, ToolDefinition},
+    definition::ToolDefinition,
     return_types::{ToolResult, ToolReturn},
+    schema::SchemaBuilder,
     RunContext, ToolError,
 };
 
@@ -377,39 +378,41 @@ impl<Deps: Send + Sync> crate::Tool<Deps> for TavilyTool {
              Returns clean, structured results optimized for AI consumption.",
         )
         .with_parameters(
-            ObjectJsonSchema::new()
-                .with_property(
-                    "query",
-                    PropertySchema::string("The search query").build(),
-                    true,
-                )
-                .with_property(
+            SchemaBuilder::new()
+                .string("query", "The search query", true)
+                .integer_constrained(
                     "max_results",
-                    PropertySchema::integer("Maximum number of results to return (default: 5)")
-                        .with_minimum(1.0)
-                        .with_maximum(20.0)
-                        .build(),
+                    "Maximum number of results to return (default: 5)",
+                    false,
+                    Some(1),
+                    Some(20),
+                )
+                .enum_values(
+                    "search_depth",
+                    "Search depth: 'basic' (faster) or 'advanced' (more comprehensive)",
+                    &["basic", "advanced"],
                     false,
                 )
-                .with_property(
-                    "search_depth",
-                    PropertySchema::enum_values(
-                        "Search depth: 'basic' (faster) or 'advanced' (more comprehensive)",
-                        &["basic", "advanced"],
-                    )
-                    .build(),
-                    false,
-                ),
+                .build()
+                .expect("SchemaBuilder JSON serialization failed"),
         )
     }
 
     async fn call(&self, _ctx: &RunContext<Deps>, args: JsonValue) -> ToolResult {
-        let query = args["query"]
-            .as_str()
-            .ok_or_else(|| ToolError::invalid_args("Missing required 'query' parameter"))?;
+        let query = args["query"].as_str().ok_or_else(|| {
+            ToolError::validation_error(
+                "tavily_search",
+                Some("query".to_string()),
+                "Missing required 'query' parameter",
+            )
+        })?;
 
         if query.trim().is_empty() {
-            return Err(ToolError::invalid_args("Query cannot be empty"));
+            return Err(ToolError::validation_error(
+                "tavily_search",
+                Some("query".to_string()),
+                "Query cannot be empty",
+            ));
         }
 
         let max_results = args["max_results"].as_u64().map(|n| n as usize);

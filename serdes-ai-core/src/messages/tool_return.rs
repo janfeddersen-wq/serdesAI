@@ -8,71 +8,94 @@ use serde::{Deserialize, Serialize};
 use super::content::ImageContent;
 
 /// Content of a tool return.
+///
+/// Uses a tagged representation to avoid ambiguous deserialization when
+/// multiple variants share compatible shapes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolReturnContent {
     /// Plain text result.
-    Text(String),
+    Text {
+        /// The text content.
+        content: String,
+    },
     /// JSON result.
-    Json(serde_json::Value),
+    Json {
+        /// The JSON content.
+        content: serde_json::Value,
+    },
     /// Image result.
-    Image(ImageContent),
+    Image {
+        /// The image content.
+        image: ImageContent,
+    },
     /// Error message.
-    Error(ToolReturnError),
+    Error {
+        /// The error payload.
+        #[serde(flatten)]
+        error: ToolReturnError,
+    },
     /// Multiple return items.
-    Multiple(Vec<ToolReturnItem>),
+    Multiple {
+        /// The list of items.
+        items: Vec<ToolReturnItem>,
+    },
 }
 
 impl ToolReturnContent {
     /// Create text content.
     #[must_use]
     pub fn text(s: impl Into<String>) -> Self {
-        Self::Text(s.into())
+        Self::Text { content: s.into() }
     }
 
     /// Create JSON content.
     #[must_use]
     pub fn json(value: serde_json::Value) -> Self {
-        Self::Json(value)
+        Self::Json { content: value }
     }
 
     /// Create error content.
     #[must_use]
     pub fn error(message: impl Into<String>) -> Self {
-        Self::Error(ToolReturnError::new(message))
+        Self::Error {
+            error: ToolReturnError::new(message),
+        }
     }
 
     /// Create image content.
     #[must_use]
     pub fn image(image: ImageContent) -> Self {
-        Self::Image(image)
+        Self::Image { image }
     }
 
     /// Create multiple items.
     #[must_use]
     pub fn multiple(items: Vec<ToolReturnItem>) -> Self {
-        Self::Multiple(items)
+        Self::Multiple { items }
     }
 
     /// Check if this is an error.
     #[must_use]
     pub fn is_error(&self) -> bool {
-        matches!(self, Self::Error(_))
+        matches!(self, Self::Error { .. })
     }
 
     /// Create empty content.
     #[must_use]
     pub fn empty() -> Self {
-        Self::Text(String::new())
+        Self::Text {
+            content: String::new(),
+        }
     }
 
     /// Check if content is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
-            Self::Text(s) => s.is_empty(),
-            Self::Json(v) => v.is_null(),
-            Self::Multiple(items) => items.is_empty(),
+            Self::Text { content } => content.is_empty(),
+            Self::Json { content } => content.is_null(),
+            Self::Multiple { items } => items.is_empty(),
             _ => false,
         }
     }
@@ -81,8 +104,8 @@ impl ToolReturnContent {
     #[must_use]
     pub fn as_text(&self) -> Option<&str> {
         match self {
-            Self::Text(s) => Some(s),
-            Self::Error(e) => Some(&e.message),
+            Self::Text { content } => Some(content),
+            Self::Error { error } => Some(&error.message),
             _ => None,
         }
     }
@@ -91,7 +114,7 @@ impl ToolReturnContent {
     #[must_use]
     pub fn as_json(&self) -> Option<&serde_json::Value> {
         match self {
-            Self::Json(v) => Some(v),
+            Self::Json { content } => Some(content),
             _ => None,
         }
     }
@@ -100,11 +123,11 @@ impl ToolReturnContent {
     #[must_use]
     pub fn to_string_content(&self) -> String {
         match self {
-            Self::Text(s) => s.clone(),
-            Self::Json(v) => serde_json::to_string(v).unwrap_or_default(),
-            Self::Image(_) => "[Image]".to_string(),
-            Self::Error(e) => format!("Error: {}", e.message),
-            Self::Multiple(items) => items
+            Self::Text { content } => content.clone(),
+            Self::Json { content } => serde_json::to_string(content).unwrap_or_default(),
+            Self::Image { .. } => "[Image]".to_string(),
+            Self::Error { error } => format!("Error: {}", error.message),
+            Self::Multiple { items } => items
                 .iter()
                 .map(|i| i.to_string_content())
                 .collect::<Vec<_>>()
@@ -115,25 +138,29 @@ impl ToolReturnContent {
 
 impl Default for ToolReturnContent {
     fn default() -> Self {
-        Self::Text(String::new())
+        Self::Text {
+            content: String::new(),
+        }
     }
 }
 
 impl From<String> for ToolReturnContent {
     fn from(s: String) -> Self {
-        Self::Text(s)
+        Self::Text { content: s }
     }
 }
 
 impl From<&str> for ToolReturnContent {
     fn from(s: &str) -> Self {
-        Self::Text(s.to_string())
+        Self::Text {
+            content: s.to_string(),
+        }
     }
 }
 
 impl From<serde_json::Value> for ToolReturnContent {
     fn from(v: serde_json::Value) -> Self {
-        Self::Json(v)
+        Self::Json { content: v }
     }
 }
 

@@ -28,12 +28,13 @@ use reqwest::Client;
 use std::time::Duration;
 
 use crate::error::ModelError;
-use crate::model::{Model, ModelRequestParameters, StreamedResponse};
+use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::ModelProfile;
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
     ModelSettings, RequestUsage, TextPart, ToolCallPart, UserContent, UserContentPart,
 };
+use serdes_ai_core::messages::ImageContent;
 
 /// Mistral AI model client.
 #[derive(Debug, Clone)]
@@ -101,7 +102,7 @@ impl MistralModel {
             supports_native_structured_output: true,
             supports_strict_tools: false,
             supports_system_messages: true,
-            supports_images: true,
+            supports_images: false,
             supports_streaming: true,
             ..Default::default()
         }
@@ -113,26 +114,33 @@ impl MistralModel {
         messages: &[ModelRequest],
         settings: &ModelSettings,
         params: &ModelRequestParameters,
-    ) -> types::ChatRequest {
-        let api_messages = self.convert_messages(messages);
+    ) -> Result<types::ChatRequest, ModelError> {
+        let api_messages = self.convert_messages(messages)?;
         let tools = self.convert_tools(params);
+        let tool_choice = params
+            .tool_choice
+            .as_ref()
+            .map(|choice| self.convert_tool_choice(choice));
 
-        types::ChatRequest {
+        Ok(types::ChatRequest {
             model: self.model_name.clone(),
             messages: api_messages,
             tools: if tools.is_empty() { None } else { Some(tools) },
-            tool_choice: None,
+            tool_choice,
             temperature: settings.temperature.map(|t| t as f64),
             max_tokens: settings.max_tokens.map(|t| t as u64),
             top_p: settings.top_p.map(|t| t as f64),
             stream: false,
             safe_prompt: None,
             random_seed: settings.seed.map(|s| s as i64),
-        }
+        })
     }
 
     /// Convert messages to Mistral format.
-    fn convert_messages(&self, messages: &[ModelRequest]) -> Vec<types::Message> {
+    fn convert_messages(
+        &self,
+        messages: &[ModelRequest],
+    ) -> Result<Vec<types::Message>, ModelError> {
         let mut result = Vec::new();
 
         for request in messages {
@@ -148,20 +156,7 @@ impl MistralModel {
                         });
                     }
                     ModelRequestPart::UserPrompt(up) => {
-                        let content = match &up.content {
-                            UserContent::Text(t) => types::Content::Text(t.clone()),
-                            UserContent::Parts(parts) => {
-                                let text = parts
-                                    .iter()
-                                    .filter_map(|p| match p {
-                                        UserContentPart::Text { text } => Some(text.clone()),
-                                        _ => None,
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join("\n");
-                                types::Content::Text(text)
-                            }
-                        };
+                        let content = self.convert_user_content(&up.content)?;
                         result.push(types::Message {
                             role: types::Role::User,
                             content,
@@ -203,7 +198,48 @@ impl MistralModel {
             }
         }
 
-        result
+        Ok(result)
+    }
+
+    fn convert_user_content(&self, content: &UserContent) -> Result<types::Content, ModelError> {
+        match content {
+            UserContent::Text(text) => Ok(types::Content::Text(text.clone())),
+            UserContent::Parts(parts) => {
+                let mut content_parts = Vec::new();
+
+                for part in parts {
+                    match part {
+                        UserContentPart::Text { text } => {
+                            content_parts.push(types::ContentPart::Text { text: text.clone() });
+                        }
+                        UserContentPart::Image { image } => {
+                            if !self.profile.supports_images {
+                                return Err(ModelError::unsupported_content("images"));
+                            }
+
+                            match image {
+                                ImageContent::Url(url) => {
+                                    content_parts.push(types::ContentPart::ImageUrl {
+                                        image_url: url.url.clone(),
+                                    });
+                                }
+                                ImageContent::Binary(_) => {
+                                    return Err(ModelError::unsupported_content("binary images"));
+                                }
+                            }
+                        }
+                        UserContentPart::Document { .. } => {
+                            return Err(ModelError::unsupported_content("documents"));
+                        }
+                        _ => {
+                            return Err(ModelError::unsupported_content("non-text content"));
+                        }
+                    }
+                }
+
+                Ok(types::Content::Parts(content_parts))
+            }
+        }
     }
 
     /// Convert tools to Mistral format.
@@ -221,6 +257,16 @@ impl MistralModel {
                 },
             })
             .collect()
+    }
+
+    /// Convert tool choice to Mistral format.
+    fn convert_tool_choice(&self, choice: &ToolChoice) -> String {
+        match choice {
+            ToolChoice::Auto => "auto".to_string(),
+            ToolChoice::Required => "any".to_string(),
+            ToolChoice::None => "none".to_string(),
+            ToolChoice::Specific(name) => name.clone(),
+        }
     }
 
     /// Parse response from Mistral.
@@ -302,7 +348,7 @@ impl Model for MistralModel {
         settings: &ModelSettings,
         params: &ModelRequestParameters,
     ) -> Result<ModelResponse, ModelError> {
-        let body = self.build_request(messages, settings, params);
+        let body = self.build_request(messages, settings, params)?;
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
         let response = self

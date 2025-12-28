@@ -94,14 +94,28 @@ where
         state: State,
         deps: Deps,
     ) -> GraphResult<GraphRunResult<State, End>> {
-        let run_id = generate_run_id();
+        let options = ExecutionOptions::new()
+            .max_steps(self.max_steps)
+            .tracing(self.instrumentation);
+        self.run_with_options(state, deps, options).await
+    }
 
-        if self.instrumentation {
+    /// Run the graph with options.
+    pub async fn run_with_options(
+        &self,
+        state: State,
+        deps: Deps,
+        mut options: ExecutionOptions,
+    ) -> GraphResult<GraphRunResult<State, End>> {
+        let run_id = options.run_id.clone().unwrap_or_else(generate_run_id);
+        options.run_id = Some(run_id.clone());
+
+        if options.tracing {
             let _span = span!(Level::INFO, "graph_run", run_id = %run_id).entered();
             info!("Starting graph execution");
         }
 
-        self.graph.run(state, deps).await
+        self.graph.run_with_options(state, deps, options).await
     }
 
     /// Resume a previous run.
@@ -119,7 +133,11 @@ where
         };
 
         // Resume from the loaded state
-        let result = self.graph.run(state, deps).await?;
+        let options = ExecutionOptions::new()
+            .max_steps(self.max_steps)
+            .tracing(self.instrumentation)
+            .run_id(run_id.to_string());
+        let result = self.graph.run_with_options(state, deps, options).await?;
 
         // Save final result
         if self.auto_save {

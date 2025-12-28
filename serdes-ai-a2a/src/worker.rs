@@ -5,13 +5,14 @@
 use crate::broker::Broker;
 use crate::schema::Message;
 use crate::storage::Storage;
-use crate::task::{Task, TaskResult};
+use crate::task::{Task, TaskResult, TaskStatus};
 use serdes_ai_agent::Agent;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 /// Handle for controlling a running worker.
 #[derive(Debug)]
@@ -129,8 +130,26 @@ where
     pub async fn process_task(&self, mut task: Task) -> TaskResult {
         let start = Instant::now();
 
+        // Check if task was already cancelled before we start
+        if task.status == TaskStatus::Cancelled {
+            return TaskResult {
+                task_id: task.id,
+                status: TaskStatus::Cancelled,
+                messages: Vec::new(),
+                artifacts: Vec::new(),
+                error: None,
+                duration_ms: Some(0),
+            };
+        }
+
+        // Get cancellation token for this task
+        let cancellation_token = self.broker.get_cancellation_token(&task.id).await
+            .unwrap_or_else(CancellationToken::new);
+
         // Mark task as running
-        task.start();
+        if let Err(e) = task.start() {
+            return TaskResult::failure(&task.id, format!("Failed to start task: {}", e));
+        }
         if let Err(e) = self.storage.update_task(&task).await {
             return TaskResult::failure(&task.id, format!("Failed to update task: {}", e));
         }
@@ -141,19 +160,54 @@ where
         // Create dependencies for this task
         let deps = (self.deps_factory)();
 
-        // Run the agent
-        let result = self.agent.run(prompt, deps).await;
+        // Run the agent with cancellation support
+        let result = tokio::select! {
+            result = self.agent.run(prompt, deps) => result,
+            _ = cancellation_token.cancelled() => {
+                // Task was cancelled during execution
+                task.force_status(TaskStatus::Cancelled);
+                if let Err(e) = self.storage.update_task(&task).await {
+                    return TaskResult::failure(&task.id, format!("Failed to save cancellation: {}", e));
+                }
+                return TaskResult {
+                    task_id: task.id,
+                    status: TaskStatus::Cancelled,
+                    messages: Vec::new(),
+                    artifacts: Vec::new(),
+                    error: None,
+                    duration_ms: Some(start.elapsed().as_millis() as u64),
+                };
+            }
+        };
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
         match result {
             Ok(agent_result) => {
+                // Check for cancellation one more time before completing
+                if cancellation_token.is_cancelled() {
+                    task.force_status(TaskStatus::Cancelled);
+                    if let Err(e) = self.storage.update_task(&task).await {
+                        return TaskResult::failure(&task.id, format!("Failed to save cancellation: {}", e));
+                    }
+                    return TaskResult {
+                        task_id: task.id,
+                        status: TaskStatus::Cancelled,
+                        messages: Vec::new(),
+                        artifacts: Vec::new(),
+                        error: None,
+                        duration_ms: Some(duration_ms),
+                    };
+                }
+
                 // Create response message
                 let output_text = agent_result.output.to_string();
                 let response_message = Message::agent(output_text);
 
                 task.add_message(response_message.clone());
-                task.complete();
+                if let Err(e) = task.complete() {
+                    return TaskResult::failure(&task.id, format!("Failed to complete task: {}", e));
+                }
 
                 if let Err(e) = self.storage.update_task(&task).await {
                     return TaskResult::failure(&task.id, format!("Failed to save result: {}", e));
@@ -165,7 +219,10 @@ where
             }
             Err(e) => {
                 let error_msg = format!("Agent error: {}", e);
-                task.fail(&error_msg);
+                // Use force_status since fail() requires Running state
+                // but we might be in a weird state after an error
+                task.force_status(TaskStatus::Failed);
+                task.error = Some(error_msg.clone());
 
                 if let Err(storage_err) = self.storage.update_task(&task).await {
                     return TaskResult::failure(

@@ -12,6 +12,8 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+const MAX_BUFFER_SIZE: usize = 10 * 1024 * 1024;
+
 /// A parsed SSE event.
 #[derive(Debug, Clone)]
 pub struct SseEvent {
@@ -75,15 +77,39 @@ impl SseParser {
     }
 
     /// Feed bytes into the parser.
-    pub fn feed(&mut self, bytes: &Bytes) {
-        self.buffer.push_str(&String::from_utf8_lossy(bytes));
-        self.parse_buffer();
+    pub fn feed(&mut self, bytes: &Bytes) -> StreamResult<Vec<SseEvent>> {
+        let chunk = String::from_utf8_lossy(bytes);
+        self.feed_str(&chunk)
     }
 
     /// Feed a string into the parser.
-    pub fn feed_str(&mut self, s: &str) {
+    pub fn feed_str(&mut self, s: &str) -> StreamResult<Vec<SseEvent>> {
         self.buffer.push_str(s);
-        self.parse_buffer();
+
+        if self.buffer.len() > MAX_BUFFER_SIZE {
+            return Err(StreamError::BufferOverflow);
+        }
+
+        self.parse_buffer()
+    }
+
+    /// Call when stream ends to flush any remaining event.
+    pub fn finish(&mut self) -> StreamResult<Vec<SseEvent>> {
+        let mut events = self.parse_buffer()?;
+
+        if !self.buffer.trim().is_empty() {
+            if let Some(event) = self.parse_event(self.buffer.trim_end_matches(|c| c == '\n' || c == '\r')) {
+                if let Some(id) = &event.id {
+                    self.last_event_id = Some(id.clone());
+                }
+                self.events.push_back(event.clone());
+                events.push(event);
+            }
+        }
+
+        self.buffer.clear();
+
+        Ok(events)
     }
 
     /// Get the next parsed event.
@@ -107,30 +133,40 @@ impl SseParser {
         self.events.clear();
     }
 
-    fn parse_buffer(&mut self) {
+    fn parse_buffer(&mut self) -> StreamResult<Vec<SseEvent>> {
+        let mut parsed_events = Vec::new();
+
         // Split by double newlines (event boundaries)
-        while let Some(pos) = self.find_event_boundary() {
+        while let Some((pos, delimiter_len)) = self.find_event_boundary() {
             let event_str = self.buffer[..pos].to_string();
-            self.buffer = self.buffer[pos..].trim_start_matches('\n').to_string();
+            self.buffer = self.buffer[pos + delimiter_len..].to_string();
+            self.buffer = self
+                .buffer
+                .trim_start_matches(|c| c == '\n' || c == '\r')
+                .to_string();
 
             if let Some(event) = self.parse_event(&event_str) {
                 if let Some(id) = &event.id {
                     self.last_event_id = Some(id.clone());
                 }
-                self.events.push_back(event);
+                self.events.push_back(event.clone());
+                parsed_events.push(event);
             }
         }
+
+        Ok(parsed_events)
     }
 
-    fn find_event_boundary(&self) -> Option<usize> {
-        // Look for "\n\n" or "\r\n\r\n"
-        if let Some(pos) = self.buffer.find("\n\n") {
-            return Some(pos + 2);
+    fn find_event_boundary(&self) -> Option<(usize, usize)> {
+        let newline = self.buffer.find("\n\n").map(|pos| (pos, 2));
+        let carriage = self.buffer.find("\r\n\r\n").map(|pos| (pos, 4));
+
+        match (newline, carriage) {
+            (Some(nl), Some(cr)) => Some(if cr.0 < nl.0 { cr } else { nl }),
+            (Some(nl), None) => Some(nl),
+            (None, Some(cr)) => Some(cr),
+            (None, None) => None,
         }
-        if let Some(pos) = self.buffer.find("\r\n\r\n") {
-            return Some(pos + 4);
-        }
-        None
     }
 
     fn parse_event(&self, s: &str) -> Option<SseEvent> {
@@ -217,7 +253,9 @@ where
         // Poll for more data
         match this.inner.poll_next_unpin(cx) {
             Poll::Ready(Some(Ok(bytes))) => {
-                this.parser.feed(&bytes);
+                if let Err(error) = this.parser.feed(&bytes) {
+                    return Poll::Ready(Some(Err(error)));
+                }
 
                 if let Some(event) = this.parser.next_event() {
                     Poll::Ready(Some(Ok(event)))
@@ -229,6 +267,11 @@ where
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(StreamError::Io(e)))),
             Poll::Ready(None) => {
                 *this.finished = true;
+
+                if let Err(error) = this.parser.finish() {
+                    return Poll::Ready(Some(Err(error)));
+                }
+
                 // Return any remaining events
                 if let Some(event) = this.parser.next_event() {
                     Poll::Ready(Some(Ok(event)))
@@ -297,7 +340,7 @@ mod tests {
     #[test]
     fn test_sse_parser_basic() {
         let mut parser = SseParser::new();
-        parser.feed_str("data: hello\n\n");
+        parser.feed_str("data: hello\n\n").unwrap();
 
         let event = parser.next_event().unwrap();
         assert_eq!(event.data, "hello");
@@ -307,7 +350,7 @@ mod tests {
     #[test]
     fn test_sse_parser_with_event_type() {
         let mut parser = SseParser::new();
-        parser.feed_str("event: message\ndata: hello\n\n");
+        parser.feed_str("event: message\ndata: hello\n\n").unwrap();
 
         let event = parser.next_event().unwrap();
         assert_eq!(event.event, Some("message".to_string()));
@@ -317,7 +360,7 @@ mod tests {
     #[test]
     fn test_sse_parser_multiline_data() {
         let mut parser = SseParser::new();
-        parser.feed_str("data: line1\ndata: line2\n\n");
+        parser.feed_str("data: line1\ndata: line2\n\n").unwrap();
 
         let event = parser.next_event().unwrap();
         assert_eq!(event.data, "line1\nline2");
@@ -326,7 +369,7 @@ mod tests {
     #[test]
     fn test_sse_parser_multiple_events() {
         let mut parser = SseParser::new();
-        parser.feed_str("data: first\n\ndata: second\n\n");
+        parser.feed_str("data: first\n\ndata: second\n\n").unwrap();
 
         let event1 = parser.next_event().unwrap();
         let event2 = parser.next_event().unwrap();
@@ -339,7 +382,7 @@ mod tests {
     #[test]
     fn test_sse_parser_with_id() {
         let mut parser = SseParser::new();
-        parser.feed_str("id: 123\ndata: hello\n\n");
+        parser.feed_str("id: 123\ndata: hello\n\n").unwrap();
 
         let event = parser.next_event().unwrap();
         assert_eq!(event.id, Some("123".to_string()));
@@ -349,7 +392,7 @@ mod tests {
     #[test]
     fn test_sse_parser_with_retry() {
         let mut parser = SseParser::new();
-        parser.feed_str("retry: 5000\ndata: hello\n\n");
+        parser.feed_str("retry: 5000\ndata: hello\n\n").unwrap();
 
         let event = parser.next_event().unwrap();
         assert_eq!(event.retry, Some(5000));
@@ -358,7 +401,7 @@ mod tests {
     #[test]
     fn test_sse_parser_ignores_comments() {
         let mut parser = SseParser::new();
-        parser.feed_str(": this is a comment\ndata: hello\n\n");
+        parser.feed_str(": this is a comment\ndata: hello\n\n").unwrap();
 
         let event = parser.next_event().unwrap();
         assert_eq!(event.data, "hello");
@@ -388,10 +431,10 @@ mod tests {
         let mut parser = SseParser::new();
 
         // Feed partial data
-        parser.feed_str("data: hel");
+        parser.feed_str("data: hel").unwrap();
         assert!(parser.next_event().is_none());
 
-        parser.feed_str("lo\n\n");
+        parser.feed_str("lo\n\n").unwrap();
         let event = parser.next_event().unwrap();
         assert_eq!(event.data, "hello");
     }

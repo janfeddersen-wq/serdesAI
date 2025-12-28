@@ -8,11 +8,8 @@
 //! OPENAI_API_KEY=your-key cargo run --example multi_agent --features graph
 //! ```
 
-#[cfg(feature = "graph")]
-use serdes_ai::graph::{Graph, GraphBuilder, GraphContext, Node};
 use serdes_ai::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 /// State passed through the pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]

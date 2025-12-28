@@ -143,8 +143,7 @@ async fn extract_person() -> anyhow::Result<()> {
         )
         .await?;
 
-    // Parse the structured output
-    let person: Person = serde_json::from_str(result.output())?;
+    let person: Person = result.into_output()?;
 
     println!("\nExtracted Person:");
     println!("  Name: {}", person.name);
@@ -187,7 +186,7 @@ async fn analyze_review() -> anyhow::Result<()> {
         )
         .await?;
 
-    let analysis: ReviewAnalysis = serde_json::from_str(result.output())?;
+    let analysis: ReviewAnalysis = result.into_output()?;
 
     println!("\nAnalysis:");
     println!("  Sentiment: {} (confidence: {:.0}%)", 

@@ -57,7 +57,7 @@ impl ExponentialBackoff {
 #[async_trait]
 impl RetryStrategy for ExponentialBackoff {
     fn should_retry(&self, error: &RetryableError, attempt: u32) -> Option<Duration> {
-        if attempt >= self.max_retries || !error.is_retryable() {
+        if attempt > self.max_retries || !error.is_retryable() {
             return None;
         }
         Some(self.calculate_delay(attempt))
@@ -157,7 +157,7 @@ impl FixedDelay {
 #[async_trait]
 impl RetryStrategy for FixedDelay {
     fn should_retry(&self, error: &RetryableError, attempt: u32) -> Option<Duration> {
-        if attempt >= self.max_retries || !error.is_retryable() {
+        if attempt > self.max_retries || !error.is_retryable() {
             None
         } else {
             Some(self.delay)
@@ -201,7 +201,7 @@ impl LinearBackoff {
 
     /// Calculate delay for an attempt.
     pub fn calculate_delay(&self, attempt: u32) -> Duration {
-        let delay = self.initial_delay + self.increment * attempt;
+        let delay = self.initial_delay + self.increment * attempt.saturating_sub(1);
         delay.min(self.max_delay)
     }
 }
@@ -209,7 +209,7 @@ impl LinearBackoff {
 #[async_trait]
 impl RetryStrategy for LinearBackoff {
     fn should_retry(&self, error: &RetryableError, attempt: u32) -> Option<Duration> {
-        if attempt >= self.max_retries || !error.is_retryable() {
+        if attempt > self.max_retries || !error.is_retryable() {
             None
         } else {
             Some(self.calculate_delay(attempt))
@@ -223,12 +223,9 @@ impl RetryStrategy for LinearBackoff {
 
 /// Generate a random jitter factor between -1.0 and 1.0.
 fn rand_jitter() -> f64 {
-    use std::time::SystemTime;
-    let nanos = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    ((nanos % 2000) as f64 / 1000.0) - 1.0
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    rng.gen_range(-1.0..1.0)
 }
 
 #[cfg(test)]
@@ -267,13 +264,13 @@ mod tests {
             .build();
 
         // Without jitter, delays should be predictable
-        let delay0 = backoff.calculate_delay(0);
         let delay1 = backoff.calculate_delay(1);
         let delay2 = backoff.calculate_delay(2);
+        let delay3 = backoff.calculate_delay(3);
 
-        assert_eq!(delay0, Duration::from_millis(100));
         assert_eq!(delay1, Duration::from_millis(200));
         assert_eq!(delay2, Duration::from_millis(400));
+        assert_eq!(delay3, Duration::from_millis(800));
     }
 
     #[test]
@@ -295,13 +292,13 @@ mod tests {
         let backoff = ExponentialBackoff::builder().max_retries(3).build();
 
         let error = RetryableError::http(500, "error");
-        assert!(backoff.should_retry(&error, 0).is_some());
-        assert!(backoff.should_retry(&error, 2).is_some());
-        assert!(backoff.should_retry(&error, 3).is_none());
+        assert!(backoff.should_retry(&error, 1).is_some());
+        assert!(backoff.should_retry(&error, 3).is_some());
+        assert!(backoff.should_retry(&error, 4).is_none());
 
         // Non-retryable error
         let error = RetryableError::http(400, "bad request");
-        assert!(backoff.should_retry(&error, 0).is_none());
+        assert!(backoff.should_retry(&error, 1).is_none());
     }
 
     #[test]
@@ -310,14 +307,14 @@ mod tests {
 
         let error = RetryableError::http(500, "error");
         assert_eq!(
-            delay.should_retry(&error, 0),
+            delay.should_retry(&error, 1),
             Some(Duration::from_secs(1))
         );
         assert_eq!(
-            delay.should_retry(&error, 2),
+            delay.should_retry(&error, 3),
             Some(Duration::from_secs(1))
         );
-        assert_eq!(delay.should_retry(&error, 3), None);
+        assert_eq!(delay.should_retry(&error, 4), None);
     }
 
     #[test]
@@ -329,9 +326,9 @@ mod tests {
             5,
         );
 
-        assert_eq!(backoff.calculate_delay(0), Duration::from_millis(100));
-        assert_eq!(backoff.calculate_delay(1), Duration::from_millis(200));
-        assert_eq!(backoff.calculate_delay(2), Duration::from_millis(300));
+        assert_eq!(backoff.calculate_delay(1), Duration::from_millis(100));
+        assert_eq!(backoff.calculate_delay(2), Duration::from_millis(200));
+        assert_eq!(backoff.calculate_delay(3), Duration::from_millis(300));
 
         // Check max delay cap
         assert_eq!(backoff.calculate_delay(20), Duration::from_secs(1));

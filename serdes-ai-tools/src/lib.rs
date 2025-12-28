@@ -20,7 +20,7 @@
 //! ```rust
 //! use async_trait::async_trait;
 //! use serdes_ai_tools::{
-//!     Tool, ToolDefinition, ObjectJsonSchema, PropertySchema,
+//!     SchemaBuilder, Tool, ToolDefinition,
 //!     RunContext, ToolResult, ToolReturn,
 //! };
 //!
@@ -31,12 +31,10 @@
 //!     fn definition(&self) -> ToolDefinition {
 //!         ToolDefinition::new("get_weather", "Get current weather for a location")
 //!             .with_parameters(
-//!                 ObjectJsonSchema::new()
-//!                     .with_property(
-//!                         "location",
-//!                         PropertySchema::string("City name").build(),
-//!                         true,
-//!                     )
+//!                 SchemaBuilder::new()
+//!                     .string("location", "City name", true)
+//!                     .build()
+//!                     .unwrap()
 //!             )
 //!     }
 //!
@@ -58,9 +56,12 @@
 //!
 //! # struct WeatherTool;
 //! # use async_trait::async_trait;
-//! # use serdes_ai_tools::{ToolDefinition, ObjectJsonSchema, ToolResult, ToolReturn};
+//! # use serdes_ai_tools::{SchemaBuilder, ToolDefinition, ToolResult, ToolReturn};
 //! # #[async_trait] impl Tool for WeatherTool {
-//! #     fn definition(&self) -> ToolDefinition { ToolDefinition::new("weather", "Get weather") }
+//! #     fn definition(&self) -> ToolDefinition {
+//! #         ToolDefinition::new("weather", "Get weather")
+//! #             .with_parameters(SchemaBuilder::new().build().unwrap())
+//! #     }
 //! #     async fn call(&self, _: &RunContext, _: serde_json::Value) -> ToolResult { Ok(ToolReturn::empty()) }
 //! # }
 //!
@@ -114,11 +115,11 @@ pub use deferred::{
     DeferredToolCall, DeferredToolDecision, DeferredToolDecisions, DeferredToolRequests,
     DeferredToolResult, DeferredToolResults, ToolApproved, ToolApprover, ToolDenied,
 };
-pub use definition::{ObjectJsonSchema, PropertySchema, ToolDefinition};
+pub use definition::{ObjectJsonSchema, ToolDefinition};
 pub use errors::{ToolError, ToolErrorInfo};
 pub use registry::{ToolProvider, ToolRegistry};
 pub use return_types::{IntoToolReturn, SerializableToolResult, ToolResult, ToolReturn};
-pub use schema::{types as schema_types, JsonSchemaGenerator, SchemaBuilder};
+pub use schema::{PropertySchema, SchemaBuilder};
 pub use tool::{BoxedTool, FunctionTool, SyncFunctionTool, Tool};
 
 // Delete old files if they exist

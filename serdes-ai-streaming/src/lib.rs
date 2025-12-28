@@ -76,7 +76,7 @@ pub mod websocket;
 // Re-exports
 pub use agent_stream::{
     AgentStream, AgentStreamExt, OutputStream, ResponseStream, StreamConfig, StreamState,
-    TextDeltaStream,
+    TextDelta, TextDeltaStream,
 };
 pub use debounce::{
     CoalescedTextStream, DebouncedStream, StreamDebounceExt, TextStreamExt, ThrottledStream,
@@ -94,7 +94,7 @@ pub mod prelude {
     pub use crate::{
         AgentStream, AgentStreamEvent, AgentStreamExt, PartialResponse, ResponseDelta,
         SseEvent, SseEventExt, SseParser, StreamConfig, StreamDebounceExt, StreamError,
-        StreamResult, StreamState, TextStreamExt,
+        StreamResult, StreamState, TextDelta, TextStreamExt,
     };
 }
 

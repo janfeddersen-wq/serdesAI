@@ -58,16 +58,17 @@ pub struct Agent<Deps = (), Output = String> {
     pub(crate) name: Option<String>,
     /// Default model settings.
     pub(crate) model_settings: ModelSettings,
-    /// Static instructions.
-    pub(crate) instructions: Vec<String>,
+    /// Pre-joined static system prompt (static instructions + static prompts).
+    /// This avoids cloning on every run.
+    pub(crate) static_system_prompt: Arc<str>,
     /// Dynamic instruction functions.
     pub(crate) instruction_fns: Vec<Box<dyn InstructionFn<Deps>>>,
-    /// Static system prompts.
-    pub(crate) system_prompts: Vec<String>,
     /// Dynamic system prompt functions.
     pub(crate) system_prompt_fns: Vec<Box<dyn SystemPromptFn<Deps>>>,
     /// Registered tool definitions.
     pub(crate) tools: Vec<RegisteredTool<Deps>>,
+    /// Cached tool definitions - pre-computed to avoid cloning on every step.
+    pub(crate) cached_tool_defs: Arc<Vec<ToolDefinition>>,
     /// Output schema.
     pub(crate) output_schema: Box<dyn OutputSchema<Output>>,
     /// Output validators.
@@ -222,14 +223,24 @@ where
     }
 
     /// Build the system prompt for a run.
+    /// 
+    /// Static prompts are pre-joined at build time for efficiency.
+    /// Only dynamic prompts need to be evaluated per-run.
     pub(crate) async fn build_system_prompt(&self, ctx: &RunContext<Deps>) -> String {
+        // Check if we have any dynamic prompts
+        let has_dynamic = !self.system_prompt_fns.is_empty() || !self.instruction_fns.is_empty();
+
+        if !has_dynamic {
+            // Fast path: just return the pre-joined static prompt (no allocation needed)
+            return self.static_system_prompt.to_string();
+        }
+
+        // Slow path: need to evaluate dynamic prompts
         let mut parts = Vec::new();
 
-        // Static system prompts
-        for prompt in &self.system_prompts {
-            if !prompt.is_empty() {
-                parts.push(prompt.clone());
-            }
+        // Add pre-joined static prompt if non-empty
+        if !self.static_system_prompt.is_empty() {
+            parts.push(self.static_system_prompt.to_string());
         }
 
         // Dynamic system prompts
@@ -238,13 +249,6 @@ where
                 if !prompt.is_empty() {
                     parts.push(prompt);
                 }
-            }
-        }
-
-        // Static instructions
-        for instruction in &self.instructions {
-            if !instruction.is_empty() {
-                parts.push(instruction.clone());
             }
         }
 
@@ -258,6 +262,13 @@ where
         }
 
         parts.join("\n\n")
+    }
+
+    /// Get the cached tool definitions.
+    /// 
+    /// These are pre-computed at build time to avoid cloning on every step.
+    pub(crate) fn tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
+        Arc::clone(&self.cached_tool_defs)
     }
 
     /// Find a tool by name.

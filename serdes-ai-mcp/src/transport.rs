@@ -3,12 +3,13 @@
 //! This module provides transport abstractions for MCP communication.
 
 use crate::error::{McpError, McpResult};
-use crate::types::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
+use crate::types::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, RequestId};
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{oneshot, Mutex};
 
 /// Trait for MCP transport implementations.
 #[async_trait]
@@ -32,7 +33,7 @@ pub trait McpTransport: Send + Sync {
 pub struct StdioTransport {
     child: Arc<Mutex<Option<Child>>>,
     stdin: Arc<Mutex<ChildStdin>>,
-    response_rx: Arc<Mutex<mpsc::Receiver<String>>>,
+    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>,
     connected: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -57,21 +58,23 @@ impl StdioTransport {
             .take()
             .ok_or_else(|| McpError::Transport("No stdout".to_string()))?;
 
-        // Create channel for responses
-        let (tx, rx) = mpsc::channel(100);
+        let pending = Arc::new(Mutex::new(HashMap::new()));
 
         // Spawn reader task
-        tokio::spawn(Self::reader_task(stdout, tx));
+        tokio::spawn(Self::reader_task(stdout, pending.clone()));
 
         Ok(Self {
             child: Arc::new(Mutex::new(Some(child))),
             stdin: Arc::new(Mutex::new(stdin)),
-            response_rx: Arc::new(Mutex::new(rx)),
+            pending,
             connected: Arc::new(std::sync::atomic::AtomicBool::new(true)),
         })
     }
 
-    async fn reader_task(stdout: ChildStdout, tx: mpsc::Sender<String>) {
+    async fn reader_task(
+        stdout: ChildStdout,
+        pending: Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>,
+    ) {
         let mut reader = BufReader::new(stdout);
         let mut line = String::new();
 
@@ -80,10 +83,29 @@ impl StdioTransport {
             match reader.read_line(&mut line).await {
                 Ok(0) => break, // EOF
                 Ok(_) => {
-                    let trimmed = line.trim().to_string();
-                    if !trimmed.is_empty() {
-                        if tx.send(trimmed).await.is_err() {
-                            break;
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+
+                    let response: JsonRpcResponse = match serde_json::from_str(trimmed) {
+                        Ok(resp) => resp,
+                        Err(_) => continue,
+                    };
+
+                    let request_id = match &response.id {
+                        RequestId::Number(id) if *id >= 0 => Some(*id as u64),
+                        _ => None,
+                    };
+
+                    if let Some(id) = request_id {
+                        let sender = {
+                            let mut pending = pending.lock().await;
+                            pending.remove(&id)
+                        };
+
+                        if let Some(tx) = sender {
+                            let _ = tx.send(response);
                         }
                     }
                 }
@@ -106,23 +128,35 @@ impl StdioTransport {
         Ok(())
     }
 
-    async fn receive_raw(&self) -> McpResult<String> {
-        let mut rx = self.response_rx.lock().await;
-        rx.recv()
-            .await
-            .ok_or_else(|| McpError::ConnectionClosed)
-    }
 }
 
 #[async_trait]
 impl McpTransport for StdioTransport {
     async fn request(&self, request: &JsonRpcRequest) -> McpResult<JsonRpcResponse> {
-        let json = serde_json::to_string(request)?;
-        self.send_raw(&json).await?;
+        let request_id = match &request.id {
+            RequestId::Number(id) if *id >= 0 => *id as u64,
+            RequestId::Number(_) => {
+                return Err(McpError::Transport(
+                    "Negative request IDs are not supported over stdio".to_string(),
+                ));
+            }
+            RequestId::String(_) => {
+                return Err(McpError::Transport(
+                    "String request IDs are not supported over stdio".to_string(),
+                ));
+            }
+        };
 
-        let line = self.receive_raw().await?;
-        let response: JsonRpcResponse = serde_json::from_str(&line)?;
-        Ok(response)
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(request_id, tx);
+
+        let json = serde_json::to_string(request)?;
+        if let Err(err) = self.send_raw(&json).await {
+            self.pending.lock().await.remove(&request_id);
+            return Err(err);
+        }
+
+        rx.await.map_err(|_| McpError::ConnectionClosed)
     }
 
     async fn notify(&self, notification: &JsonRpcNotification) -> McpResult<()> {

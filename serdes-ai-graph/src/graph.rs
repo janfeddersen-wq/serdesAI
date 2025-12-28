@@ -2,6 +2,7 @@
 
 use crate::edge::Edge;
 use crate::error::{GraphError, GraphResult};
+use crate::executor::ExecutionOptions;
 use crate::node::{BaseNode, Node, NodeDef, NodeResult};
 use crate::state::{generate_run_id, GraphRunContext, GraphRunResult, GraphState};
 use std::collections::HashMap;
@@ -130,6 +131,37 @@ where
         self.edges.len()
     }
 
+    /// Get edges.
+    pub fn edges(&self) -> &[Edge<State>] {
+        &self.edges
+    }
+
+    fn detect_cycle(
+        node: &str,
+        adjacency: &HashMap<String, Vec<String>>,
+        visiting: &mut std::collections::HashSet<String>,
+        visited: &mut std::collections::HashSet<String>,
+    ) -> bool {
+        if visited.contains(node) {
+            return false;
+        }
+        if visiting.contains(node) {
+            return true;
+        }
+
+        visiting.insert(node.to_string());
+        if let Some(neighbors) = adjacency.get(node) {
+            for neighbor in neighbors {
+                if Self::detect_cycle(neighbor, adjacency, visiting, visited) {
+                    return true;
+                }
+            }
+        }
+        visiting.remove(node);
+        visited.insert(node.to_string());
+        false
+    }
+
     /// Validate the graph configuration.
     pub fn validate(&self) -> GraphResult<()> {
         // Check entry node exists
@@ -158,6 +190,22 @@ where
             }
         }
 
+        let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
+        for edge in &self.edges {
+            adjacency
+                .entry(edge.from.clone())
+                .or_default()
+                .push(edge.to.clone());
+        }
+
+        let mut visiting = std::collections::HashSet::new();
+        let mut visited = std::collections::HashSet::new();
+        for node in self.nodes.keys() {
+            if Self::detect_cycle(node, &adjacency, &mut visiting, &mut visited) {
+                return Err(GraphError::CycleDetected);
+            }
+        }
+
         Ok(())
     }
 
@@ -176,12 +224,26 @@ where
 {
     /// Run the graph from the entry node.
     pub async fn run(&self, state: State, deps: Deps) -> GraphResult<GraphRunResult<State, End>> {
+        let options = ExecutionOptions::new()
+            .max_steps(self.max_steps)
+            .tracing(self.auto_instrument);
+        self.run_with_options(state, deps, options).await
+    }
+
+    /// Run the graph from the entry node with options.
+    pub async fn run_with_options(
+        &self,
+        state: State,
+        deps: Deps,
+        options: ExecutionOptions,
+    ) -> GraphResult<GraphRunResult<State, End>> {
         let entry = self.entry_node.as_ref().ok_or(GraphError::NoEntryNode)?;
         let start_node = self.nodes.get(entry).ok_or_else(|| {
             GraphError::node_not_found(entry)
         })?;
 
-        self.run_from(&*start_node.node, state, deps).await
+        self.run_from_with_options(&*start_node.node, state, deps, options)
+            .await
     }
 
     /// Run the graph from a specific node.
@@ -194,12 +256,34 @@ where
     where
         N: BaseNode<State, Deps, End> + ?Sized,
     {
-        let run_id = generate_run_id();
-        let mut ctx = GraphRunContext::new(state, deps, &run_id)
-            .with_max_steps(self.max_steps);
-        let mut history = Vec::new();
+        let options = ExecutionOptions::new()
+            .max_steps(self.max_steps)
+            .tracing(self.auto_instrument);
+        self.run_from_with_options(start, state, deps, options).await
+    }
 
-        // Execute the first node
+    /// Run the graph from a specific node with options.
+    pub async fn run_from_with_options<N>(
+        &self,
+        start: &N,
+        state: State,
+        deps: Deps,
+        mut options: ExecutionOptions,
+    ) -> GraphResult<GraphRunResult<State, End>>
+    where
+        N: BaseNode<State, Deps, End> + ?Sized,
+    {
+        let run_id = options.run_id.take().unwrap_or_else(generate_run_id);
+        let max_steps = options.max_steps;
+        let mut ctx = GraphRunContext::new(state, deps, &run_id)
+            .with_max_steps(max_steps);
+        let mut history = Vec::new();
+        let mut steps = 0;
+
+        steps += 1;
+        if steps > max_steps {
+            return Err(GraphError::MaxStepsExceeded(max_steps));
+        }
         ctx.increment_step();
         let node_name = start.name().to_string();
         history.push(node_name);
@@ -207,12 +291,12 @@ where
         let mut result = start.run(&mut ctx).await?;
 
         loop {
-            if ctx.is_max_steps_reached() {
-                return Err(GraphError::MaxStepsExceeded(ctx.max_steps));
-            }
-
             match result {
                 NodeResult::Next(next) => {
+                    steps += 1;
+                    if steps > max_steps {
+                        return Err(GraphError::MaxStepsExceeded(max_steps));
+                    }
                     ctx.increment_step();
                     let name = next.name().to_string();
                     history.push(name);
@@ -222,6 +306,10 @@ where
                     let node = self.nodes.get(&name).ok_or_else(|| {
                         GraphError::node_not_found(&name)
                     })?;
+                    steps += 1;
+                    if steps > max_steps {
+                        return Err(GraphError::MaxStepsExceeded(max_steps));
+                    }
                     ctx.increment_step();
                     history.push(name);
                     result = node.node.run(&mut ctx).await?;

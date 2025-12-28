@@ -8,6 +8,7 @@ use crate::errors::{OutputParseError, OutputValidationError};
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde_json::Value as JsonValue;
+use std::any::TypeId;
 use std::marker::PhantomData;
 
 /// Trait for validating agent outputs.
@@ -328,6 +329,44 @@ pub struct TextOutputSchema;
 impl OutputSchema<String> for TextOutputSchema {
     fn parse_text(&self, text: &str) -> Result<String, OutputParseError> {
         Ok(text.to_string())
+    }
+}
+
+/// Default output schema (text for String, JSON for others).
+#[derive(Debug, Clone, Default)]
+pub struct DefaultOutputSchema<Output> {
+    _phantom: PhantomData<Output>,
+}
+
+impl<Output> DefaultOutputSchema<Output> {
+    /// Create a new default output schema.
+    pub fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<Output: DeserializeOwned + Send + Sync + 'static> OutputSchema<Output>
+    for DefaultOutputSchema<Output>
+{
+    fn mode(&self) -> OutputMode {
+        if TypeId::of::<Output>() == TypeId::of::<String>() {
+            OutputMode::Text
+        } else {
+            OutputMode::Json
+        }
+    }
+
+    fn parse_text(&self, text: &str) -> Result<Output, OutputParseError> {
+        if TypeId::of::<Output>() == TypeId::of::<String>() {
+            // For String output, use serde_json with Value::String to safely convert
+            serde_json::from_value(serde_json::Value::String(text.to_string()))
+                .map_err(OutputParseError::Json)
+        } else {
+            let json_str = extract_json(text).unwrap_or(text);
+            serde_json::from_str(json_str).map_err(OutputParseError::Json)
+        }
     }
 }
 

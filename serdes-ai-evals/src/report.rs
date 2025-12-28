@@ -203,6 +203,8 @@ impl<TaskOutput> EvaluationReport<TaskOutput> {
 
         // Per-evaluator stats
         let mut evaluator_stats: HashMap<String, EvaluatorStats> = HashMap::new();
+        let mut evaluator_scores: HashMap<String, (f64, usize)> = HashMap::new();
+
         for case in cases {
             for eval in &case.evaluations {
                 let stats = evaluator_stats
@@ -223,16 +225,28 @@ impl<TaskOutput> EvaluationReport<TaskOutput> {
                 if eval.result.is_fail() {
                     stats.failed += 1;
                 }
+
+                if let Some(score) = eval.result.score() {
+                    let entry = evaluator_scores.entry(eval.evaluator.clone()).or_insert((0.0, 0));
+                    entry.0 += score;
+                    entry.1 += 1;
+                }
             }
         }
 
-        // Calculate pass rates
+        // Calculate pass rates and averages
         for stats in evaluator_stats.values_mut() {
             stats.pass_rate = if stats.total > 0 {
                 stats.passed as f64 / stats.total as f64
             } else {
                 0.0
             };
+
+            if let Some((sum, count)) = evaluator_scores.get(&stats.name) {
+                if *count > 0 {
+                    stats.average_score = Some(sum / *count as f64);
+                }
+            }
         }
 
         ReportSummary {

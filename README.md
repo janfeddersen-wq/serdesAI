@@ -66,6 +66,7 @@ impl Tool<()> for CalculatorTool {
                 SchemaBuilder::new()
                     .string("expression", "Math expression to evaluate", true)
                     .build()
+                    .unwrap()
             )
     }
     

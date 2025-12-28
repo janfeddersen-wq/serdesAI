@@ -9,7 +9,7 @@ use serde_json::Value as JsonValue;
 use std::time::Duration;
 
 use crate::{
-    definition::{ObjectJsonSchema, ToolDefinition},
+    definition::ToolDefinition,
     errors::ToolError,
     return_types::{ToolResult, ToolReturn},
     schema::SchemaBuilder,
@@ -254,7 +254,7 @@ impl CodeExecutionTool {
     }
 
     /// Get the tool schema.
-    fn schema(&self) -> ObjectJsonSchema {
+    fn schema(&self) -> JsonValue {
         let lang_names: Vec<&str> = self
             .config
             .allowed_languages
@@ -276,6 +276,7 @@ impl CodeExecutionTool {
                 false,
             )
             .build()
+            .expect("SchemaBuilder JSON serialization failed")
     }
 
     /// Execute code (stub - integrate with actual sandbox).
@@ -325,26 +326,52 @@ impl<Deps: Send + Sync> Tool<Deps> for CodeExecutionTool {
         let language_str = args
             .get("language")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_args("Missing 'language' field"))?;
+            .ok_or_else(|| {
+                ToolError::validation_error(
+                    "code_execution",
+                    Some("language".to_string()),
+                    "Missing 'language' field",
+                )
+            })?;
 
         let language = ProgrammingLanguage::from_str(language_str)
-            .ok_or_else(|| ToolError::invalid_args(format!("Unknown language: {}", language_str)))?;
+            .ok_or_else(|| {
+                ToolError::validation_error(
+                    "code_execution",
+                    Some("language".to_string()),
+                    format!("Unknown language: {}", language_str),
+                )
+            })?;
 
         if !self.config.allowed_languages.contains(&language) {
-            return Err(ToolError::invalid_args(format!(
-                "Language '{}' is not allowed. Allowed: {:?}",
-                language,
-                self.config.allowed_languages
-            )));
+            return Err(ToolError::validation_error(
+                "code_execution",
+                Some("language".to_string()),
+                format!(
+                    "Language '{}' is not allowed. Allowed: {:?}",
+                    language,
+                    self.config.allowed_languages
+                ),
+            ));
         }
 
         let code = args
             .get("code")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_args("Missing 'code' field"))?;
+            .ok_or_else(|| {
+                ToolError::validation_error(
+                    "code_execution",
+                    Some("code".to_string()),
+                    "Missing 'code' field",
+                )
+            })?;
 
         if code.trim().is_empty() {
-            return Err(ToolError::invalid_args("Code cannot be empty"));
+            return Err(ToolError::validation_error(
+                "code_execution",
+                Some("code".to_string()),
+                "Code cannot be empty",
+            ));
         }
 
         let stdin = args.get("stdin").and_then(|v| v.as_str());
@@ -445,8 +472,13 @@ mod tests {
         let tool = CodeExecutionTool::new();
         let def = <CodeExecutionTool as Tool<()>>::definition(&tool);
         assert_eq!(def.name, "code_execution");
-        assert!(def.parameters().is_required("language"));
-        assert!(def.parameters().is_required("code"));
+        let required = def
+            .parameters()
+            .get("required")
+            .and_then(|value| value.as_array())
+            .unwrap();
+        assert!(required.iter().any(|value| value.as_str() == Some("language")));
+        assert!(required.iter().any(|value| value.as_str() == Some("code")));
     }
 
     #[tokio::test]
@@ -488,7 +520,7 @@ mod tests {
             )
             .await;
 
-        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
+        assert!(matches!(result, Err(ToolError::ValidationFailed { .. })));
     }
 
     #[tokio::test]
@@ -500,7 +532,7 @@ mod tests {
             .call(&ctx, serde_json::json!({"language": "python"}))
             .await;
 
-        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
+        assert!(matches!(result, Err(ToolError::ValidationFailed { .. })));
     }
 
     #[test]

@@ -116,9 +116,8 @@ impl ObjectJsonSchema {
     }
 
     /// Convert to a JSON value.
-    #[must_use]
-    pub fn to_json(&self) -> JsonValue {
-        serde_json::to_value(self).unwrap_or(JsonValue::Null)
+    pub fn to_json(&self) -> Result<JsonValue, serde_json::Error> {
+        serde_json::to_value(self)
     }
 }
 
@@ -128,9 +127,17 @@ impl Default for ObjectJsonSchema {
     }
 }
 
-impl From<JsonValue> for ObjectJsonSchema {
-    fn from(value: JsonValue) -> Self {
-        serde_json::from_value(value).unwrap_or_default()
+impl TryFrom<JsonValue> for ObjectJsonSchema {
+    type Error = serde_json::Error;
+
+    fn try_from(value: JsonValue) -> Result<Self, Self::Error> {
+        serde_json::from_value(value)
+    }
+}
+
+impl From<ObjectJsonSchema> for JsonValue {
+    fn from(schema: ObjectJsonSchema) -> Self {
+        serde_json::to_value(schema).unwrap_or(JsonValue::Null)
     }
 }
 
@@ -147,7 +154,7 @@ pub struct ToolDefinition {
     pub description: String,
 
     /// JSON Schema for the tool's parameters.
-    pub parameters_json_schema: ObjectJsonSchema,
+    pub parameters_json_schema: JsonValue,
 
     /// Whether to use strict mode for schema validation (OpenAI feature).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,7 +172,9 @@ impl ToolDefinition {
         Self {
             name: name.into(),
             description: description.into(),
-            parameters_json_schema: ObjectJsonSchema::new(),
+            parameters_json_schema: crate::schema::SchemaBuilder::new()
+                .build()
+                .expect("SchemaBuilder JSON serialization failed"),
             strict: None,
             outer_typed_dict_key: None,
         }
@@ -173,8 +182,8 @@ impl ToolDefinition {
 
     /// Set the parameters schema.
     #[must_use]
-    pub fn with_parameters(mut self, schema: ObjectJsonSchema) -> Self {
-        self.parameters_json_schema = schema;
+    pub fn with_parameters(mut self, schema: impl Into<JsonValue>) -> Self {
+        self.parameters_json_schema = schema.into();
         self
     }
 
@@ -206,7 +215,7 @@ impl ToolDefinition {
 
     /// Get the parameters schema.
     #[must_use]
-    pub fn parameters(&self) -> &ObjectJsonSchema {
+    pub fn parameters(&self) -> &JsonValue {
         &self.parameters_json_schema
     }
 
@@ -224,7 +233,7 @@ impl ToolDefinition {
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters_json_schema.to_json()
+                "parameters": self.parameters_json_schema.clone()
             }
         });
 
@@ -241,162 +250,11 @@ impl ToolDefinition {
         serde_json::json!({
             "name": self.name,
             "description": self.description,
-            "input_schema": self.parameters_json_schema.to_json()
+            "input_schema": self.parameters_json_schema.clone()
         })
     }
 }
 
-/// Builder for creating property schemas.
-#[derive(Debug, Clone)]
-pub struct PropertySchema {
-    schema: JsonValue,
-}
-
-impl PropertySchema {
-    /// Create a string property.
-    #[must_use]
-    pub fn string(description: &str) -> Self {
-        Self {
-            schema: serde_json::json!({
-                "type": "string",
-                "description": description
-            }),
-        }
-    }
-
-    /// Create an integer property.
-    #[must_use]
-    pub fn integer(description: &str) -> Self {
-        Self {
-            schema: serde_json::json!({
-                "type": "integer",
-                "description": description
-            }),
-        }
-    }
-
-    /// Create a number (float) property.
-    #[must_use]
-    pub fn number(description: &str) -> Self {
-        Self {
-            schema: serde_json::json!({
-                "type": "number",
-                "description": description
-            }),
-        }
-    }
-
-    /// Create a boolean property.
-    #[must_use]
-    pub fn boolean(description: &str) -> Self {
-        Self {
-            schema: serde_json::json!({
-                "type": "boolean",
-                "description": description
-            }),
-        }
-    }
-
-    /// Create an array property.
-    #[must_use]
-    pub fn array(description: &str, items: JsonValue) -> Self {
-        Self {
-            schema: serde_json::json!({
-                "type": "array",
-                "description": description,
-                "items": items
-            }),
-        }
-    }
-
-    /// Create an object property.
-    #[must_use]
-    pub fn object(description: &str, schema: ObjectJsonSchema) -> Self {
-        let mut obj = schema.to_json();
-        if let Some(obj_map) = obj.as_object_mut() {
-            obj_map.insert("description".to_string(), JsonValue::String(description.to_string()));
-        }
-        Self { schema: obj }
-    }
-
-    /// Create an enum property.
-    #[must_use]
-    pub fn enum_values(description: &str, values: &[&str]) -> Self {
-        Self {
-            schema: serde_json::json!({
-                "type": "string",
-                "description": description,
-                "enum": values
-            }),
-        }
-    }
-
-    /// Add a default value.
-    #[must_use]
-    pub fn with_default(mut self, default: JsonValue) -> Self {
-        if let Some(obj) = self.schema.as_object_mut() {
-            obj.insert("default".to_string(), default);
-        }
-        self
-    }
-
-    /// Add minimum value (for numbers/integers).
-    #[must_use]
-    pub fn with_minimum(mut self, min: f64) -> Self {
-        if let Some(obj) = self.schema.as_object_mut() {
-            obj.insert("minimum".to_string(), JsonValue::from(min));
-        }
-        self
-    }
-
-    /// Add maximum value (for numbers/integers).
-    #[must_use]
-    pub fn with_maximum(mut self, max: f64) -> Self {
-        if let Some(obj) = self.schema.as_object_mut() {
-            obj.insert("maximum".to_string(), JsonValue::from(max));
-        }
-        self
-    }
-
-    /// Add min length (for strings).
-    #[must_use]
-    pub fn with_min_length(mut self, len: usize) -> Self {
-        if let Some(obj) = self.schema.as_object_mut() {
-            obj.insert("minLength".to_string(), JsonValue::from(len));
-        }
-        self
-    }
-
-    /// Add max length (for strings).
-    #[must_use]
-    pub fn with_max_length(mut self, len: usize) -> Self {
-        if let Some(obj) = self.schema.as_object_mut() {
-            obj.insert("maxLength".to_string(), JsonValue::from(len));
-        }
-        self
-    }
-
-    /// Add pattern (for strings).
-    #[must_use]
-    pub fn with_pattern(mut self, pattern: &str) -> Self {
-        if let Some(obj) = self.schema.as_object_mut() {
-            obj.insert("pattern".to_string(), JsonValue::String(pattern.to_string()));
-        }
-        self
-    }
-
-    /// Build the JSON value.
-    #[must_use]
-    pub fn build(self) -> JsonValue {
-        self.schema
-    }
-}
-
-impl From<PropertySchema> for JsonValue {
-    fn from(ps: PropertySchema) -> Self {
-        ps.build()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -434,37 +292,48 @@ mod tests {
         let def = ToolDefinition::new("get_weather", "Get the current weather");
         assert_eq!(def.name(), "get_weather");
         assert_eq!(def.description(), "Get the current weather");
-        assert!(def.parameters().is_empty());
+        let properties = def
+            .parameters()
+            .get("properties")
+            .and_then(|value| value.as_object())
+            .unwrap();
+        assert!(properties.is_empty());
     }
 
     #[test]
     fn test_tool_definition_with_parameters() {
-        let params = ObjectJsonSchema::new()
-            .with_property(
-                "location",
-                PropertySchema::string("City name").build(),
-                true,
-            )
-            .with_property(
+        let params = crate::schema::SchemaBuilder::new()
+            .string("location", "City name", true)
+            .enum_values(
                 "unit",
-                PropertySchema::enum_values("Temperature unit", &["celsius", "fahrenheit"]).build(),
+                "Temperature unit",
+                &["celsius", "fahrenheit"],
                 false,
-            );
+            )
+            .build()
+            .expect("SchemaBuilder JSON serialization failed");
 
         let def = ToolDefinition::new("get_weather", "Get weather")
             .with_parameters(params)
             .with_strict(true);
 
         assert!(def.is_strict());
-        assert_eq!(def.parameters().property_count(), 2);
+        let properties = def
+            .parameters()
+            .get("properties")
+            .and_then(|value| value.as_object())
+            .unwrap();
+        assert_eq!(properties.len(), 2);
     }
 
     #[test]
     fn test_to_openai_function() {
         let def = ToolDefinition::new("test", "Test tool")
             .with_parameters(
-                ObjectJsonSchema::new()
-                    .with_property("x", serde_json::json!({"type": "string"}), true),
+                crate::schema::SchemaBuilder::new()
+                    .string("x", "A value", true)
+                    .build()
+                    .expect("SchemaBuilder JSON serialization failed"),
             )
             .with_strict(true);
 
@@ -480,26 +349,6 @@ mod tests {
         let tool = def.to_anthropic_tool();
         assert_eq!(tool["name"], "test");
         assert!(tool.get("input_schema").is_some());
-    }
-
-    #[test]
-    fn test_property_schema_builders() {
-        let str_prop = PropertySchema::string("A string")
-            .with_min_length(1)
-            .with_max_length(100)
-            .build();
-        assert_eq!(str_prop["type"], "string");
-        assert_eq!(str_prop["minLength"], 1);
-
-        let num_prop = PropertySchema::number("A number")
-            .with_minimum(0.0)
-            .with_maximum(100.0)
-            .build();
-        assert_eq!(num_prop["type"], "number");
-        assert_eq!(num_prop["minimum"], 0.0);
-
-        let enum_prop = PropertySchema::enum_values("Choice", &["a", "b", "c"]).build();
-        assert_eq!(enum_prop["enum"].as_array().unwrap().len(), 3);
     }
 
     #[test]

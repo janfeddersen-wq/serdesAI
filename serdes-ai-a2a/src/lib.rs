@@ -44,7 +44,7 @@ pub mod server;
 pub use broker::{Broker, BrokerError, InMemoryBroker};
 pub use schema::*;
 pub use storage::{InMemoryStorage, Storage, StorageError};
-pub use task::{Task, TaskResult, TaskStatus};
+pub use task::{Task, TaskError, TaskResult, TaskStatus};
 pub use worker::{AgentWorker, WorkerHandle};
 
 // Re-export for convenience

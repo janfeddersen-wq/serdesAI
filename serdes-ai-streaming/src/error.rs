@@ -57,6 +57,10 @@ pub enum StreamError {
     #[error("Invalid state: {0}")]
     InvalidState(String),
 
+    /// Buffer overflow.
+    #[error("SSE buffer exceeded maximum size")]
+    BufferOverflow,
+
     /// Other error.
     #[error("{0}")]
     Other(String),

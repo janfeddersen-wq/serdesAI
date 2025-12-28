@@ -172,6 +172,11 @@ impl ModelError {
         Self::NotSupported(message.into())
     }
 
+    /// Create an unsupported content error.
+    pub fn unsupported_content(content: impl Into<String>) -> Self {
+        Self::NotSupported(format!("Unsupported content type: {}", content.into()))
+    }
+
     /// Create a configuration error.
     pub fn configuration(message: impl Into<String>) -> Self {
         Self::Configuration(message.into())

@@ -4,7 +4,7 @@
 
 use crate::error::{McpError, McpResult};
 use crate::types::{
-    CallToolParams, CallToolResult, Implementation, InitializeResult, JsonRpcRequest,
+    CallToolParams, CallToolResult, Implementation, InitializeResult, JsonRpcMessage,
     JsonRpcResponse, ListToolsResult, McpTool, ServerCapabilities, ToolsCapability,
 };
 use async_trait::async_trait;
@@ -187,7 +187,7 @@ impl McpServer {
     }
 
     async fn handle_message(&self, message: &str) -> Option<JsonRpcResponse> {
-        let request: JsonRpcRequest = match serde_json::from_str(message) {
+        let message: JsonRpcMessage = match serde_json::from_str(message) {
             Ok(r) => r,
             Err(e) => {
                 return Some(JsonRpcResponse::error(
@@ -198,10 +198,15 @@ impl McpServer {
             }
         };
 
-        // Handle notifications (no response needed)
-        if request.method.starts_with("notifications/") {
-            return None;
-        }
+        let request = match message {
+            JsonRpcMessage::Notification(notification) => {
+                if notification.method.starts_with("notifications/") {
+                    return None;
+                }
+                return None;
+            }
+            JsonRpcMessage::Request(request) => request,
+        };
 
         match request.method.as_str() {
             "initialize" => {
@@ -258,14 +263,11 @@ impl McpServer {
                     }
                 };
 
-                match handler.call(params.arguments).await {
-                    Ok(result) => Some(JsonRpcResponse::success(request.id, result)),
-                    Err(e) => Some(JsonRpcResponse::error(
-                        request.id,
-                        -32603,
-                        e.to_string(),
-                    )),
-                }
+                let result = match handler.call(params.arguments).await {
+                    Ok(output) => output,
+                    Err(e) => CallToolResult::error(e.to_string()),
+                };
+                Some(JsonRpcResponse::success(request.id, result))
             }
             _ => Some(JsonRpcResponse::error(
                 request.id,
@@ -367,7 +369,7 @@ mod tests {
     async fn test_handle_notification() {
         let server = McpServer::new("test", "1.0.0");
 
-        let message = r#"{"jsonrpc":"2.0","id":1,"method":"notifications/initialized"}"#;
+        let message = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
         let response = server.handle_message(message).await;
 
         // Notifications don't get responses

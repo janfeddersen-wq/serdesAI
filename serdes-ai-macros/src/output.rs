@@ -9,7 +9,7 @@ use syn::{parse_macro_input, DeriveInput, Type};
 pub fn derive_output_schema_impl(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
-    let name_str = name.to_string();
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     // Extract schema attributes
     let mut description = String::new();
@@ -17,7 +17,7 @@ pub fn derive_output_schema_impl(input: TokenStream) -> TokenStream {
 
     for attr in &input.attrs {
         if attr.path().is_ident("output") {
-            let _ = attr.parse_nested_meta(|meta| {
+            if let Err(err) = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("description") {
                     let value = meta.value()?;
                     let lit: syn::LitStr = value.parse()?;
@@ -26,9 +26,13 @@ pub fn derive_output_schema_impl(input: TokenStream) -> TokenStream {
                     let value = meta.value()?;
                     let lit: syn::LitBool = value.parse()?;
                     strict = lit.value;
+                } else {
+                    return Err(meta.error("unknown `output` attribute"));
                 }
                 Ok(())
-            });
+            }) {
+                return err.to_compile_error().into();
+            }
         }
     }
 
@@ -36,7 +40,7 @@ pub fn derive_output_schema_impl(input: TokenStream) -> TokenStream {
     let schema_impl = generate_json_schema(&input);
 
     let expanded = quote! {
-        impl ::serdes_ai_output::OutputSchema for #name {
+        impl #impl_generics ::serdes_ai_output::OutputSchema for #name #ty_generics #where_clause {
             fn json_schema() -> ::serde_json::Value {
                 #schema_impl
             }

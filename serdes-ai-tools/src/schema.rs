@@ -1,7 +1,7 @@
 //! JSON schema generation utilities.
 //!
-//! This module provides utilities for generating JSON schemas from Rust types
-//! and a builder API for manual schema construction.
+//! This module provides the `SchemaBuilder` API for manual JSON schema
+//! construction and keeps the underlying schema representation internal.
 
 use indexmap::IndexMap;
 use serde_json::Value as JsonValue;
@@ -17,12 +17,15 @@ use crate::definition::ObjectJsonSchema;
 /// ```rust
 /// use serdes_ai_tools::SchemaBuilder;
 ///
+/// # fn main() -> Result<(), serde_json::Error> {
 /// let schema = SchemaBuilder::new()
 ///     .string("name", "The user's name", true)
 ///     .integer("age", "The user's age", false)
 ///     .enum_values("status", "User status", &["active", "inactive"], true)
 ///     .description("User information")
-///     .build();
+///     .build()?;
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct SchemaBuilder {
@@ -222,10 +225,10 @@ impl SchemaBuilder {
         mut self,
         name: &str,
         desc: &str,
-        schema: ObjectJsonSchema,
+        schema: impl Into<JsonValue>,
         required: bool,
     ) -> Self {
-        let mut obj = serde_json::to_value(&schema).unwrap_or_default();
+        let mut obj = schema.into();
         if let Some(obj_map) = obj.as_object_mut() {
             obj_map.insert(
                 "description".to_string(),
@@ -297,9 +300,15 @@ impl SchemaBuilder {
         self
     }
 
-    /// Build the `ObjectJsonSchema`.
+    /// Build the schema as JSON.
     #[must_use]
-    pub fn build(self) -> ObjectJsonSchema {
+    pub fn build(self) -> Result<JsonValue, serde_json::Error> {
+        self.build_object_schema().to_json()
+    }
+
+    /// Build the schema as an ObjectJsonSchema (internal use).
+    #[must_use]
+    pub(crate) fn build_object_schema(self) -> ObjectJsonSchema {
         ObjectJsonSchema {
             schema_type: "object".to_string(),
             properties: self.properties,
@@ -311,14 +320,170 @@ impl SchemaBuilder {
     }
 }
 
+/// Builder for individual property schemas.
+///
+/// Provides a fluent API for building JSON schemas for individual properties.
+///
+/// # Example
+///
+/// ```rust
+/// use serdes_ai_tools::{ObjectJsonSchema, PropertySchema};
+///
+/// let schema = ObjectJsonSchema::new()
+///     .with_property("name", PropertySchema::string("The user's name").build(), true)
+///     .with_property("age", PropertySchema::integer("The user's age").build(), false);
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct PropertySchema {
+    schema_type: String,
+    description: Option<String>,
+    enum_values: Option<Vec<String>>,
+    minimum: Option<i64>,
+    maximum: Option<i64>,
+    min_length: Option<usize>,
+    max_length: Option<usize>,
+    pattern: Option<String>,
+    items: Option<Box<JsonValue>>,
+}
+
+impl PropertySchema {
+    /// Create a string property schema.
+    #[must_use]
+    pub fn string(description: impl Into<String>) -> Self {
+        Self {
+            schema_type: "string".to_string(),
+            description: Some(description.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create an integer property schema.
+    #[must_use]
+    pub fn integer(description: impl Into<String>) -> Self {
+        Self {
+            schema_type: "integer".to_string(),
+            description: Some(description.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create a number property schema.
+    #[must_use]
+    pub fn number(description: impl Into<String>) -> Self {
+        Self {
+            schema_type: "number".to_string(),
+            description: Some(description.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create a boolean property schema.
+    #[must_use]
+    pub fn boolean(description: impl Into<String>) -> Self {
+        Self {
+            schema_type: "boolean".to_string(),
+            description: Some(description.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create an array property schema.
+    #[must_use]
+    pub fn array(description: impl Into<String>, items: JsonValue) -> Self {
+        Self {
+            schema_type: "array".to_string(),
+            description: Some(description.into()),
+            items: Some(Box::new(items)),
+            ..Default::default()
+        }
+    }
+
+    /// Set enum values for a string property.
+    #[must_use]
+    pub fn with_enum(mut self, values: &[&str]) -> Self {
+        self.enum_values = Some(values.iter().map(|s| s.to_string()).collect());
+        self
+    }
+
+    /// Set minimum value for numeric properties.
+    #[must_use]
+    pub fn with_minimum(mut self, min: i64) -> Self {
+        self.minimum = Some(min);
+        self
+    }
+
+    /// Set maximum value for numeric properties.
+    #[must_use]
+    pub fn with_maximum(mut self, max: i64) -> Self {
+        self.maximum = Some(max);
+        self
+    }
+
+    /// Set minimum length for string properties.
+    #[must_use]
+    pub fn with_min_length(mut self, min: usize) -> Self {
+        self.min_length = Some(min);
+        self
+    }
+
+    /// Set maximum length for string properties.
+    #[must_use]
+    pub fn with_max_length(mut self, max: usize) -> Self {
+        self.max_length = Some(max);
+        self
+    }
+
+    /// Set pattern for string properties.
+    #[must_use]
+    pub fn with_pattern(mut self, pattern: impl Into<String>) -> Self {
+        self.pattern = Some(pattern.into());
+        self
+    }
+
+    /// Build the property schema as a JSON value.
+    #[must_use]
+    pub fn build(self) -> JsonValue {
+        let mut obj = serde_json::json!({
+            "type": self.schema_type
+        });
+
+        if let Some(desc) = self.description {
+            obj["description"] = JsonValue::String(desc);
+        }
+        if let Some(values) = self.enum_values {
+            obj["enum"] = JsonValue::Array(values.into_iter().map(JsonValue::String).collect());
+        }
+        if let Some(min) = self.minimum {
+            obj["minimum"] = JsonValue::from(min);
+        }
+        if let Some(max) = self.maximum {
+            obj["maximum"] = JsonValue::from(max);
+        }
+        if let Some(min) = self.min_length {
+            obj["minLength"] = JsonValue::from(min);
+        }
+        if let Some(max) = self.max_length {
+            obj["maxLength"] = JsonValue::from(max);
+        }
+        if let Some(pat) = self.pattern {
+            obj["pattern"] = JsonValue::String(pat);
+        }
+        if let Some(items) = self.items {
+            obj["items"] = *items;
+        }
+
+        obj
+    }
+}
+
 /// Trait for types that can generate a JSON schema.
-pub trait JsonSchemaGenerator {
+pub(crate) trait JsonSchemaGenerator {
     /// Generate a JSON schema for this type.
-    fn json_schema() -> ObjectJsonSchema;
+    fn json_schema() -> JsonValue;
 }
 
 /// Common JSON schema types.
-pub mod types {
+pub(crate) mod types {
     use serde_json::Value as JsonValue;
 
     /// Schema for a string.
@@ -456,7 +621,7 @@ mod tests {
             .string("name", "The name", true)
             .integer("age", "The age", false)
             .description("A person")
-            .build();
+            .build_object_schema();
 
         assert_eq!(schema.schema_type, "object");
         assert_eq!(schema.property_count(), 2);
@@ -474,7 +639,7 @@ mod tests {
             .boolean("b", "boolean", true)
             .string_array("arr", "array", true)
             .enum_values("e", "enum", &["a", "b"], true)
-            .build();
+            .build_object_schema();
 
         assert_eq!(schema.property_count(), 6);
         assert_eq!(schema.required.len(), 6);
@@ -486,7 +651,7 @@ mod tests {
             .string_constrained("s", "string", true, Some(1), Some(100), Some("^[a-z]+$"))
             .integer_constrained("i", "integer", true, Some(0), Some(100))
             .number_constrained("n", "number", true, Some(0.0), Some(1.0))
-            .build();
+            .build_object_schema();
 
         let s_prop = schema.get_property("s").unwrap();
         assert_eq!(s_prop["minLength"], 1);
@@ -503,12 +668,13 @@ mod tests {
         let inner = SchemaBuilder::new()
             .string("street", "Street name", true)
             .string("city", "City name", true)
-            .build();
+            .build()
+            .expect("SchemaBuilder JSON serialization failed");
 
         let schema = SchemaBuilder::new()
             .string("name", "Name", true)
             .object("address", "Address", inner, true)
-            .build();
+            .build_object_schema();
 
         assert!(schema.get_property("address").is_some());
     }
@@ -517,7 +683,7 @@ mod tests {
     fn test_schema_builder_nullable() {
         let schema = SchemaBuilder::new()
             .nullable("maybe", serde_json::json!({"type": "string"}), false)
-            .build();
+            .build_object_schema();
 
         let prop = schema.get_property("maybe").unwrap();
         assert!(prop.get("anyOf").is_some());

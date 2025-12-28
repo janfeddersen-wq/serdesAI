@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::{
-    definition::{ObjectJsonSchema, ToolDefinition},
+    definition::ToolDefinition,
     errors::ToolError,
     return_types::{ToolResult, ToolReturn},
     schema::SchemaBuilder,
@@ -310,7 +310,7 @@ impl ImageGenerationTool {
     }
 
     /// Get the tool schema.
-    fn schema() -> ObjectJsonSchema {
+    fn schema() -> JsonValue {
         SchemaBuilder::new()
             .string("prompt", "The text prompt describing the image to generate", true)
             .enum_values(
@@ -351,6 +351,7 @@ impl ImageGenerationTool {
                 Some(100),
             )
             .build()
+            .expect("SchemaBuilder JSON serialization failed")
     }
 
     /// Generate an image (stub - integrate with actual provider).
@@ -414,10 +415,20 @@ impl<Deps: Send + Sync> Tool<Deps> for ImageGenerationTool {
         let prompt = args
             .get("prompt")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_args("Missing 'prompt' field"))?;
+            .ok_or_else(|| {
+                ToolError::validation_error(
+                    "image_generation",
+                    Some("prompt".to_string()),
+                    "Missing 'prompt' field",
+                )
+            })?;
 
         if prompt.trim().is_empty() {
-            return Err(ToolError::invalid_args("Prompt cannot be empty"));
+            return Err(ToolError::validation_error(
+                "image_generation",
+                Some("prompt".to_string()),
+                "Prompt cannot be empty",
+            ));
         }
 
         // Apply any overrides from args
@@ -627,7 +638,12 @@ mod tests {
         let tool = ImageGenerationTool::new();
         let def = <ImageGenerationTool as Tool<()>>::definition(&tool);
         assert_eq!(def.name, "image_generation");
-        assert!(def.parameters().is_required("prompt"));
+        let required = def
+            .parameters()
+            .get("required")
+            .and_then(|value| value.as_array())
+            .unwrap();
+        assert!(required.iter().any(|value| value.as_str() == Some("prompt")));
     }
 
     #[tokio::test]
@@ -652,7 +668,7 @@ mod tests {
         let ctx = RunContext::minimal("test");
 
         let result = tool.call(&ctx, serde_json::json!({})).await;
-        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
+        assert!(matches!(result, Err(ToolError::ValidationFailed { .. })));
     }
 
     #[tokio::test]
@@ -661,7 +677,7 @@ mod tests {
         let ctx = RunContext::minimal("test");
 
         let result = tool.call(&ctx, serde_json::json!({"prompt": "  "})).await;
-        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
+        assert!(matches!(result, Err(ToolError::ValidationFailed { .. })));
     }
 
     #[tokio::test]

@@ -41,6 +41,10 @@ tokio = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
+sha2 = "0.10"
+base64 = { workspace = true }
+getrandom = "0.2"
+urlencoding = "2.1"
 
 [dev-dependencies]
 tokio-test = { workspace = true }

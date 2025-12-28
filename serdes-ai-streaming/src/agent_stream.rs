@@ -363,8 +363,37 @@ pub trait AgentStreamExt<Output>: Stream<Item = AgentStreamEvent<Output>> + Size
 
 impl<S, Output> AgentStreamExt<Output> for S where S: Stream<Item = AgentStreamEvent<Output>> {}
 
+/// A text delta with position information.
+/// 
+/// This struct is emitted by `TextDeltaStream` when using `text_accumulated()`.
+/// It provides incremental text content along with position metadata,
+/// avoiding O(n²) string cloning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextDelta {
+    /// The actual delta content (just the new text, not the full accumulated string).
+    pub content: String,
+    /// Position where this delta starts in the accumulated text.
+    pub position: usize,
+    /// Total length of accumulated text after this delta.
+    pub total_length: usize,
+}
+
+impl TextDelta {
+    /// Create a new text delta.
+    pub fn new(content: String, position: usize, total_length: usize) -> Self {
+        Self {
+            content,
+            position,
+            total_length,
+        }
+    }
+}
+
 pin_project! {
     /// Stream that filters to text deltas.
+    /// 
+    /// When created via `text_deltas()`, emits just the delta content as `String`.
+    /// When created via `text_accumulated()`, emits `TextDelta` with position info.
     pub struct TextDeltaStream<S> {
         #[pin]
         inner: S,
@@ -373,11 +402,28 @@ pin_project! {
     }
 }
 
+impl<S> TextDeltaStream<S> {
+    /// Get the current accumulated text.
+    /// 
+    /// This is useful when you need the full text at the end of streaming.
+    pub fn accumulated_text(&self) -> &str {
+        &self.accumulated
+    }
+
+    /// Consume and return the accumulated text.
+    pub fn into_accumulated(self) -> String {
+        self.accumulated
+    }
+}
+
 impl<S, Output> Stream for TextDeltaStream<S>
 where
     S: Stream<Item = AgentStreamEvent<Output>>,
 {
-    type Item = String;
+    // When emit_accumulated is false, we just return the delta content.
+    // When true, we still only return the delta content (not the full accumulated),
+    // but we track position internally. The caller can use accumulated_text() if needed.
+    type Item = TextDelta;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
@@ -386,12 +432,16 @@ where
             match this.inner.as_mut().poll_next(cx) {
                 Poll::Ready(Some(event)) => match event {
                     AgentStreamEvent::TextDelta { content, .. } => {
-                        if *this.emit_accumulated {
-                            this.accumulated.push_str(&content);
-                            return Poll::Ready(Some(this.accumulated.clone()));
-                        } else {
-                            return Poll::Ready(Some(content));
-                        }
+                        let position = this.accumulated.len();
+                        this.accumulated.push_str(&content);
+                        let total_length = this.accumulated.len();
+
+                        // Always emit just the delta, never clone the full accumulated string
+                        return Poll::Ready(Some(TextDelta::new(
+                            content,
+                            position,
+                            total_length,
+                        )));
                     }
                     AgentStreamEvent::RunComplete { .. } | AgentStreamEvent::Error { .. } => {
                         return Poll::Ready(None);
@@ -532,8 +582,16 @@ mod tests {
         let inner = stream::iter(deltas);
         let agent_stream: AgentStream<_, String> = AgentStream::new(inner, "test-run");
 
-        let texts: Vec<String> = agent_stream.text_deltas().collect().await;
-        assert_eq!(texts, vec!["Hello", " world"]);
+        let text_deltas: Vec<TextDelta> = agent_stream.text_deltas().collect().await;
+        
+        // Should get individual deltas with position info
+        assert_eq!(text_deltas.len(), 2);
+        assert_eq!(text_deltas[0].content, "Hello");
+        assert_eq!(text_deltas[0].position, 0);
+        assert_eq!(text_deltas[0].total_length, 5);
+        assert_eq!(text_deltas[1].content, " world");
+        assert_eq!(text_deltas[1].position, 5);
+        assert_eq!(text_deltas[1].total_length, 11);
     }
 
     #[tokio::test]
@@ -554,9 +612,19 @@ mod tests {
 
         let inner = stream::iter(deltas);
         let agent_stream: AgentStream<_, String> = AgentStream::new(inner, "test-run");
+        let mut stream = agent_stream.text_accumulated();
 
-        let texts: Vec<String> = agent_stream.text_accumulated().collect().await;
-        assert_eq!(texts, vec!["Hello", "Hello world"]);
+        // Collect all deltas
+        let text_deltas: Vec<TextDelta> = (&mut stream).collect().await;
+        
+        // Each delta only contains the new content, not the full accumulated string
+        // This is the O(n²) fix - we no longer clone the full string each time!
+        assert_eq!(text_deltas.len(), 2);
+        assert_eq!(text_deltas[0].content, "Hello");
+        assert_eq!(text_deltas[1].content, " world");
+        
+        // The accumulated text can be retrieved via accumulated_text() method
+        assert_eq!(stream.accumulated_text(), "Hello world");
     }
 
     #[tokio::test]

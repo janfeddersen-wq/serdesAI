@@ -113,50 +113,62 @@ impl ModelResponse {
 
     /// Get all text parts.
     #[must_use]
-    pub fn text_parts(&self) -> Vec<&TextPart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelResponsePart::Text(t) => Some(t),
-                _ => None,
-            })
-            .collect()
+    pub fn text_parts(&self) -> impl Iterator<Item = &TextPart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelResponsePart::Text(t) => Some(t),
+            _ => None,
+        })
     }
 
     /// Get all tool call parts.
     #[must_use]
-    pub fn tool_call_parts(&self) -> Vec<&ToolCallPart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelResponsePart::ToolCall(t) => Some(t),
-                _ => None,
-            })
-            .collect()
+    pub fn tool_call_parts(&self) -> impl Iterator<Item = &ToolCallPart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelResponsePart::ToolCall(t) => Some(t),
+            _ => None,
+        })
     }
 
     /// Get all thinking parts.
     #[must_use]
-    pub fn thinking_parts(&self) -> Vec<&ThinkingPart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelResponsePart::Thinking(t) => Some(t),
-                _ => None,
-            })
-            .collect()
+    pub fn thinking_parts(&self) -> impl Iterator<Item = &ThinkingPart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelResponsePart::Thinking(t) => Some(t),
+            _ => None,
+        })
     }
 
     /// Get all file parts.
     #[must_use]
-    pub fn file_parts(&self) -> Vec<&FilePart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelResponsePart::File(f) => Some(f),
-                _ => None,
-            })
-            .collect()
+    pub fn file_parts(&self) -> impl Iterator<Item = &FilePart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelResponsePart::File(f) => Some(f),
+            _ => None,
+        })
+    }
+
+    /// Get all text parts as a vector.
+    #[deprecated(note = "Use text_parts() iterator instead")]
+    pub fn text_parts_vec(&self) -> Vec<&TextPart> {
+        self.text_parts().collect()
+    }
+
+    /// Get all tool call parts as a vector.
+    #[deprecated(note = "Use tool_call_parts() iterator instead")]
+    pub fn tool_call_parts_vec(&self) -> Vec<&ToolCallPart> {
+        self.tool_call_parts().collect()
+    }
+
+    /// Get all thinking parts as a vector.
+    #[deprecated(note = "Use thinking_parts() iterator instead")]
+    pub fn thinking_parts_vec(&self) -> Vec<&ThinkingPart> {
+        self.thinking_parts().collect()
+    }
+
+    /// Get all file parts as a vector.
+    #[deprecated(note = "Use file_parts() iterator instead")]
+    pub fn file_parts_vec(&self) -> Vec<&FilePart> {
+        self.file_parts().collect()
     }
 
     /// Check if this response contains file parts.
@@ -169,14 +181,17 @@ impl ModelResponse {
 
     /// Get all builtin tool call parts.
     #[must_use]
-    pub fn builtin_tool_call_parts(&self) -> Vec<&BuiltinToolCallPart> {
-        self.parts
-            .iter()
-            .filter_map(|p| match p {
-                ModelResponsePart::BuiltinToolCall(b) => Some(b),
-                _ => None,
-            })
-            .collect()
+    pub fn builtin_tool_call_parts(&self) -> impl Iterator<Item = &BuiltinToolCallPart> {
+        self.parts.iter().filter_map(|p| match p {
+            ModelResponsePart::BuiltinToolCall(b) => Some(b),
+            _ => None,
+        })
+    }
+
+    /// Get all builtin tool call parts as a vector.
+    #[deprecated(note = "Use builtin_tool_call_parts() iterator instead")]
+    pub fn builtin_tool_call_parts_vec(&self) -> Vec<&BuiltinToolCallPart> {
+        self.builtin_tool_call_parts().collect()
     }
 
     /// Check if this response contains builtin tool calls.
@@ -191,7 +206,6 @@ impl ModelResponse {
     #[must_use]
     pub fn text_content(&self) -> String {
         self.text_parts()
-            .iter()
             .map(|p| p.content.as_str())
             .collect::<Vec<_>>()
             .join("")
@@ -435,7 +449,7 @@ mod tests {
             ModelResponsePart::tool_call("get_weather", serde_json::json!({"city": "NYC"})),
         ]);
         assert!(response.has_tool_calls());
-        assert_eq!(response.tool_call_parts().len(), 1);
+        assert_eq!(response.tool_call_parts().count(), 1);
     }
 
     #[test]

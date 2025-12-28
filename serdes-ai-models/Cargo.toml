@@ -12,7 +12,7 @@ categories = ["api-bindings"]
 
 [features]
 default = ["openai"]
-full = ["openai", "anthropic", "google", "mistral", "groq", "ollama", "bedrock", "azure", "openrouter", "huggingface", "cohere"]
+full = ["openai", "anthropic", "google", "mistral", "groq", "ollama", "bedrock", "azure", "openrouter", "huggingface", "cohere", "chatgpt-oauth", "claude-code-oauth"]
 
 # Provider implementations
 openai = []
@@ -27,6 +27,8 @@ azure = []
 openrouter = ["openai"]  # OpenRouter uses OpenAI's stream parser
 huggingface = []
 cohere = []
+chatgpt-oauth = []
+claude-code-oauth = []
 
 [dependencies]
 serdes-ai-core = { workspace = true }

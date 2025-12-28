@@ -188,12 +188,11 @@ impl EmbeddingModel for OpenAIEmbeddingModel {
 
         let embeddings: Vec<Embedding> = data
             .into_iter()
-            .enumerate()
-            .map(|(i, d)| {
+            .map(|d| {
                 let text = texts.get(d.index).cloned();
                 let mut emb = Embedding::new(d.embedding)
                     .with_model(&resp.model)
-                    .with_index(i);
+                    .with_index(d.index);
                 if let Some(t) = text {
                     emb = emb.with_text(t);
                 }

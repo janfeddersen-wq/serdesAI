@@ -11,8 +11,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
-    definition::{ObjectJsonSchema, ToolDefinition},
+    definition::ToolDefinition,
     return_types::{ToolResult, ToolReturn},
+    schema::SchemaBuilder,
     RunContext,
 };
 
@@ -108,14 +109,16 @@ pub type BoxedTool<Deps> = Arc<dyn Tool<Deps>>;
 /// # Example
 ///
 /// ```ignore
-/// use serdes_ai_tools::{FunctionTool, ObjectJsonSchema, PropertySchema, ToolReturn};
+/// use serdes_ai_tools::{FunctionTool, SchemaBuilder, ToolReturn};
 ///
 /// let tool = FunctionTool::new(
 ///     "add",
 ///     "Add two numbers",
-///     ObjectJsonSchema::new()
-///         .with_property("a", PropertySchema::number("First number").build(), true)
-///         .with_property("b", PropertySchema::number("Second number").build(), true),
+///     SchemaBuilder::new()
+///         .number("a", "First number", true)
+///         .number("b", "Second number", true)
+///         .build()
+///         .unwrap(),
 ///     |_ctx, args| async move {
 ///         let a = args["a"].as_f64().unwrap_or(0.0);
 ///         let b = args["b"].as_f64().unwrap_or(0.0);
@@ -126,7 +129,7 @@ pub type BoxedTool<Deps> = Arc<dyn Tool<Deps>>;
 pub struct FunctionTool<F, Deps = ()> {
     name: String,
     description: String,
-    parameters: ObjectJsonSchema,
+    parameters: JsonValue,
     function: F,
     max_retries: Option<u32>,
     strict: Option<bool>,
@@ -138,13 +141,13 @@ impl<F, Deps> FunctionTool<F, Deps> {
     pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,
-        parameters: ObjectJsonSchema,
+        parameters: impl Into<JsonValue>,
         function: F,
     ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
-            parameters,
+            parameters: parameters.into(),
             function,
             max_retries: None,
             strict: None,
@@ -210,7 +213,7 @@ impl<F, Deps> std::fmt::Debug for FunctionTool<F, Deps> {
 pub struct SyncFunctionTool<F, Deps = ()> {
     name: String,
     description: String,
-    parameters: ObjectJsonSchema,
+    parameters: JsonValue,
     function: F,
     max_retries: Option<u32>,
     _phantom: PhantomData<fn() -> Deps>,
@@ -224,13 +227,13 @@ where
     pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,
-        parameters: ObjectJsonSchema,
+        parameters: impl Into<JsonValue>,
         function: F,
     ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
-            parameters,
+            parameters: parameters.into(),
             function,
             max_retries: None,
             _phantom: PhantomData,
@@ -297,13 +300,19 @@ pub fn sync_tool<F, Deps>(
 where
     F: Fn(&RunContext<Deps>, JsonValue) -> ToolResult + Send + Sync,
 {
-    SyncFunctionTool::new(name, description, ObjectJsonSchema::new(), function)
+    SyncFunctionTool::new(
+        name,
+        description,
+        SchemaBuilder::new()
+            .build()
+            .expect("SchemaBuilder JSON serialization failed"),
+        function,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PropertySchema;
 
     #[derive(Debug, Clone, Default)]
     struct TestDeps;
@@ -313,11 +322,12 @@ mod tests {
     #[async_trait]
     impl Tool<TestDeps> for TestTool {
         fn definition(&self) -> ToolDefinition {
-            ToolDefinition::new("test", "Test tool")
-                .with_parameters(
-                    ObjectJsonSchema::new()
-                        .with_property("x", PropertySchema::integer("A number").build(), true),
-                )
+            ToolDefinition::new("test", "Test tool").with_parameters(
+                SchemaBuilder::new()
+                    .integer("x", "A number", true)
+                    .build()
+                    .expect("SchemaBuilder JSON serialization failed"),
+            )
         }
 
         async fn call(&self, _ctx: &RunContext<TestDeps>, args: JsonValue) -> ToolResult {
@@ -348,9 +358,11 @@ mod tests {
         let tool = SyncFunctionTool::new(
             "add",
             "Add numbers",
-            ObjectJsonSchema::new()
-                .with_property("a", PropertySchema::number("First").build(), true)
-                .with_property("b", PropertySchema::number("Second").build(), true),
+            SchemaBuilder::new()
+                .number("a", "First", true)
+                .number("b", "Second", true)
+                .build()
+                .expect("SchemaBuilder JSON serialization failed"),
             |_ctx: &RunContext<()>, args: JsonValue| {
                 let a = args["a"].as_f64().unwrap_or(0.0);
                 let b = args["b"].as_f64().unwrap_or(0.0);

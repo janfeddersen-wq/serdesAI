@@ -247,7 +247,7 @@ pub trait ToolProvider<Deps> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ObjectJsonSchema, PropertySchema, ToolResult};
+    use crate::{schema::SchemaBuilder, ToolResult};
     use async_trait::async_trait;
 
     struct EchoTool;
@@ -255,11 +255,12 @@ mod tests {
     #[async_trait]
     impl Tool<()> for EchoTool {
         fn definition(&self) -> ToolDefinition {
-            ToolDefinition::new("echo", "Echo the message")
-                .with_parameters(
-                    ObjectJsonSchema::new()
-                        .with_property("message", PropertySchema::string("Message").build(), true),
-                )
+            ToolDefinition::new("echo", "Echo the message").with_parameters(
+                SchemaBuilder::new()
+                    .string("message", "Message", true)
+                    .build()
+                    .expect("SchemaBuilder JSON serialization failed"),
+            )
         }
 
         async fn call(&self, _ctx: &RunContext<()>, args: serde_json::Value) -> ToolResult {

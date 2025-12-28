@@ -11,7 +11,7 @@ use crate::instructions::{
     SystemPromptFn,
 };
 use crate::output::{
-    JsonOutputSchema, OutputSchema, OutputValidator, SyncValidator, TextOutputSchema,
+    DefaultOutputSchema, JsonOutputSchema, OutputSchema, OutputValidator, SyncValidator,
     ToolOutputSchema,
 };
 use serde::de::DeserializeOwned;
@@ -193,12 +193,14 @@ where
         F: Fn(&RunContext<Deps>, Args) -> Result<ToolReturn, ToolError> + Send + Sync + 'static,
         Args: DeserializeOwned + Send + 'static,
     {
-        let definition = ToolDefinition::new(name.into(), description.into());
+        let tool_name = name.into();
+        let definition = ToolDefinition::new(tool_name.clone(), description.into());
 
         let executor = SyncFnExecutor {
             func: Arc::new(move |ctx, args: JsonValue| {
-                let parsed: Args = serde_json::from_value(args)
-                    .map_err(|e| ToolError::InvalidArguments(e.to_string()))?;
+                let parsed: Args = serde_json::from_value(args).map_err(|e| {
+                    ToolError::invalid_arguments(tool_name.clone(), e.to_string())
+                })?;
                 f(ctx, parsed)
             }),
             _phantom: PhantomData,
@@ -225,10 +227,12 @@ where
         Fut: Future<Output = Result<ToolReturn, ToolError>> + Send + Sync + 'static,
         Args: DeserializeOwned + Send + Sync + 'static,
     {
-        let definition = ToolDefinition::new(name.into(), description.into());
+        let tool_name = name.into();
+        let definition = ToolDefinition::new(tool_name.clone(), description.into());
 
         let executor = AsyncFnExecutor {
             func: Arc::new(f),
+            tool_name,
             _phantom: PhantomData,
         };
 
@@ -320,17 +324,48 @@ where
     {
         let output_schema = self
             .output_schema
-            .unwrap_or_else(|| Box::new(JsonOutputSchema::<Output>::new()) as Box<dyn OutputSchema<Output>>);
+            .unwrap_or_else(|| Box::new(DefaultOutputSchema::<Output>::new()));
+
+        // Pre-join static system prompts and instructions at build time.
+        // This avoids cloning these strings on every run.
+        let static_system_prompt = {
+            let mut parts = Vec::new();
+
+            // Static system prompts first
+            for prompt in &self.system_prompts {
+                if !prompt.is_empty() {
+                    parts.push(prompt.as_str());
+                }
+            }
+
+            // Then static instructions
+            for instruction in &self.instructions {
+                if !instruction.is_empty() {
+                    parts.push(instruction.as_str());
+                }
+            }
+
+            Arc::from(parts.join("\n\n"))
+        };
+
+        // Pre-compute tool definitions at build time.
+        // This avoids cloning tool definitions on every agent step.
+        let cached_tool_defs = Arc::new(
+            self.tools
+                .iter()
+                .map(|t| t.definition.clone())
+                .collect::<Vec<_>>()
+        );
 
         Agent {
             model: self.model,
             name: self.name,
             model_settings: self.model_settings,
-            instructions: self.instructions,
+            static_system_prompt,
             instruction_fns: self.instruction_fns,
-            system_prompts: self.system_prompts,
             system_prompt_fns: self.system_prompt_fns,
             tools: self.tools,
+            cached_tool_defs,
             output_schema,
             output_validators: self.output_validators,
             end_strategy: self.end_strategy,
@@ -461,6 +496,7 @@ where
     Args: DeserializeOwned + Send,
 {
     func: Arc<F>,
+    tool_name: String,
     _phantom: PhantomData<(Deps, Args, Fut)>,
 }
 
@@ -477,8 +513,9 @@ where
         args: JsonValue,
         ctx: &RunContext<Deps>,
     ) -> Result<ToolReturn, ToolError> {
-        let parsed: Args = serde_json::from_value(args)
-            .map_err(|e| ToolError::InvalidArguments(e.to_string()))?;
+        let parsed: Args = serde_json::from_value(args).map_err(|e| {
+            ToolError::invalid_arguments(self.tool_name.clone(), e.to_string())
+        })?;
         (self.func)(ctx, parsed).await
     }
 }
@@ -524,8 +561,9 @@ mod tests {
             .instructions("Be concise.")
             .build();
 
-        assert_eq!(agent.system_prompts.len(), 1);
-        assert_eq!(agent.instructions.len(), 1);
+        // Static prompts are now pre-joined at build time
+        assert!(agent.static_system_prompt.contains("You are helpful."));
+        assert!(agent.static_system_prompt.contains("Be concise."));
     }
 
     #[test]

@@ -640,7 +640,7 @@ mod tests {
         let response = model.request(&messages, &settings, &params).await.unwrap();
         assert!(response.has_tool_calls());
 
-        let tool_calls = response.tool_call_parts();
+        let tool_calls: Vec<_> = response.tool_call_parts().collect();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].tool_name, "get_weather");
     }
@@ -695,7 +695,7 @@ mod tests {
         // Test a truly dynamic function that inspects messages
         let model = FunctionModel::new(|messages, _| {
             let total_user_prompts: usize =
-                messages.iter().map(|m| m.user_prompts().len()).sum();
+                messages.iter().map(|m| m.user_prompts().count()).sum();
 
             if total_user_prompts > 2 {
                 ModelResponse::text("That's a lot of messages!")

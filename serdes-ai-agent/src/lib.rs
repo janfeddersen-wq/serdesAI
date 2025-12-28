@@ -98,8 +98,9 @@ pub use instructions::{
     SystemPromptFn,
 };
 pub use output::{
-    AsyncValidator, ChainedValidator, JsonOutputSchema, LengthValidator, NonEmptyValidator,
-    OutputMode, OutputSchema, OutputValidator, SyncValidator, TextOutputSchema, ToolOutputSchema,
+    AsyncValidator, ChainedValidator, DefaultOutputSchema, JsonOutputSchema, LengthValidator,
+    NonEmptyValidator, OutputMode, OutputSchema, OutputValidator, SyncValidator, TextOutputSchema,
+    ToolOutputSchema,
 };
 pub use run::{AgentRun, AgentRunResult, RunOptions, StepResult};
 pub use stream::{AgentStream, AgentStreamEvent};

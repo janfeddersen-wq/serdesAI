@@ -26,7 +26,7 @@ use serde_json::Value as JsonValue;
 use std::collections::HashSet;
 
 use crate::{
-    definition::{ObjectJsonSchema, ToolDefinition},
+    definition::ToolDefinition,
     errors::ToolError,
     return_types::{ToolResult, ToolReturn},
     schema::SchemaBuilder,
@@ -595,7 +595,7 @@ impl WebSearchTool {
     }
 
     /// Get the tool schema.
-    fn schema() -> ObjectJsonSchema {
+    fn schema() -> JsonValue {
         SchemaBuilder::new()
             .string("query", "The search query", true)
             .enum_values(
@@ -612,6 +612,7 @@ impl WebSearchTool {
                 Some(50),
             )
             .build()
+            .expect("SchemaBuilder JSON serialization failed")
     }
 
     /// Perform the search (stub - integrate with actual provider).
@@ -895,10 +896,20 @@ impl<Deps: Send + Sync> Tool<Deps> for WebSearchTool {
         let query = args
             .get("query")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::invalid_args("Missing 'query' field"))?;
+            .ok_or_else(|| {
+                ToolError::validation_error(
+                    "web_search",
+                    Some("query".to_string()),
+                    "Missing 'query' field",
+                )
+            })?;
 
         if query.trim().is_empty() {
-            return Err(ToolError::invalid_args("Query cannot be empty"));
+            return Err(ToolError::validation_error(
+                "web_search",
+                Some("query".to_string()),
+                "Query cannot be empty",
+            ));
         }
 
         let search_depth = args
@@ -1239,7 +1250,12 @@ mod tests {
         let tool = WebSearchTool::new();
         let def = <WebSearchTool as Tool<()>>::definition(&tool);
         assert_eq!(def.name, "web_search");
-        assert!(def.parameters().is_required("query"));
+        let required = def
+            .parameters()
+            .get("required")
+            .and_then(|value| value.as_array())
+            .unwrap();
+        assert!(required.iter().any(|value| value.as_str() == Some("query")));
     }
 
     #[tokio::test]
@@ -1263,7 +1279,7 @@ mod tests {
         let ctx = RunContext::minimal("test");
 
         let result = tool.call(&ctx, serde_json::json!({})).await;
-        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
+        assert!(matches!(result, Err(ToolError::ValidationFailed { .. })));
     }
 
     #[tokio::test]
@@ -1272,7 +1288,7 @@ mod tests {
         let ctx = RunContext::minimal("test");
 
         let result = tool.call(&ctx, serde_json::json!({"query": "  "})).await;
-        assert!(matches!(result, Err(ToolError::InvalidArguments(_))));
+        assert!(matches!(result, Err(ToolError::ValidationFailed { .. })));
     }
 
     #[test]

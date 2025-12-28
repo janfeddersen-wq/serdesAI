@@ -7,6 +7,26 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use thiserror::Error;
 
+/// Structured validation error for tool arguments.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ValidationError {
+    /// Field that failed validation, if applicable.
+    pub field: Option<String>,
+    /// Validation error message.
+    pub message: String,
+}
+
+impl ValidationError {
+    /// Create a new validation error.
+    #[must_use]
+    pub fn new(field: Option<String>, message: impl Into<String>) -> Self {
+        Self {
+            field,
+            message: message.into(),
+        }
+    }
+}
+
 /// Errors that can occur during tool execution.
 #[derive(Debug, Error)]
 pub enum ToolError {
@@ -19,9 +39,6 @@ pub enum ToolError {
         retryable: bool,
     },
 
-    /// Invalid arguments provided to the tool.
-    #[error("Invalid arguments: {0}")]
-    InvalidArguments(String),
 
     /// Tool not found in registry.
     #[error("Tool not found: {0}")]
@@ -53,13 +70,13 @@ pub enum ToolError {
     #[error("Tool execution timed out after {0:?}")]
     Timeout(Duration),
 
-    /// Argument validation failed.
-    #[error("Argument validation failed: {message}")]
+    /// Tool argument validation failed.
+    #[error("Tool argument validation failed for '{tool_name}'")]
     ValidationFailed {
-        /// Validation error message.
-        message: String,
-        /// Field that failed validation, if applicable.
-        field: Option<String>,
+        /// Name of the tool.
+        tool_name: String,
+        /// Validation errors.
+        errors: Vec<ValidationError>,
     },
 
     /// Tool was cancelled.
@@ -88,7 +105,6 @@ impl ToolError {
             Self::ModelRetry(_) => true,
             Self::Timeout(_) => true,
             Self::ValidationFailed { .. } => false,
-            Self::InvalidArguments(_) => false,
             Self::NotFound(_) => false,
             Self::ApprovalRequired { .. } => false,
             Self::CallDeferred { .. } => false,
@@ -117,10 +133,32 @@ impl ToolError {
         }
     }
 
-    /// Create an invalid arguments error.
+    /// Create a validation failed error with multiple issues.
     #[must_use]
-    pub fn invalid_args(msg: impl Into<String>) -> Self {
-        Self::InvalidArguments(msg.into())
+    pub fn validation_failed(tool_name: impl Into<String>, errors: Vec<ValidationError>) -> Self {
+        Self::ValidationFailed {
+            tool_name: tool_name.into(),
+            errors,
+        }
+    }
+
+    /// Create a validation failed error with a single issue.
+    #[must_use]
+    pub fn validation_error(
+        tool_name: impl Into<String>,
+        field: Option<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::validation_failed(tool_name, vec![ValidationError::new(field, message)])
+    }
+
+    /// Create an invalid arguments error for argument parsing.
+    #[must_use]
+    pub fn invalid_arguments(
+        tool_name: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self::validation_failed(tool_name, vec![ValidationError::new(None, message)])
     }
 
     /// Create a not found error.
@@ -159,14 +197,6 @@ impl ToolError {
         Self::Timeout(duration)
     }
 
-    /// Create a validation failed error.
-    #[must_use]
-    pub fn validation_failed(msg: impl Into<String>, field: Option<String>) -> Self {
-        Self::ValidationFailed {
-            message: msg.into(),
-            field,
-        }
-    }
 
     /// Get the error message.
     #[must_use]
@@ -250,7 +280,6 @@ impl From<&ToolError> for ToolErrorInfo {
     fn from(err: &ToolError) -> Self {
         let error_type = match err {
             ToolError::ExecutionFailed { .. } => "execution_failed",
-            ToolError::InvalidArguments(_) => "invalid_arguments",
             ToolError::NotFound(_) => "not_found",
             ToolError::ModelRetry(_) => "model_retry",
             ToolError::ApprovalRequired { .. } => "approval_required",
@@ -263,11 +292,18 @@ impl From<&ToolError> for ToolErrorInfo {
             ToolError::Other(_) => "other",
         };
 
+        let details = match err {
+            ToolError::ValidationFailed { errors, .. } => {
+                serde_json::to_value(errors).ok()
+            }
+            _ => None,
+        };
+
         Self {
             error_type: error_type.to_string(),
             message: err.message(),
             retryable: err.is_retryable(),
-            details: None,
+            details,
         }
     }
 }
@@ -321,6 +357,19 @@ mod tests {
         let err = ToolError::model_retry("Invalid format");
         assert!(err.is_model_retry());
         assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn test_validation_failed() {
+        let err = ToolError::validation_error(
+            "test_tool",
+            Some("field".to_string()),
+            "Invalid value",
+        );
+        assert!(!err.is_retryable());
+        let info = ToolErrorInfo::from(&err);
+        assert_eq!(info.error_type, "validation_failed");
+        assert!(info.details.is_some());
     }
 
     #[test]

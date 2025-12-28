@@ -3,13 +3,23 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, DeriveInput, FnArg, ItemFn, PatType, Type};
+use syn::parse::Parser;
+use syn::{
+    parse_macro_input, punctuated::Punctuated, DeriveInput, Error, FnArg, ItemFn, Meta, Pat,
+    PatType, Token, Type,
+};
+
+struct ParamInfo {
+    ident: syn::Ident,
+    ty: Type,
+}
 
 /// Implementation for `#[derive(Tool)]`
 pub fn derive_tool_impl(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
     let name_str = name.to_string();
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     // Extract tool attributes
     let mut description = String::new();
@@ -18,7 +28,7 @@ pub fn derive_tool_impl(input: TokenStream) -> TokenStream {
 
     for attr in &input.attrs {
         if attr.path().is_ident("tool") {
-            let _ = attr.parse_nested_meta(|meta| {
+            if let Err(err) = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("name") {
                     let value = meta.value()?;
                     let lit: syn::LitStr = value.parse()?;
@@ -28,10 +38,17 @@ pub fn derive_tool_impl(input: TokenStream) -> TokenStream {
                     let lit: syn::LitStr = value.parse()?;
                     description = lit.value();
                 } else if meta.path.is_ident("strict") {
+                    if !meta.input.is_empty() {
+                        return Err(meta.error("`strict` does not take a value"));
+                    }
                     strict = true;
+                } else {
+                    return Err(meta.error("unknown `tool` attribute"));
                 }
                 Ok(())
-            });
+            }) {
+                return err.to_compile_error().into();
+            }
         }
     }
 
@@ -39,7 +56,7 @@ pub fn derive_tool_impl(input: TokenStream) -> TokenStream {
     let schema_fields = generate_struct_schema(&input);
 
     let expanded = quote! {
-        impl ::serdes_ai_tools::Tool for #name {
+        impl #impl_generics ::serdes_ai_tools::Tool for #name #ty_generics #where_clause {
             fn definition(&self) -> ::serdes_ai_tools::ToolDefinition {
                 ::serdes_ai_tools::ToolDefinition {
                     name: #tool_name.to_string(),
@@ -59,7 +76,6 @@ pub fn derive_tool_impl(input: TokenStream) -> TokenStream {
 
 /// Implementation for `#[tool]` attribute macro
 pub fn tool_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let _attr = attr;
     let input = parse_macro_input!(item as ItemFn);
     let fn_name = &input.sig.ident;
     let fn_name_str = fn_name.to_string();
@@ -69,20 +85,69 @@ pub fn tool_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream 
     let fn_vis = &input.vis;
     let fn_asyncness = &input.sig.asyncness;
 
+    let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
+    let args = match parser.parse(attr.into()) {
+        Ok(args) => args,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let mut description = String::new();
+    let mut tool_name = fn_name_str.clone();
+    let mut strict = false;
+
+    for meta in args {
+        match meta {
+            Meta::NameValue(nv) if nv.path.is_ident("name") => {
+                match parse_lit_str(&nv.value) {
+                    Ok(value) => tool_name = value,
+                    Err(err) => return err.to_compile_error().into(),
+                }
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("description") => {
+                match parse_lit_str(&nv.value) {
+                    Ok(value) => description = value,
+                    Err(err) => return err.to_compile_error().into(),
+                }
+            }
+            Meta::Path(path) if path.is_ident("strict") => {
+                strict = true;
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("strict") => {
+                match parse_lit_bool(&nv.value) {
+                    Ok(value) => strict = value,
+                    Err(err) => return err.to_compile_error().into(),
+                }
+            }
+            _ => {
+                return Error::new_spanned(meta, "unknown `tool` attribute")
+                    .to_compile_error()
+                    .into();
+            }
+        }
+    }
+
     // Extract parameters (skip self or RunContext)
-    let params: Vec<_> = input
+    let params: Vec<ParamInfo> = match input
         .sig
         .inputs
         .iter()
-        .filter_map(|arg| {
-            if let FnArg::Typed(pat_type) = arg {
-                Some(pat_type)
-            } else {
-                None
-            }
+        .filter_map(|arg| match arg {
+            FnArg::Typed(pat_type) => Some(pat_type),
+            _ => None,
         })
-        .skip(1) // Skip RunContext
-        .collect();
+        .skip(1)
+        .map(|pat_type| {
+            let ident = extract_pat_ident(&pat_type.pat)?;
+            Ok(ParamInfo {
+                ident,
+                ty: (*pat_type.ty).clone(),
+            })
+        })
+        .collect::<Result<_, Error>>()
+    {
+        Ok(params) => params,
+        Err(err) => return err.to_compile_error().into(),
+    };
 
     // Generate struct for parameters
     let struct_name = format_ident!("{}Args", to_pascal_case(&fn_name_str));
@@ -90,14 +155,28 @@ pub fn tool_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream 
 
     let param_fields: Vec<TokenStream2> = params
         .iter()
-        .map(|p| {
-            let pat = &p.pat;
-            let ty = &p.ty;
-            quote! { pub #pat: #ty }
+        .map(|param| {
+            let ident = &param.ident;
+            let ty = &param.ty;
+            quote! { pub #ident: #ty }
         })
         .collect();
 
     let param_schema = generate_param_schema(&params);
+
+    let call_args: Vec<TokenStream2> = params
+        .iter()
+        .map(|param| {
+            let ident = &param.ident;
+            quote!(args.#ident)
+        })
+        .collect();
+
+    let call_expr = if fn_asyncness.is_some() {
+        quote!(#fn_name(ctx, #(#call_args),*).await)
+    } else {
+        quote!(#fn_name(ctx, #(#call_args),*))
+    };
 
     let expanded = quote! {
         /// Auto-generated arguments struct
@@ -114,6 +193,31 @@ pub fn tool_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream 
             /// Create a new instance.
             pub fn new() -> Self {
                 Self
+            }
+        }
+
+        #[::async_trait::async_trait]
+        impl<Deps> ::serdes_ai_tools::Tool<Deps> for #tool_struct_name
+        where
+            Deps: Send + Sync + 'static,
+        {
+            fn definition(&self) -> ::serdes_ai_tools::ToolDefinition {
+                let mut def = ::serdes_ai_tools::ToolDefinition::new(#tool_name, #description)
+                    .with_parameters(#param_schema);
+                if #strict {
+                    def = def.with_strict(true);
+                }
+                def
+            }
+
+            async fn call(
+                &self,
+                ctx: &::serdes_ai_tools::RunContext<Deps>,
+                args: ::serde_json::Value,
+            ) -> ::serdes_ai_tools::ToolResult {
+                let args: #struct_name = ::serde_json::from_value(args)
+                    .map_err(|e| ::serdes_ai_tools::ToolError::invalid_args(e.to_string()))?;
+                #call_expr
             }
         }
 
@@ -169,19 +273,20 @@ fn generate_struct_schema(input: &DeriveInput) -> TokenStream2 {
     }
 }
 
-fn generate_param_schema(params: &[&PatType]) -> TokenStream2 {
+fn generate_param_schema(params: &[ParamInfo]) -> TokenStream2 {
     let field_schemas: Vec<TokenStream2> = params
         .iter()
-        .map(|p| {
-            let pat = &p.pat;
-            let name = quote!(#pat).to_string();
-            let ty = &p.ty;
+        .map(|param| {
+            let name = param.ident.to_string();
+            let ty = &param.ty;
             let type_str = type_to_json_type(ty);
+            let required = !is_option_type(ty);
 
             quote! {
-                properties.insert(
-                    #name.to_string(),
-                    ::serde_json::json!({ "type": #type_str })
+                schema.add_property(
+                    #name,
+                    ::serde_json::json!({ "type": #type_str }),
+                    #required,
                 );
             }
         })
@@ -189,12 +294,9 @@ fn generate_param_schema(params: &[&PatType]) -> TokenStream2 {
 
     quote! {
         {
-            let mut properties = ::std::collections::HashMap::new();
+            let mut schema = ::serdes_ai_tools::ObjectJsonSchema::new();
             #(#field_schemas)*
-            ::serdes_ai_tools::ObjectJsonSchema {
-                properties,
-                ..Default::default()
-            }
+            schema
         }
     }
 }
@@ -233,6 +335,33 @@ fn is_option_type(ty: &Type) -> bool {
         }
     }
     false
+}
+
+fn extract_pat_ident(pat: &Pat) -> Result<syn::Ident, Error> {
+    match pat {
+        Pat::Ident(ident) => Ok(ident.ident.clone()),
+        _ => Err(Error::new_spanned(pat, "tool parameters must be identifiers")),
+    }
+}
+
+fn parse_lit_str(expr: &syn::Expr) -> Result<String, Error> {
+    match expr {
+        syn::Expr::Lit(lit) => match &lit.lit {
+            syn::Lit::Str(value) => Ok(value.value()),
+            _ => Err(Error::new_spanned(expr, "expected a string literal")),
+        },
+        _ => Err(Error::new_spanned(expr, "expected a string literal")),
+    }
+}
+
+fn parse_lit_bool(expr: &syn::Expr) -> Result<bool, Error> {
+    match expr {
+        syn::Expr::Lit(lit) => match &lit.lit {
+            syn::Lit::Bool(value) => Ok(value.value()),
+            _ => Err(Error::new_spanned(expr, "expected a boolean literal")),
+        },
+        _ => Err(Error::new_spanned(expr, "expected a boolean literal")),
+    }
 }
 
 fn to_snake_case(s: &str) -> String {

@@ -210,7 +210,19 @@ async fn cancel_task(
                 ));
             }
 
-            task.cancel();
+            // Cancel in broker first (removes from queue and/or signals running task)
+            state.broker.cancel_task(&task_id).await;
+
+            // Then update task status in storage
+            if let Err(e) = task.cancel() {
+                return Err((
+                    StatusCode::CONFLICT,
+                    Json(ErrorResponse::with_code(
+                        format!("Failed to cancel task: {}", e),
+                        "invalid_state",
+                    )),
+                ));
+            }
 
             if let Err(e) = state.storage.update_task(&task).await {
                 return Err((

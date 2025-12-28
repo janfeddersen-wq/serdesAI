@@ -73,6 +73,11 @@ mod compatible;
 // Gateway providers
 mod gateway;
 
+// OAuth utilities
+pub mod oauth;
+pub use oauth::{OAuthConfig, OAuthContext, OAuthError, TokenResponse, run_pkce_flow, refresh_token};
+pub use oauth::config::{chatgpt_oauth_config, claude_code_oauth_config};
+
 // Re-exports
 pub use provider::*;
 pub use registry::*;

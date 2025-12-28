@@ -223,15 +223,49 @@ impl EmbedderBuilder {
             .model_name
             .ok_or_else(|| EmbeddingError::config("Model name required"))?;
 
-        // If API key provided, use it; otherwise try env
-        let embedder = if let Some(_api_key) = self.api_key {
-            // Would create model with explicit key
-            Embedder::from_env(&model_name)?
-        } else {
-            Embedder::from_env(&model_name)?
+        let (provider, model_id) = model_name.split_once(':').ok_or_else(|| {
+            EmbeddingError::config("Invalid model format. Use 'provider:model-name'")
+        })?;
+
+        let model: BoxedEmbeddingModel = match provider {
+            #[cfg(feature = "openai")]
+            "openai" => {
+                use crate::openai::OpenAIEmbeddingModel;
+                let mut model = match self.api_key {
+                    Some(key) => OpenAIEmbeddingModel::new(model_id, key),
+                    None => OpenAIEmbeddingModel::from_env(model_id)?,
+                };
+                if let Some(url) = self.base_url {
+                    model = model.with_base_url(url);
+                }
+                Box::new(model)
+            }
+
+            #[cfg(feature = "cohere")]
+            "cohere" => {
+                use crate::cohere::CohereEmbeddingModel;
+                let mut model = match self.api_key {
+                    Some(key) => CohereEmbeddingModel::new(model_id, key),
+                    None => CohereEmbeddingModel::from_env(model_id)?,
+                };
+                if let Some(url) = self.base_url {
+                    model = model.with_base_url(url);
+                }
+                Box::new(model)
+            }
+
+            _ => {
+                return Err(EmbeddingError::config(format!(
+                    "Unknown provider: {}. Available: openai, cohere",
+                    provider
+                )))
+            }
         };
 
-        let mut embedder = embedder;
+        let mut embedder = Embedder {
+            model,
+            settings: EmbeddingSettings::default(),
+        };
         if let Some(dims) = self.dimensions {
             embedder = embedder.with_dimensions(dims);
         }
