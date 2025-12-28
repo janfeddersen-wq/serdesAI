@@ -113,6 +113,36 @@ impl OpenRouterModel {
                     .unwrap_or_else(|_| builtin.content_type().to_string());
                 Some(ChatMessage::tool(builtin.tool_call_id.clone(), content_str))
             }
+            ModelRequestPart::ModelResponse(response) => {
+                // Add assistant response for proper alternation
+                let mut text_content = String::new();
+                let mut tool_calls = Vec::new();
+                for resp_part in &response.parts {
+                    match resp_part {
+                        serdes_ai_core::ModelResponsePart::Text(t) => {
+                            text_content.push_str(&t.content);
+                        }
+                        serdes_ai_core::ModelResponsePart::ToolCall(tc) => {
+                            tool_calls.push(ToolCall {
+                                id: tc.tool_call_id.clone().unwrap_or_default(),
+                                tool_type: "function".to_string(),
+                                function: FunctionCall {
+                                    name: tc.tool_name.clone(),
+                                    arguments: tc.args.to_json_string().unwrap_or_default(),
+                                },
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                Some(ChatMessage {
+                    role: "assistant".into(),
+                    content: if text_content.is_empty() { None } else { Some(MessageContent::Text(text_content)) },
+                    name: None,
+                    tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                    tool_call_id: None,
+                })
+            }
         })).collect()
     }
 

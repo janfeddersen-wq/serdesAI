@@ -165,6 +165,10 @@ pub enum ModelRequestPart {
     RetryPrompt(RetryPromptPart),
     /// Builtin tool return (web search results, code execution output, etc.).
     BuiltinToolReturn(BuiltinToolReturnPart),
+    /// Model response (for multi-turn conversations).
+    /// This represents the assistant's previous response, which MUST be included
+    /// when sending tool results to ensure proper user/assistant message alternation.
+    ModelResponse(Box<super::response::ModelResponse>),
 }
 
 impl ModelRequestPart {
@@ -177,6 +181,7 @@ impl ModelRequestPart {
             Self::ToolReturn(p) => p.timestamp,
             Self::RetryPrompt(p) => p.timestamp,
             Self::BuiltinToolReturn(p) => p.timestamp,
+            Self::ModelResponse(r) => r.timestamp,
         }
     }
 
@@ -189,6 +194,7 @@ impl ModelRequestPart {
             Self::ToolReturn(_) => ToolReturnPart::PART_KIND,
             Self::RetryPrompt(_) => RetryPromptPart::PART_KIND,
             Self::BuiltinToolReturn(_) => BuiltinToolReturnPart::PART_KIND,
+            Self::ModelResponse(_) => "model-response",
         }
     }
 
@@ -196,6 +202,12 @@ impl ModelRequestPart {
     #[must_use]
     pub fn is_builtin_tool_return(&self) -> bool {
         matches!(self, Self::BuiltinToolReturn(_))
+    }
+
+    /// Check if this is a model response.
+    #[must_use]
+    pub fn is_model_response(&self) -> bool {
+        matches!(self, Self::ModelResponse(_))
     }
 }
 

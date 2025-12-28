@@ -2,6 +2,7 @@
 
 use super::types::*;
 use crate::error::ModelError;
+use tracing::{debug, info, error};
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{anthropic_claude_profile, ModelProfile};
 use async_trait::async_trait;
@@ -11,11 +12,15 @@ use serdes_ai_core::{
     ModelSettings, RequestUsage,
 };
 use serdes_ai_core::messages::{
-    ImageContent, PartStartEvent, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart, 
+    ImageContent, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart, 
     UserContent, UserContentPart, UserPromptPart,
 };
 use base64::Engine;
 use std::time::Duration;
+
+/// The hardcoded system prompt for Claude Code OAuth models.
+/// This matches the Python code_puppy implementation.
+const CLAUDE_CODE_INSTRUCTIONS: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /// Claude Code OAuth model.
 ///
@@ -38,13 +43,16 @@ impl ClaudeCodeOAuthModel {
     /// * `access_token` - OAuth access token from authentication flow
     pub fn new(model_name: impl Into<String>, access_token: impl Into<String>) -> Self {
         let model_name = model_name.into();
+        let access_token = access_token.into();
         let profile = anthropic_claude_profile();
-        
+        let config = ClaudeCodeConfig::default();
+        let client = Self::build_client();
+
         Self {
             model_name,
-            access_token: access_token.into(),
-            client: Client::new(),
-            config: ClaudeCodeConfig::default(),
+            access_token,
+            client,
+            config,
             profile,
         }
     }
@@ -70,20 +78,42 @@ impl ClaudeCodeOAuthModel {
         self
     }
 
+    fn build_client() -> Client {
+        Client::builder()
+            .timeout(Duration::from_secs(180))
+            .build()
+            .expect("Failed to build HTTP client")
+    }
+
     /// Convert our messages to Claude format.
+    /// 
+    /// For Claude Code OAuth models, we use special system prompt handling:
+    /// 1. The actual system prompt is always the hardcoded CLAUDE_CODE_INSTRUCTIONS
+    /// 2. Any user-provided system prompts are prepended to the first user message
     fn convert_messages(&self, requests: &[ModelRequest]) -> (Option<String>, Vec<ClaudeMessage>) {
-        let mut system_prompt = None;
+        // Collect all system prompts to prepend to first user message
+        let mut collected_system_prompts: Vec<String> = Vec::new();
         let mut messages = Vec::new();
+        let mut first_user_message_processed = false;
 
         for req in requests {
             for part in &req.parts {
                 match part {
                     ModelRequestPart::SystemPrompt(sys) => {
-                        // Claude uses a separate system field
-                        system_prompt = Some(sys.content.clone());
+                        // For Claude Code: collect system prompts to prepend to first user message
+                        // instead of using them as the actual system prompt
+                        collected_system_prompts.push(sys.content.clone());
                     }
                     ModelRequestPart::UserPrompt(user) => {
-                        let content = self.convert_user_content(user);
+                        let mut content = self.convert_user_content(user);
+                        
+                        // Prepend collected system prompts to the FIRST user message only
+                        if !first_user_message_processed && !collected_system_prompts.is_empty() {
+                            let system_prefix = collected_system_prompts.join("\n\n");
+                            content = self.prepend_to_content(content, &system_prefix);
+                            first_user_message_processed = true;
+                        }
+                        
                         messages.push(ClaudeMessage {
                             role: "user".to_string(),
                             content,
@@ -106,12 +136,48 @@ impl ClaudeCodeOAuthModel {
                             content: ClaudeContent::Text(retry.content.message().to_string()),
                         });
                     }
-                    _ => {}
+                    ModelRequestPart::BuiltinToolReturn(builtin) => {
+                        let content_str = serde_json::to_string(&builtin.content)
+                            .unwrap_or_else(|_| builtin.content_type().to_string());
+                        messages.push(ClaudeMessage {
+                            role: "user".to_string(),
+                            content: ClaudeContent::Blocks(vec![ContentBlock::ToolResult {
+                                tool_use_id: builtin.tool_call_id.clone(),
+                                content: content_str,
+                                is_error: None,
+                            }]),
+                        });
+                    }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add the assistant response to messages for proper alternation
+                        self.add_response_to_messages(&mut messages, response);
+                    }
                 }
             }
         }
 
+        // Always use the hardcoded Claude Code instructions as the system prompt
+        let system_prompt = Some(CLAUDE_CODE_INSTRUCTIONS.to_string());
+
         (system_prompt, messages)
+    }
+
+    /// Helper to prepend text to ClaudeContent.
+    /// Used to prepend user-provided system prompts to the first user message.
+    fn prepend_to_content(&self, content: ClaudeContent, prefix: &str) -> ClaudeContent {
+        match content {
+            ClaudeContent::Text(text) => {
+                ClaudeContent::Text(format!("{}\n\n{}", prefix, text))
+            }
+            ClaudeContent::Blocks(mut blocks) => {
+                // Prepend as a text block at the beginning
+                blocks.insert(0, ContentBlock::Text { 
+                    text: prefix.to_string(),
+                    cache_control: None,
+                });
+                ClaudeContent::Blocks(blocks)
+            }
+        }
     }
 
     fn convert_user_content(&self, user: &UserPromptPart) -> ClaudeContent {
@@ -122,7 +188,7 @@ impl ClaudeCodeOAuthModel {
                     .iter()
                     .filter_map(|part| match part {
                         UserContentPart::Text { text } => {
-                            Some(ContentBlock::Text { text: text.clone() })
+                            Some(ContentBlock::Text { text: text.clone(), cache_control: None })
                         }
                         UserContentPart::Image { image } => {
                             // Claude expects base64 image data
@@ -186,7 +252,20 @@ impl ClaudeCodeOAuthModel {
         params: &ModelRequestParameters,
         stream: bool,
     ) -> ClaudeRequest {
-        let (system, messages) = self.convert_messages(messages);
+        let (system, mut api_messages) = self.convert_messages(messages);
+        
+        // Inject cache_control on the last content block of the last message
+        // This matches the Python ClaudeCacheAsyncClient behavior
+        if let Some(last_msg) = api_messages.last_mut() {
+            if let ClaudeContent::Blocks(ref mut blocks) = last_msg.content {
+                if let Some(last_block) = blocks.last_mut() {
+                    if let ContentBlock::Text { cache_control, .. } = last_block {
+                        *cache_control = Some(CacheControl::ephemeral());
+                    }
+                }
+            }
+        }
+        
         let tools = if params.tools.is_empty() {
             None
         } else {
@@ -195,7 +274,7 @@ impl ClaudeCodeOAuthModel {
 
         ClaudeRequest {
             model: self.model_name.clone(),
-            messages,
+            messages: api_messages,
             max_tokens: settings.max_tokens.map(|t| t as u32).unwrap_or(4096),
             system,
             temperature: settings.temperature.map(|t| t as f32),
@@ -227,8 +306,17 @@ impl ClaudeCodeOAuthModel {
                             .with_tool_call_id(id),
                     ));
                 }
-                ResponseContentBlock::Thinking { thinking } => {
-                    parts.push(ModelResponsePart::Thinking(ThinkingPart::new(thinking)));
+                ResponseContentBlock::Thinking { thinking, signature } => {
+                    let mut thinking_part = ThinkingPart::new(thinking);
+                    if let Some(sig) = signature {
+                        thinking_part = thinking_part.with_signature(sig);
+                    }
+                    parts.push(ModelResponsePart::Thinking(thinking_part));
+                }
+                ResponseContentBlock::RedactedThinking { data } => {
+                    parts.push(ModelResponsePart::Thinking(
+                        ThinkingPart::redacted(data, "anthropic"),
+                    ));
                 }
             }
         }
@@ -260,6 +348,56 @@ impl ClaudeCodeOAuthModel {
             kind: "response".to_string(),
         }
     }
+
+    /// Add an assistant response to messages (for multi-turn conversations).
+    /// This is CRITICAL - Anthropic requires alternating user/assistant messages.
+    pub fn add_response_to_messages(
+        &self,
+        messages: &mut Vec<ClaudeMessage>,
+        response: &ModelResponse,
+    ) {
+        let mut blocks = Vec::new();
+
+        for part in &response.parts {
+            match part {
+                ModelResponsePart::Text(text) => {
+                    blocks.push(ContentBlock::Text { 
+                        text: text.content.clone(),
+                        cache_control: None,
+                    });
+                }
+                ModelResponsePart::ToolCall(tc) => {
+                    blocks.push(ContentBlock::ToolUse {
+                        id: tc.tool_call_id.clone().unwrap_or_default(),
+                        name: tc.tool_name.clone(),
+                        input: tc.args.to_json(),
+                    });
+                }
+                ModelResponsePart::Thinking(think) => {
+                    if think.is_redacted() {
+                        if let Some(sig) = &think.signature {
+                            blocks.push(ContentBlock::RedactedThinking {
+                                data: sig.clone(),
+                            });
+                        }
+                    } else {
+                        blocks.push(ContentBlock::Thinking {
+                            thinking: think.content.clone(),
+                            signature: think.signature.clone(),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if !blocks.is_empty() {
+            messages.push(ClaudeMessage {
+                role: "assistant".to_string(),
+                content: ClaudeContent::Blocks(blocks),
+            });
+        }
+    }
 }
 
 #[async_trait]
@@ -278,32 +416,81 @@ impl Model for ClaudeCodeOAuthModel {
         settings: &ModelSettings,
         params: &ModelRequestParameters,
     ) -> Result<ModelResponse, ModelError> {
-        let request = self.build_request(messages, settings, params, false);
-        let url = format!("{}/v1/messages", self.config.api_base_url);
+        use reqwest::header::{
+            HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT,
+        };
 
+        let request_body = self.build_request(messages, settings, params, false);
+        let url = format!("{}/v1/messages", self.config.api_base_url);
+        
+        info!(
+            model = %self.model_name,
+            url = %url,
+            message_count = messages.len(),
+            "ClaudeCodeOAuth: making request"
+        );
+        debug!("ClaudeCodeOAuth: request body model={}", request_body.model);
+
+        // Build headers for THIS request
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", self.access_token))
+                .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
+        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(
+            HeaderName::from_static("anthropic-version"),
+            HeaderValue::from_str(&self.config.anthropic_version)
+                .map_err(|e| ModelError::api(format!("Invalid version header: {}", e)))?,
+        );
+        headers.insert(
+            HeaderName::from_static("anthropic-beta"),
+            HeaderValue::from_static("oauth-2025-04-20,interleaved-thinking-2025-05-14"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-app"),
+            HeaderValue::from_static("cli"),
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static("claude-cli/2.0.61 (external, cli)"),
+        );
+
+        debug!("ClaudeCodeOAuth: sending HTTP request...");
         let response = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.access_token))
-            .header("Content-Type", "application/json")
-            .header("anthropic-version", &self.config.anthropic_version)
-            .header("x-api-key", &self.access_token)  // Anthropic also accepts x-api-key
-            .timeout(Duration::from_secs(120))
-            .json(&request)
+            .headers(headers)
+            .json(&request_body)
             .send()
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
+        let status = response.status();
+        debug!(status = %status, "ClaudeCodeOAuth: received response");
+        
+        if !status.is_success() {
+            let status_code = status.as_u16();
             let body = response.text().await.unwrap_or_default();
+            error!(
+                status = status_code,
+                body_preview = %body.chars().take(500).collect::<String>(),
+                "ClaudeCodeOAuth: API error"
+            );
+
             return Err(ModelError::Http {
-                status,
+                status: status_code,
                 body,
                 headers: std::collections::HashMap::new(),
             });
         }
 
         let claude_response: ClaudeResponse = response.json().await?;
+        info!(
+            content_parts = claude_response.content.len(),
+            "ClaudeCodeOAuth: parsed response successfully"
+        );
         Ok(self.convert_response(claude_response))
     }
 
@@ -313,22 +500,84 @@ impl Model for ClaudeCodeOAuthModel {
         settings: &ModelSettings,
         params: &ModelRequestParameters,
     ) -> Result<StreamedResponse, ModelError> {
-        // For now, fall back to non-streaming
-        // TODO: Implement proper SSE streaming
-        let response = self.request(messages, settings, params).await?;
+        use reqwest::header::{
+            HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT,
+        };
+        use super::stream::ClaudeCodeStreamParser;
         
-        use serdes_ai_core::messages::ModelResponseStreamEvent;
+        // Build request with stream: true
+        let request_body = self.build_request(messages, settings, params, true);
+        let url = format!("{}/v1/messages", self.config.api_base_url);
         
-        let events: Vec<Result<ModelResponseStreamEvent, ModelError>> = response
-            .parts
-            .into_iter()
-            .enumerate()
-            .map(|(idx, part)| {
-                Ok(ModelResponseStreamEvent::PartStart(PartStartEvent::new(idx, part)))
-            })
-            .collect();
+        info!(
+            model = %self.model_name,
+            url = %url,
+            message_count = messages.len(),
+            "ClaudeCodeOAuth: making streaming request"
+        );
+
+        // Build headers
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {}", self.access_token))
+                .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
+        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
+        headers.insert(
+            HeaderName::from_static("anthropic-version"),
+            HeaderValue::from_str(&self.config.anthropic_version)
+                .map_err(|e| ModelError::api(format!("Invalid version header: {}", e)))?,
+        );
+        headers.insert(
+            HeaderName::from_static("anthropic-beta"),
+            HeaderValue::from_static("oauth-2025-04-20,interleaved-thinking-2025-05-14"),
+        );
+        headers.insert(
+            HeaderName::from_static("x-app"),
+            HeaderValue::from_static("cli"),
+        );
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static("claude-cli/2.0.61 (external, cli)"),
+        );
+
+        debug!("ClaudeCodeOAuth: sending streaming HTTP request...");
+        let response = self
+            .client
+            .post(&url)
+            .headers(headers)
+            .json(&request_body)
+            .send()
+            .await?;
+
+        let status = response.status();
+        debug!(status = %status, "ClaudeCodeOAuth: received response");
         
-        Ok(Box::pin(futures::stream::iter(events)))
+        if !status.is_success() {
+            let status_code = status.as_u16();
+            let body = response.text().await.unwrap_or_default();
+            error!(
+                status = status_code,
+                body_preview = %body.chars().take(500).collect::<String>(),
+                "ClaudeCodeOAuth: streaming API error"
+            );
+
+            return Err(ModelError::Http {
+                status: status_code,
+                body,
+                headers: std::collections::HashMap::new(),
+            });
+        }
+
+        info!("ClaudeCodeOAuth: streaming response started, creating parser");
+        
+        // Get the byte stream and wrap with SSE parser
+        let byte_stream = response.bytes_stream();
+        let parser = ClaudeCodeStreamParser::new(byte_stream);
+
+        Ok(Box::pin(parser))
     }
 
     fn profile(&self) -> &ModelProfile {

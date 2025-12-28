@@ -194,6 +194,36 @@ impl MistralModel {
                             name: Some(builtin.tool_name.clone()),
                         });
                     }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add assistant response for proper alternation
+                        let mut tool_calls = Vec::new();
+                        let mut text_content = String::new();
+                        for resp_part in &response.parts {
+                            match resp_part {
+                                serdes_ai_core::ModelResponsePart::Text(t) => {
+                                    text_content.push_str(&t.content);
+                                }
+                                serdes_ai_core::ModelResponsePart::ToolCall(tc) => {
+                                    tool_calls.push(types::ToolCall {
+                                        id: tc.tool_call_id.clone().unwrap_or_default(),
+                                        r#type: "function".to_string(),
+                                        function: types::FunctionCall {
+                                            name: tc.tool_name.clone(),
+                                            arguments: tc.args.to_json_string().unwrap_or_default(),
+                                        },
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                        result.push(types::Message {
+                            role: types::Role::Assistant,
+                            content: types::Content::Text(text_content),
+                            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                            tool_call_id: None,
+                            name: None,
+                        });
+                    }
                 }
             }
         }

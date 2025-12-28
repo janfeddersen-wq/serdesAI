@@ -92,15 +92,20 @@ impl OAuthFlowHandle {
 fn build_authorization_url(config: &OAuthConfig, context: &OAuthContext) -> String {
     let redirect_uri = context.redirect_uri.as_deref().unwrap_or("");
     
-    let params = [
-        ("response_type", "code"),
-        ("client_id", &config.client_id),
-        ("redirect_uri", redirect_uri),
-        ("scope", &config.scopes),
-        ("code_challenge", &context.code_challenge),
-        ("code_challenge_method", "S256"),
-        ("state", &context.state),
+    let mut params = vec![
+        ("response_type", "code".to_string()),
+        ("client_id", config.client_id.clone()),
+        ("redirect_uri", redirect_uri.to_string()),
+        ("scope", config.scopes.clone()),
+        ("code_challenge", context.code_challenge.clone()),
+        ("code_challenge_method", "S256".to_string()),
+        ("state", context.state.clone()),
     ];
+    
+    // Claude Code requires "code=true" parameter
+    if config.token_url.contains("anthropic.com") {
+        params.push(("code", "true".to_string()));
+    }
     
     let query = params
         .iter()
@@ -118,22 +123,47 @@ async fn exchange_code_for_tokens(
     code: &str,
 ) -> Result<TokenResponse, OAuthError> {
     let redirect_uri = context.redirect_uri.as_deref().unwrap_or("");
-    
-    let params = [
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", redirect_uri),
-        ("client_id", &config.client_id),
-        ("code_verifier", &context.code_verifier),
-    ];
-    
     let client = Client::new();
-    let response = client
-        .post(&config.token_url)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .form(&params)
-        .send()
-        .await?;
+    
+    // Check if this is Claude/Anthropic (uses JSON) or others (use form-urlencoded)
+    let is_anthropic = config.token_url.contains("anthropic.com");
+    
+    let response = if is_anthropic {
+        // Anthropic/Claude uses JSON body with special headers
+        let payload = serde_json::json!({
+            "grant_type": "authorization_code",
+            "client_id": config.client_id,
+            "code": code,
+            "state": context.state,
+            "code_verifier": context.code_verifier,
+            "redirect_uri": redirect_uri,
+        });
+        
+        client
+            .post(&config.token_url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("anthropic-beta", "oauth-2025-04-20")
+            .json(&payload)
+            .send()
+            .await?
+    } else {
+        // Standard OAuth uses form-urlencoded
+        let params = [
+            ("grant_type", "authorization_code"),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+            ("client_id", &config.client_id),
+            ("code_verifier", &context.code_verifier),
+        ];
+        
+        client
+            .post(&config.token_url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .form(&params)
+            .send()
+            .await?
+    };
     
     if !response.status().is_success() {
         let status = response.status();
@@ -156,19 +186,38 @@ pub async fn refresh_token(
     config: &OAuthConfig,
     refresh_token: &str,
 ) -> Result<TokenResponse, OAuthError> {
-    let params = [
-        ("grant_type", "refresh_token"),
-        ("refresh_token", refresh_token),
-        ("client_id", &config.client_id),
-    ];
-    
     let client = Client::new();
-    let response = client
-        .post(&config.token_url)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .form(&params)
-        .send()
-        .await?;
+    let is_anthropic = config.token_url.contains("anthropic.com");
+    
+    let response = if is_anthropic {
+        let payload = serde_json::json!({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": config.client_id,
+        });
+        
+        client
+            .post(&config.token_url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .header("anthropic-beta", "oauth-2025-04-20")
+            .json(&payload)
+            .send()
+            .await?
+    } else {
+        let params = [
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("client_id", &config.client_id),
+        ];
+        
+        client
+            .post(&config.token_url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .form(&params)
+            .send()
+            .await?
+    };
     
     if !response.status().is_success() {
         let status = response.status();

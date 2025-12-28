@@ -140,6 +140,22 @@ impl CohereModel {
                             tool_calls: None,
                         });
                     }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add assistant response for proper alternation
+                        let mut text_content = String::new();
+                        for resp_part in &response.parts {
+                            if let serdes_ai_core::ModelResponsePart::Text(t) = resp_part {
+                                text_content.push_str(&t.content);
+                            }
+                        }
+                        if !text_content.is_empty() {
+                            history.push(ChatMessage {
+                                role: Role::Chatbot,
+                                message: text_content,
+                                tool_calls: None,
+                            });
+                        }
+                    }
                 }
             }
         }

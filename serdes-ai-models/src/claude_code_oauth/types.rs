@@ -59,12 +59,29 @@ pub enum ClaudeContent {
     Blocks(Vec<ContentBlock>),
 }
 
+/// Cache control for prompt caching.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CacheControl {
+    #[serde(rename = "type")]
+    pub cache_type: String,
+}
+
+impl CacheControl {
+    pub fn ephemeral() -> Self {
+        Self { cache_type: "ephemeral".to_string() }
+    }
+}
+
 /// Content block for multi-modal messages.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type")]
 pub enum ContentBlock {
     #[serde(rename = "text")]
-    Text { text: String },
+    Text { 
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
+    },
     #[serde(rename = "image")]
     Image { source: ImageSource },
     #[serde(rename = "tool_use")]
@@ -79,6 +96,16 @@ pub enum ContentBlock {
         content: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
+    },
+    #[serde(rename = "thinking")]
+    Thinking {
+        thinking: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+    },
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking {
+        data: String,
     },
 }
 
@@ -124,7 +151,15 @@ pub enum ResponseContentBlock {
         input: serde_json::Value,
     },
     #[serde(rename = "thinking")]
-    Thinking { thinking: String },
+    Thinking { 
+        thinking: String,
+        #[serde(default)]
+        signature: Option<String>,
+    },
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking {
+        data: String,
+    },
 }
 
 #[derive(Debug, Deserialize, Default)]

@@ -135,6 +135,18 @@ impl HuggingFaceModel {
                             .unwrap_or_else(|_| builtin.content_type().to_string());
                         prompt.push_str(&format!("<|tool|>\n{}\n", content_str));
                     }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add assistant response for proper alternation
+                        let mut text_content = String::new();
+                        for resp_part in &response.parts {
+                            if let serdes_ai_core::ModelResponsePart::Text(t) = resp_part {
+                                text_content.push_str(&t.content);
+                            }
+                        }
+                        if !text_content.is_empty() {
+                            prompt.push_str(&format!("<|assistant|>\n{}\n", text_content));
+                        }
+                    }
                 }
             }
         }

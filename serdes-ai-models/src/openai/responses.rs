@@ -784,6 +784,10 @@ impl OpenAIResponsesModel {
                             content: content_str,
                         });
                     }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add the assistant response to inputs for proper alternation
+                        inputs.push(self.convert_response_to_input(response));
+                    }
                 }
             }
         }
@@ -849,6 +853,42 @@ impl OpenAIResponsesModel {
     fn convert_retry_prompt(&self, retry: &RetryPromptPart) -> ResponseInput {
         ResponseInput::User {
             content: ResponseInputContent::Text(retry.content.message().to_string()),
+        }
+    }
+
+    /// Convert a ModelResponse to an assistant input for multi-turn conversations.
+    fn convert_response_to_input(&self, response: &ModelResponse) -> ResponseInput {
+        let mut content_parts = Vec::new();
+
+        for part in &response.parts {
+            match part {
+                ModelResponsePart::Text(text) => {
+                    content_parts.push(text.content.clone());
+                }
+                ModelResponsePart::ToolCall(_) => {
+                    // Tool calls are handled by the model, not included in assistant input
+                }
+                ModelResponsePart::Thinking(_) => {
+                    // Thinking parts are not sent back
+                }
+                ModelResponsePart::File(_) => {
+                    // Files are not sent back
+                }
+                ModelResponsePart::BuiltinToolCall(_) => {
+                    // Builtin tool calls are not sent back
+                }
+            }
+        }
+
+        let content = if content_parts.is_empty() {
+            ResponseInputContent::Text(String::new())
+        } else {
+            ResponseInputContent::Text(content_parts.join(""))
+        };
+
+        ResponseInput::Assistant {
+            content,
+            reasoning_id: None,
         }
     }
 

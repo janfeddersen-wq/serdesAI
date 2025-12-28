@@ -415,6 +415,17 @@ where
         &mut self,
         returns: Vec<(String, Option<String>, Result<ToolReturn, ToolError>)>,
     ) -> Result<(), AgentRunError> {
+        // CRITICAL: First add the previous response as a model response part.
+        // This ensures proper user/assistant alternation for Anthropic and other providers.
+        // Without this, we'd send consecutive user messages which violates the API contract.
+        if let Some(last_response) = self.state.responses.last() {
+            let mut response_req = ModelRequest::new();
+            response_req.parts.push(ModelRequestPart::ModelResponse(
+                Box::new(last_response.clone())
+            ));
+            self.state.messages.push(response_req);
+        }
+
         let mut req = ModelRequest::new();
 
         for (tool_name, tool_call_id, result) in returns {

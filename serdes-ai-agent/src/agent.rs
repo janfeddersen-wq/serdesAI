@@ -119,6 +119,11 @@ where
         self.model.as_ref()
     }
 
+    /// Get the model as an Arc (for cloning into spawned tasks).
+    pub fn model_arc(&self) -> Arc<dyn Model> {
+        Arc::clone(&self.model)
+    }
+
     /// Get agent name.
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
@@ -207,7 +212,7 @@ where
         &self,
         prompt: impl Into<UserContent>,
         deps: Deps,
-    ) -> Result<AgentStream<Deps, Output>, AgentRunError> {
+    ) -> Result<AgentStream, AgentRunError> {
         self.run_stream_with_options(prompt, deps, RunOptions::default())
             .await
     }
@@ -218,7 +223,7 @@ where
         prompt: impl Into<UserContent>,
         deps: Deps,
         options: RunOptions,
-    ) -> Result<AgentStream<Deps, Output>, AgentRunError> {
+    ) -> Result<AgentStream, AgentRunError> {
         AgentStream::new(self, prompt.into(), deps, options).await
     }
 
@@ -282,6 +287,16 @@ where
             .tool_name()
             .map(|n| n == name)
             .unwrap_or(false)
+    }
+
+    /// Get the output tool name if output is via tool.
+    pub(crate) fn output_tool_name(&self) -> Option<String> {
+        self.output_schema.tool_name().map(|s| s.to_string())
+    }
+
+    /// Get the static system prompt.
+    pub fn static_system_prompt(&self) -> &str {
+        &self.static_system_prompt
     }
 }
 

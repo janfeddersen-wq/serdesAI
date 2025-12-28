@@ -146,6 +146,10 @@ impl OpenAIChatModel {
                         builtin.tool_call_id.clone(),
                     ));
                 }
+                ModelRequestPart::ModelResponse(response) => {
+                    // Add the assistant response to messages for proper alternation
+                    self.add_response_to_messages(&mut messages, response);
+                }
             }
         }
 
@@ -275,6 +279,15 @@ impl OpenAIChatModel {
             },
             tool_call_id: None,
         }
+    }
+
+    /// Add an assistant response to messages (for multi-turn conversations).
+    pub fn add_response_to_messages(
+        &self,
+        messages: &mut Vec<ChatMessage>,
+        response: &ModelResponse,
+    ) {
+        messages.push(self.convert_response_to_message(response));
     }
 
     /// Convert tool definitions to OpenAI format.

@@ -214,6 +214,10 @@ impl AnthropicModel {
                             content: AnthropicContent::Blocks(vec![block]),
                         });
                     }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add the assistant response to messages for proper alternation
+                        self.add_response_to_messages(&mut api_messages, response);
+                    }
                 }
             }
         }

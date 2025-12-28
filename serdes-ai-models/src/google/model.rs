@@ -281,6 +281,32 @@ impl GoogleModel {
                             parts: vec![part],
                         });
                     }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add the assistant response for proper alternation
+                        let mut parts = Vec::new();
+                        for resp_part in &response.parts {
+                            match resp_part {
+                                ModelResponsePart::Text(text) => {
+                                    parts.push(Part::Text { text: text.content.clone() });
+                                }
+                                ModelResponsePart::ToolCall(tc) => {
+                                    parts.push(Part::FunctionCall {
+                                        function_call: FunctionCall {
+                                            name: tc.tool_name.clone(),
+                                            args: tc.args.to_json(),
+                                        },
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                        if !parts.is_empty() {
+                            contents.push(Content {
+                                role: "model".to_string(),
+                                parts,
+                            });
+                        }
+                    }
                 }
             }
         }

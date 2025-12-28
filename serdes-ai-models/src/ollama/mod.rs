@@ -212,6 +212,21 @@ impl OllamaModel {
                             tool_calls: None,
                         });
                     }
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add assistant response for proper alternation
+                        let mut text_content = String::new();
+                        for resp_part in &response.parts {
+                            if let serdes_ai_core::ModelResponsePart::Text(t) = resp_part {
+                                text_content.push_str(&t.content);
+                            }
+                        }
+                        result.push(types::Message {
+                            role: "assistant".to_string(),
+                            content: text_content,
+                            images: None,
+                            tool_calls: None,
+                        });
+                    }
                 }
             }
         }

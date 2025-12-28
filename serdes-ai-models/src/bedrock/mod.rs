@@ -304,6 +304,31 @@ impl BedrockModel {
                     }
                     // System prompts are handled separately
                     ModelRequestPart::SystemPrompt(_) => {}
+                    ModelRequestPart::ModelResponse(response) => {
+                        // Add assistant response for proper alternation
+                        let mut content = Vec::new();
+                        for resp_part in &response.parts {
+                            match resp_part {
+                                serdes_ai_core::ModelResponsePart::Text(t) => {
+                                    content.push(types::Content::Text { text: t.content.clone() });
+                                }
+                                serdes_ai_core::ModelResponsePart::ToolCall(tc) => {
+                                    content.push(types::Content::ToolUse {
+                                        tool_use_id: tc.tool_call_id.clone().unwrap_or_default(),
+                                        name: tc.tool_name.clone(),
+                                        input: tc.args.to_json(),
+                                    });
+                                }
+                                _ => {}
+                            }
+                        }
+                        if !content.is_empty() {
+                            result.push(types::Message {
+                                role: types::Role::Assistant,
+                                content,
+                            });
+                        }
+                    }
                 }
             }
         }

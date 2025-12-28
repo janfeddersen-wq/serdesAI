@@ -138,6 +138,20 @@ impl TruncateByTokens {
                     // Estimate based on content type
                     b.content_type().len() + 100
                 }
+                serdes_ai_core::ModelRequestPart::ModelResponse(r) => {
+                    // Estimate based on response parts
+                    r.parts.iter().map(|p| {
+                        match p {
+                            serdes_ai_core::ModelResponsePart::Text(t) => t.content.len(),
+                            serdes_ai_core::ModelResponsePart::ToolCall(tc) => {
+                                tc.tool_name.len() + tc.args.to_json_string().map(|s| s.len()).unwrap_or(50)
+                            }
+                            serdes_ai_core::ModelResponsePart::Thinking(t) => t.content.len(),
+                            serdes_ai_core::ModelResponsePart::File(_) => 100,
+                            serdes_ai_core::ModelResponsePart::BuiltinToolCall(_) => 100,
+                        }
+                    }).sum::<usize>()
+                }
             }
         }).sum();
 

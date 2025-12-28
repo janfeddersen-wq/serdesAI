@@ -16,9 +16,11 @@
 //! ```
 
 mod model;
+pub mod stream;
 mod types;
 
 pub use model::ClaudeCodeOAuthModel;
+pub use stream::ClaudeCodeStreamParser;
 pub use types::*;
 
 /// Default Claude Code models (dynamically discovered, these are common ones).
