@@ -5,8 +5,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::parse::Parser;
 use syn::{
-    parse_macro_input, punctuated::Punctuated, DeriveInput, Error, FnArg, ItemFn, Meta, Pat,
-    PatType, Token, Type,
+    parse_macro_input, punctuated::Punctuated, DeriveInput, Error, FnArg, ItemFn, Meta, Pat, Token,
+    Type,
 };
 
 struct ParamInfo {
@@ -86,7 +86,7 @@ pub fn tool_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream 
     let fn_asyncness = &input.sig.asyncness;
 
     let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
-    let args = match parser.parse(attr.into()) {
+    let args = match parser.parse(attr) {
         Ok(args) => args,
         Err(err) => return err.to_compile_error().into(),
     };

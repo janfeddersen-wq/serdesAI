@@ -233,6 +233,7 @@ impl ModelApiError {
     }
 }
 
+/// Deprecated alias for [`ModelApiError`].
 #[deprecated(note = "Use ModelApiError instead")]
 pub type ModelAPIError = ModelApiError;
 
@@ -317,6 +318,7 @@ impl ModelHttpError {
     }
 }
 
+/// Deprecated alias for [`ModelHttpError`].
 #[deprecated(note = "Use ModelHttpError instead")]
 pub type ModelHTTPError = ModelHttpError;
 

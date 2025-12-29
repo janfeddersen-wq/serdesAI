@@ -8,8 +8,8 @@ use bytes::Bytes;
 use futures::Stream;
 use pin_project_lite::pin_project;
 use serdes_ai_core::messages::{
-    ModelResponsePartDelta, ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent,
-    PartStartEvent, TextPart, ToolCallPart,
+    ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent, PartStartEvent, TextPart, ToolCallArgs,
+    ToolCallPart,
 };
 use serdes_ai_core::ModelResponsePart;
 use std::collections::HashMap;
@@ -32,6 +32,8 @@ pin_project! {
         next_part_index: usize,
         // Finished
         done: bool,
+        // Pending PartEnd events to emit (queued when multiple parts close at once)
+        pending_part_ends: Vec<usize>,
     }
 }
 
@@ -59,6 +61,7 @@ where
             current_text_index: None,
             next_part_index: 0,
             done: false,
+            pending_part_ends: Vec::new(),
         }
     }
 }
@@ -76,6 +79,13 @@ where
             return Poll::Ready(None);
         }
 
+        // First, emit any pending PartEnd events
+        if let Some(idx) = this.pending_part_ends.pop() {
+            return Poll::Ready(Some(Ok(ModelResponseStreamEvent::PartEnd(
+                PartEndEvent { index: idx },
+            ))));
+        }
+
         loop {
             // Check if we have complete lines in the buffer
             while let Some(newline_pos) = this.buffer.find('\n') {
@@ -87,6 +97,7 @@ where
                     this.current_text_index,
                     this.next_part_index,
                     this.done,
+                    this.pending_part_ends,
                 ) {
                     return Poll::Ready(Some(event));
                 }
@@ -115,6 +126,7 @@ where
                                 this.current_text_index,
                                 this.next_part_index,
                                 this.done,
+                                this.pending_part_ends,
                             ) {
                                 return Poll::Ready(Some(event));
                             }
@@ -136,6 +148,7 @@ fn parse_sse_line(
     current_text_index: &mut Option<usize>,
     next_part_index: &mut usize,
     done: &mut bool,
+    pending_part_ends: &mut Vec<usize>,
 ) -> Option<Result<ModelResponseStreamEvent, ModelError>> {
     let line = line.trim();
 
@@ -211,10 +224,12 @@ fn parse_sse_line(
                                     // Start part if not started
                                     if !state.started {
                                         state.started = true;
+                                        // Include the accumulated args in PartStart (some providers
+                                        // like Cerebras send all tool call data in one chunk)
                                         let tool_part = ToolCallPart::new(
                                             &state.name,
-                                            serde_json::Value::Null,
-                                        ).with_id(&state.id);
+                                            ToolCallArgs::String(state.arguments.clone()),
+                                        ).with_tool_call_id(&state.id);
 
                                         let start = PartStartEvent::new(
                                             state.part_index,
@@ -236,18 +251,32 @@ fn parse_sse_line(
 
                     // Handle finish reason - emit part end events
                     if choice.finish_reason.is_some() {
+                        // Collect all part indices that need to be closed
+                        let mut parts_to_close = Vec::new();
+
                         // End text part if open
                         if let Some(idx) = current_text_index.take() {
-                            let end = PartEndEvent { index: idx };
-                            return Some(Ok(ModelResponseStreamEvent::PartEnd(end)));
+                            parts_to_close.push(idx);
                         }
 
                         // End tool call parts
                         for (_, state) in tool_calls.drain() {
                             if state.started {
-                                let end = PartEndEvent { index: state.part_index };
-                                return Some(Ok(ModelResponseStreamEvent::PartEnd(end)));
+                                parts_to_close.push(state.part_index);
                             }
+                        }
+
+                        // If we have parts to close, return the first one and queue the rest
+                        if !parts_to_close.is_empty() {
+                            // Queue all but the first for later emission
+                            if parts_to_close.len() > 1 {
+                                pending_part_ends.extend(parts_to_close.iter().skip(1).copied());
+                            }
+                            // Return the first one now
+                            let first_idx = parts_to_close[0];
+                            return Some(Ok(ModelResponseStreamEvent::PartEnd(PartEndEvent {
+                                index: first_idx,
+                            })));
                         }
                     }
                 }
@@ -266,6 +295,7 @@ mod tests {
     use super::*;
     use futures::stream;
     use futures::StreamExt;
+    use serdes_ai_core::ModelResponsePartDelta;
 
     fn make_chunk_bytes(data: &str) -> Bytes {
         Bytes::from(format!("data: {}\n\n", data))
@@ -366,5 +396,79 @@ mod tests {
         // Subsequent events should be deltas
         let event = parser.next().await.unwrap().unwrap();
         assert!(matches!(event, ModelResponseStreamEvent::PartDelta(_)));
+    }
+
+    /// Regression test: when finish_reason is received with multiple open parts
+    /// (text + tool calls), ALL PartEnd events must be emitted, not just the first.
+    #[tokio::test]
+    async fn test_multiple_part_ends_on_finish() {
+        // Scenario: text part starts, then 2 tool calls start, then finish_reason
+        // We should get 3 PartEnd events (one for text, two for tool calls)
+        let text_chunk = r#"{"id":"123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"Hello"}}]}"#;
+        let tool1_chunk = r#"{"id":"123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"search","arguments":"{\"q\":\"test\"}"}}]}}]}"#;
+        let tool2_chunk = r#"{"id":"123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_2","type":"function","function":{"name":"lookup","arguments":"{\"id\":1}"}}]}}]}"#;
+        let finish_chunk = r#"{"id":"123","object":"chat.completion.chunk","created":1234567890,"model":"gpt-4o","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#;
+
+        let bytes = vec![
+            Ok(make_chunk_bytes(text_chunk)),
+            Ok(make_chunk_bytes(tool1_chunk)),
+            Ok(make_chunk_bytes(tool2_chunk)),
+            Ok(make_chunk_bytes(finish_chunk)),
+        ];
+        let stream = stream::iter(bytes);
+        let mut parser = OpenAIStreamParser::new(stream);
+
+        // Collect all events
+        let mut events = Vec::new();
+        while let Some(result) = parser.next().await {
+            events.push(result.unwrap());
+        }
+
+        // Should have:
+        // - 1 PartStart for text (index 0)
+        // - 1 PartStart for tool call 1 (index 1)
+        // - 1 PartStart for tool call 2 (index 2)
+        // - 3 PartEnd events (for indices 0, 1, 2)
+        let part_starts: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, ModelResponseStreamEvent::PartStart(_)))
+            .collect();
+        let part_ends: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, ModelResponseStreamEvent::PartEnd(_)))
+            .collect();
+
+        assert_eq!(
+            part_starts.len(),
+            3,
+            "Expected 3 PartStart events, got {}: {:?}",
+            part_starts.len(),
+            part_starts
+        );
+        assert_eq!(
+            part_ends.len(),
+            3,
+            "Expected 3 PartEnd events (regression: bug caused only 1 to be emitted), got {}: {:?}",
+            part_ends.len(),
+            part_ends
+        );
+
+        // Verify all part indices are closed
+        let mut closed_indices: Vec<usize> = part_ends
+            .iter()
+            .filter_map(|e| {
+                if let ModelResponseStreamEvent::PartEnd(end) = e {
+                    Some(end.index)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        closed_indices.sort();
+        assert_eq!(
+            closed_indices,
+            vec![0, 1, 2],
+            "All part indices should be closed"
+        );
     }
 }

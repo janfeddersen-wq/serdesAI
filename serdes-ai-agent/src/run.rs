@@ -6,7 +6,7 @@ use crate::agent::{Agent, EndStrategy};
 use crate::context::{generate_run_id, RunContext, RunUsage, UsageLimits};
 use crate::errors::{AgentRunError, OutputParseError, OutputValidationError};
 use chrono::Utc;
-use serdes_ai_core::messages::{RetryPromptPart, ToolReturnPart, UserContent, ToolReturnContent};
+use serdes_ai_core::messages::{RetryPromptPart, ToolReturnPart, UserContent};
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
 };
@@ -87,6 +87,7 @@ impl<Output> AgentRunResult<Output> {
 /// Active agent run that can be iterated.
 pub struct AgentRun<'a, Deps, Output> {
     agent: &'a Agent<Deps, Output>,
+    #[allow(dead_code)]
     deps: Arc<Deps>,
     state: AgentRunState<Output>,
     ctx: RunContext<Deps>,

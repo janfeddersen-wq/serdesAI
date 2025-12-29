@@ -2,7 +2,7 @@
 
 use crate::case::Case;
 use crate::error::{EvalError, EvalResult};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// A collection of test cases.

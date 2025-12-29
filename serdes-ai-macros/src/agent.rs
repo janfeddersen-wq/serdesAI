@@ -18,7 +18,7 @@ pub fn agent_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
-    let args = match parser.parse(attr.into()) {
+    let args = match parser.parse(attr) {
         Ok(args) => args,
         Err(err) => return err.to_compile_error().into(),
     };

@@ -3,7 +3,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::marker::PhantomData;
 
 /// Result of an evaluation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -263,7 +262,7 @@ impl EvaluatorSet {
     }
 
     /// Add an evaluator.
-    pub fn add<E: Evaluator + 'static>(mut self, evaluator: E) -> Self {
+    pub fn with_evaluator<E: Evaluator + 'static>(mut self, evaluator: E) -> Self {
         self.evaluators.push(Box::new(evaluator));
         self
     }

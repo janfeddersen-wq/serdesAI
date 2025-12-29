@@ -164,7 +164,7 @@ pub fn generate_flowchart(
 
 /// Generate a state diagram.
 pub fn generate_state_diagram(
-    states: &[&str],
+    _states: &[&str],
     transitions: &[(&str, &str, &str)],
 ) -> String {
     let mut output = String::new();
@@ -207,6 +207,7 @@ pub struct MermaidBuilder {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 enum DiagramType {
     #[default]
     Flowchart,
@@ -215,6 +216,7 @@ enum DiagramType {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct NodeSpec {
     id: String,
     label: String,
@@ -223,6 +225,7 @@ struct NodeSpec {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 enum NodeShape {
     #[default]
     Rectangle,
@@ -234,6 +237,7 @@ enum NodeShape {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct EdgeSpec {
     from: String,
     to: String,
@@ -242,6 +246,7 @@ struct EdgeSpec {
 }
 
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 enum EdgeStyle {
     #[default]
     Solid,
@@ -409,7 +414,7 @@ mod tests {
 
         assert!(diagram.contains("flowchart TD"));
         assert!(diagram.contains("start[start]"));
-        assert!(diagram.contains("process --> end").not());
+        assert!(!diagram.contains("process --> end"));
         assert!(diagram.contains("|done|"));
     }
 
@@ -454,15 +459,5 @@ mod tests {
         assert_eq!(opts.direction, MermaidDirection::LeftRight);
         assert_eq!(opts.theme, Some("dark".to_string()));
         assert!(opts.include_descriptions);
-    }
-}
-
-trait BoolNot {
-    fn not(&self) -> bool;
-}
-
-impl BoolNot for bool {
-    fn not(&self) -> bool {
-        !*self
     }
 }

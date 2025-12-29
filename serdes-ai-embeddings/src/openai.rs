@@ -103,6 +103,7 @@ struct OpenAIEmbeddingData {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenAIUsage {
     prompt_tokens: u64,
     total_tokens: u64,
@@ -114,6 +115,7 @@ struct OpenAIErrorResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenAIError {
     message: String,
     #[serde(rename = "type")]

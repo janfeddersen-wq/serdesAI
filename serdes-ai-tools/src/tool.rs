@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::{
     definition::ToolDefinition,
-    return_types::{ToolResult, ToolReturn},
+    return_types::ToolResult,
     schema::SchemaBuilder,
     RunContext,
 };
@@ -313,6 +313,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ToolReturn;
 
     #[derive(Debug, Clone, Default)]
     struct TestDeps;

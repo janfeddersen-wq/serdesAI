@@ -430,7 +430,6 @@ impl<State: GraphState + 'static> Default for SimpleGraph<State> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::End;
     use async_trait::async_trait;
 
     #[derive(Debug, Clone, Default)]

@@ -140,6 +140,7 @@ where
         matches!(self.state, StreamState::Completed | StreamState::Failed)
     }
 
+    #[allow(dead_code)]
     fn process_delta(&mut self, delta: ResponseDelta) {
         match &delta {
             ResponseDelta::Text { index, content } => {

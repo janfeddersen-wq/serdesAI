@@ -14,6 +14,7 @@ categories = ["development-tools"]
 default = []
 full = ["tracing-integration"]
 tracing-integration = ["dep:tracing", "serdes-ai-core/tracing-integration"]
+regex = ["dep:regex"]
 
 [dependencies]
 serdes-ai-core = { workspace = true }
@@ -28,6 +29,7 @@ async-trait = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 tracing = { workspace = true, optional = true }
+regex = { workspace = true, optional = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 pin-project-lite = { workspace = true }

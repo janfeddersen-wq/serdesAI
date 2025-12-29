@@ -2,7 +2,7 @@
 
 use crate::case::Case;
 use crate::dataset::Dataset;
-use crate::error::{EvalError, EvalResult};
+use crate::error::EvalResult;
 use crate::evaluator::{EvaluationResult, Evaluator, EvaluatorSet, NamedEvaluationResult};
 use crate::report::{CaseResult, EvaluationReport};
 use std::future::Future;
@@ -92,7 +92,7 @@ impl EvalRunner {
 
     /// Add an evaluator.
     pub fn evaluator<E: Evaluator + 'static>(mut self, evaluator: E) -> Self {
-        self.evaluators = self.evaluators.add(evaluator);
+        self.evaluators = self.evaluators.with_evaluator(evaluator);
         self
     }
 

@@ -216,6 +216,7 @@ impl McpClient {
 pub struct McpClientBuilder {
     command: Option<String>,
     args: Vec<String>,
+    #[allow(dead_code)]
     url: Option<String>,
 }
 

@@ -68,19 +68,14 @@ impl Default for CachePoint {
 }
 
 /// Type of caching to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CacheType {
     /// Ephemeral cache (short-lived).
+    #[default]
     Ephemeral,
     /// Persistent cache (long-lived).
     Persistent,
-}
-
-impl Default for CacheType {
-    fn default() -> Self {
-        Self::Ephemeral
-    }
 }
 
 impl std::fmt::Display for CacheType {

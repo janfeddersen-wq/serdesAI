@@ -1,6 +1,6 @@
 //! State persistence for graph execution.
 
-use crate::error::{GraphError, GraphResult};
+use crate::error::GraphError;
 use async_trait::async_trait;
 use parking_lot::RwLock;
 use serde::{de::DeserializeOwned, Serialize};

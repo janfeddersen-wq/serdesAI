@@ -243,7 +243,7 @@ impl<F, Deps> std::fmt::Debug for AsyncFnTool<F, Deps> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serdes_ai_tools::{PropertySchema, SyncFunctionTool};
+    use serdes_ai_tools::PropertySchema;
 
     struct EchoTool;
 

@@ -1,6 +1,6 @@
 //! Evaluation reports and summaries.
 
-use crate::evaluator::{EvaluationResult, NamedEvaluationResult};
+use crate::evaluator::NamedEvaluationResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
@@ -376,6 +376,7 @@ mod duration_serde {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::evaluator::EvaluationResult;
 
     fn make_case(name: &str, passed: bool) -> CaseResult<String> {
         let result = if passed {

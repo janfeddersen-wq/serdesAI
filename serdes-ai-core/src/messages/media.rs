@@ -8,12 +8,13 @@ use std::fmt;
 use std::str::FromStr;
 
 /// Image media types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageMediaType {
     /// JPEG image.
     Jpeg,
     /// PNG image.
+    #[default]
     Png,
     /// GIF image.
     Gif,
@@ -77,19 +78,15 @@ impl FromStr for ImageMediaType {
     }
 }
 
-impl Default for ImageMediaType {
-    fn default() -> Self {
-        Self::Png
-    }
-}
 
 /// Audio media types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AudioMediaType {
     /// WAV audio.
     Wav,
     /// MPEG audio (MP3).
+    #[default]
     Mpeg,
     /// Ogg Vorbis audio.
     Ogg,
@@ -171,17 +168,13 @@ impl FromStr for AudioMediaType {
     }
 }
 
-impl Default for AudioMediaType {
-    fn default() -> Self {
-        Self::Mpeg
-    }
-}
 
 /// Video media types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VideoMediaType {
     /// MP4 video.
+    #[default]
     Mp4,
     /// WebM video.
     Webm,
@@ -277,11 +270,6 @@ impl FromStr for VideoMediaType {
     }
 }
 
-impl Default for VideoMediaType {
-    fn default() -> Self {
-        Self::Mp4
-    }
-}
 
 /// Document media types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

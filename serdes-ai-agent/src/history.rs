@@ -340,6 +340,7 @@ pub struct SummarizeHistory {
     /// Number of recent messages to keep.
     keep_recent: usize,
     /// Token threshold before summarization.
+    #[allow(dead_code)]
     threshold_tokens: u64,
 }
 

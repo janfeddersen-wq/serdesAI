@@ -134,6 +134,7 @@ where
 }
 
 /// A node that runs an agent.
+#[allow(dead_code)]
 pub struct AgentNode<State, Agent, UpdateFn>
 where
     UpdateFn: Fn(State, &Agent) -> State + Send + Sync,
@@ -169,6 +170,7 @@ pub struct RouterNode<State, F>
 where
     F: Fn(&State) -> String + Send + Sync,
 {
+    #[allow(dead_code)]
     name: String,
     router: F,
     _phantom: PhantomData<State>,
@@ -194,6 +196,7 @@ where
 }
 
 /// A conditional node that branches based on state.
+#[allow(dead_code)]
 pub struct ConditionalNode<State, Cond, Then, Else>
 where
     Cond: Fn(&State) -> bool + Send + Sync,

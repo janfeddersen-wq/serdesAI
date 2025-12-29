@@ -141,6 +141,7 @@ pub struct ClaudeResponse {
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
+#[allow(missing_docs)]
 pub enum ResponseContentBlock {
     #[serde(rename = "text")]
     Text { text: String },
@@ -163,6 +164,7 @@ pub enum ResponseContentBlock {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[allow(missing_docs)]
 pub struct ClaudeUsage {
     #[serde(default)]
     pub input_tokens: u32,

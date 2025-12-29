@@ -3,11 +3,25 @@
 //! This module provides streaming support for agent runs with real
 //! character-by-character streaming from the model.
 
-use crate::agent::{Agent, EndStrategy};
+use crate::agent::{Agent, RegisteredTool};
+use crate::context::{generate_run_id, RunContext, RunUsage};
+use crate::errors::AgentRunError;
+use crate::run::RunOptions;
+use chrono::Utc;
+use futures::{Stream, StreamExt};
+use serdes_ai_core::messages::{ModelResponseStreamEvent, ToolReturnPart, UserContent};
+use serdes_ai_core::{
+    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
+};
+use serdes_ai_models::ModelRequestParameters;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use tokio::sync::mpsc;
 
 // Conditional tracing - use no-op macros when tracing feature is disabled
 #[cfg(feature = "tracing-integration")]
-use tracing::{debug, info, error, warn};
+use tracing::{debug, error, info, warn};
 
 #[cfg(not(feature = "tracing-integration"))]
 macro_rules! debug { ($($arg:tt)*) => {} }
@@ -17,24 +31,6 @@ macro_rules! info { ($($arg:tt)*) => {} }
 macro_rules! error { ($($arg:tt)*) => {} }
 #[cfg(not(feature = "tracing-integration"))]
 macro_rules! warn { ($($arg:tt)*) => {} }
-use crate::context::{generate_run_id, RunContext, RunUsage, UsageLimits};
-use crate::errors::AgentRunError;
-use crate::output::OutputSchema;
-use crate::run::RunOptions;
-use chrono::Utc;
-use futures::{Stream, StreamExt};
-use serdes_ai_core::messages::{
-    ModelResponseStreamEvent, RetryPromptPart, ToolReturnPart, UserContent,
-};
-use serdes_ai_core::{
-    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
-};
-use serdes_ai_models::{Model, ModelRequestParameters};
-use serdes_ai_tools::{ToolDefinition, ToolError, ToolReturn};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use tokio::sync::mpsc;
 
 /// Events emitted during streaming.
 #[derive(Debug, Clone)]
@@ -68,21 +64,7 @@ pub enum AgentStreamEvent {
     Error { message: String },
 }
 
-/// Tool executor function type for the streaming context.
-type ToolExecutorFn = Box<
-    dyn Fn(
-            serde_json::Value,
-        ) -> Pin<Box<dyn std::future::Future<Output = Result<ToolReturn, ToolError>> + Send>>
-        + Send
-        + Sync,
->;
 
-/// Tool info for streaming execution.
-struct StreamingTool {
-    name: String,
-    executor: ToolExecutorFn,
-    max_retries: u32,
-}
 
 /// Streaming agent execution.
 ///
@@ -115,60 +97,30 @@ impl AgentStream {
 
         // Clone what we need for the spawned task
         let model = agent.model_arc();
+        let model_name = model.name().to_string();
         let model_settings = options
             .model_settings
             .clone()
             .unwrap_or_else(|| agent.model_settings.clone());
-        
+
         // Get the static system prompt - for streaming we use just the static part
         // Dynamic prompts are not supported in streaming mode for simplicity
         let static_system_prompt = agent.static_system_prompt().to_string();
-        
+
         let tool_definitions = agent.tool_definitions();
-        let end_strategy = agent.end_strategy;
+        let _end_strategy = agent.end_strategy;
         let usage_limits = agent.usage_limits.clone();
         let run_usage_limits = options.usage_limits.clone();
 
-        // Capture tool executors
-        // We need to wrap them in a way that doesn't require Deps at runtime
-        let deps = Arc::new(deps);
-        let model_name = model.name().to_string();
-        
-        // Create tool executor closures that capture deps
-        let mut streaming_tools: Vec<StreamingTool> = Vec::new();
-        for registered_tool in &agent.tools {
-            let tool_name = registered_tool.definition.name.clone();
-            let max_retries = registered_tool.max_retries;
-            
-            // We can't easily clone the executor, so we'll handle tools differently
-            // For now, we'll store the tool info and execute them via a different path
-            streaming_tools.push(StreamingTool {
-                name: tool_name,
-                executor: Box::new(|_| Box::pin(async { 
-                    Err(ToolError::ExecutionFailed { 
-                        message: "Streaming tool execution not yet fully implemented".to_string(),
-                        retryable: false,
-                    })
-                })),
-                max_retries,
-            });
-        }
+        // Clone tool executors - now possible because RegisteredTool implements Clone!
+        let tools: Vec<RegisteredTool<Deps>> = agent.tools.iter().cloned().collect();
 
-        // Clone tool info for the spawned task
-        let tools_info: Vec<(String, u32)> = agent.tools
-            .iter()
-            .map(|t| (t.definition.name.clone(), t.max_retries))
-            .collect();
+        // Wrap deps in Arc for shared access in tool execution
+        let deps = Arc::new(deps);
 
         let initial_history = options.message_history.clone();
-        let metadata = options.metadata.clone();
+        let _metadata = options.metadata.clone();
         let run_id_clone = run_id.clone();
-
-        // For tool execution, we need to work around the lifetime issues
-        // by collecting the necessary data upfront
-        let agent_tools = agent.tools.iter().map(|t| {
-            t.definition.clone()
-        }).collect::<Vec<_>>();
 
         debug!(run_id = %run_id, "AgentStream: spawning streaming task");
         
@@ -209,7 +161,7 @@ impl AgentStream {
             let mut usage = RunUsage::new();
             let mut step = 0u32;
             let mut finished = false;
-            let mut finish_reason: Option<FinishReason> = None;
+            let mut finish_reason: Option<FinishReason>;
 
             // Main agent loop
             while !finished {
@@ -269,12 +221,13 @@ impl AgentStream {
 
                 // Collect response parts while streaming
                 let mut response_parts: Vec<ModelResponsePart> = Vec::new();
+                // Track stream events (used by tracing when enabled)
                 let mut stream_event_count = 0u32;
 
                 // Process stream events
                 debug!("AgentStream: starting to process model stream events");
                 while let Some(event_result) = model_stream.next().await {
-                    stream_event_count += 1;
+                    { stream_event_count += 1; let _ = stream_event_count; }
                     match event_result {
                         Ok(event) => {
                             match event {
@@ -333,7 +286,7 @@ impl AgentStream {
                                                 }))
                                                 .await;
                                             // Update args
-                                            if let Some(ModelResponsePart::ToolCall(ref mut tool_call)) =
+                                            if let Some(ModelResponsePart::ToolCall(ref mut _tool_call)) =
                                                 response_parts.get_mut(delta.index)
                                             {
                                                 // Accumulate args - this is a simplification
@@ -422,50 +375,74 @@ impl AgentStream {
 
                         usage.record_tool_call();
 
-                        // Note: Actual tool execution requires access to the tool executors
-                        // which have lifetime constraints. For now, we emit a "not implemented"
-                        // error for tools. This is a limitation of the streaming implementation.
-                        // The non-streaming run() path handles tools properly.
-                        
-                        // Check if tool exists
-                        let tool_exists = tools_info.iter().any(|(name, _)| name == &tc.tool_name);
-                        
-                        if tool_exists {
-                            // We can't execute the tool in the streaming context due to lifetime issues.
-                            // Return a placeholder result.
-                            let _ = tx
-                                .send(Ok(AgentStreamEvent::ToolExecuted {
-                                    tool_name: tc.tool_name.clone(),
-                                    success: false,
-                                }))
-                                .await;
+                        // Find the tool by name
+                        let tool = tools.iter().find(|t| t.definition.name == tc.tool_name);
 
-                            let part = RetryPromptPart::new(format!(
-                                "Tool '{}' execution in streaming mode is not yet supported. \
-                                Please use run() instead of run_stream() for tool-using agents.",
-                                tc.tool_name
-                            )).with_tool_name(&tc.tool_name);
-                            
-                            if let Some(id) = tc.tool_call_id.clone() {
-                                tool_req.parts.push(ModelRequestPart::RetryPrompt(
-                                    part.with_tool_call_id(id)
-                                ));
-                            } else {
-                                tool_req.parts.push(ModelRequestPart::RetryPrompt(part));
+                        match tool {
+                            Some(tool) => {
+                                // Create a RunContext for tool execution
+                                let tool_ctx = RunContext::with_shared_deps(
+                                    deps.clone(),
+                                    model_name.clone(),
+                                ).for_tool(&tc.tool_name, tc.tool_call_id.clone());
+
+                                // Execute the tool
+                                let result = tool.executor.execute(tc.args.to_json(), &tool_ctx).await;
+
+                                match result {
+                                    Ok(ret) => {
+                                        let _ = tx
+                                            .send(Ok(AgentStreamEvent::ToolExecuted {
+                                                tool_name: tc.tool_name.clone(),
+                                                success: true,
+                                            }))
+                                            .await;
+
+                                        // Use ToolReturnPart for successful execution
+                                        let mut part = ToolReturnPart::new(&tc.tool_name, ret.content);
+                                        if let Some(id) = tc.tool_call_id.clone() {
+                                            part = part.with_tool_call_id(id);
+                                        }
+                                        tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                                    }
+                                    Err(e) => {
+                                        let _ = tx
+                                            .send(Ok(AgentStreamEvent::ToolExecuted {
+                                                tool_name: tc.tool_name.clone(),
+                                                success: false,
+                                            }))
+                                            .await;
+
+                                        // Use ToolReturnPart with error content for tool errors
+                                        let mut part = ToolReturnPart::error(
+                                            &tc.tool_name,
+                                            format!("Tool error: {}", e),
+                                        );
+                                        if let Some(id) = tc.tool_call_id.clone() {
+                                            part = part.with_tool_call_id(id);
+                                        }
+                                        tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                                    }
+                                }
                             }
-                        } else {
-                            let _ = tx
-                                .send(Ok(AgentStreamEvent::ToolExecuted {
-                                    tool_name: tc.tool_name.clone(),
-                                    success: false,
-                                }))
-                                .await;
+                            None => {
+                                let _ = tx
+                                    .send(Ok(AgentStreamEvent::ToolExecuted {
+                                        tool_name: tc.tool_name.clone(),
+                                        success: false,
+                                    }))
+                                    .await;
 
-                            let part = RetryPromptPart::new(format!(
-                                "Tool '{}' not found",
-                                tc.tool_name
-                            )).with_tool_name(&tc.tool_name);
-                            tool_req.parts.push(ModelRequestPart::RetryPrompt(part));
+                                // Unknown tool - use ToolReturnPart with error
+                                let mut part = ToolReturnPart::error(
+                                    &tc.tool_name,
+                                    format!("Unknown tool: {}", tc.tool_name),
+                                );
+                                if let Some(id) = tc.tool_call_id.clone() {
+                                    part = part.with_tool_call_id(id);
+                                }
+                                tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                            }
                         }
                     }
 

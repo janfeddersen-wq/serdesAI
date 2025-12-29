@@ -289,10 +289,14 @@ pub async fn load_mcp_servers(
                 let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
                 McpToolset::stdio(&command, &args_refs).await?
             }
-            McpTransportConfig::Http { url } => {
+            McpTransportConfig::Http { url: _ } => {
                 #[cfg(feature = "reqwest")]
                 {
-                    McpToolset::http(&url).await?
+                    if let McpTransportConfig::Http { url } = &config.transport {
+                        McpToolset::http(url).await?
+                    } else {
+                        unreachable!()
+                    }
                 }
                 #[cfg(not(feature = "reqwest"))]
                 {
@@ -301,10 +305,14 @@ pub async fn load_mcp_servers(
                     ));
                 }
             }
-            McpTransportConfig::Sse { url } => {
+            McpTransportConfig::Sse { url: _ } => {
                 #[cfg(feature = "reqwest")]
                 {
-                    McpToolset::http(&url).await?
+                    if let McpTransportConfig::Sse { url } = &config.transport {
+                        McpToolset::http(url).await?
+                    } else {
+                        unreachable!()
+                    }
                 }
                 #[cfg(not(feature = "reqwest"))]
                 {

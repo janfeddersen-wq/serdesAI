@@ -477,12 +477,14 @@ impl PropertySchema {
 }
 
 /// Trait for types that can generate a JSON schema.
+#[allow(dead_code)]
 pub(crate) trait JsonSchemaGenerator {
     /// Generate a JSON schema for this type.
     fn json_schema() -> JsonValue;
 }
 
 /// Common JSON schema types.
+#[allow(dead_code)]
 pub(crate) mod types {
     use serde_json::Value as JsonValue;
 

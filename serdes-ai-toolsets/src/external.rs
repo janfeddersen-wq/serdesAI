@@ -151,7 +151,6 @@ impl<Deps> std::fmt::Debug for ExternalToolset<Deps> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serdes_ai_tools::ObjectJsonSchema;
 
     #[test]
     fn test_external_toolset_new() {

@@ -24,8 +24,8 @@ use crate::{AbstractToolset, BoxedToolset, ToolsetTool};
 /// let toolset2 = FunctionToolset::with_id("tools2").tool(tool_b);
 ///
 /// let combined = CombinedToolset::new()
-///     .add(toolset1)
-///     .add(toolset2);
+///     .with_toolset(toolset1)
+///     .with_toolset(toolset2);
 /// ```
 pub struct CombinedToolset<Deps = ()> {
     id: Option<String>,
@@ -53,7 +53,7 @@ impl<Deps> CombinedToolset<Deps> {
 
     /// Add a toolset.
     #[must_use]
-    pub fn add<T: AbstractToolset<Deps> + 'static>(mut self, toolset: T) -> Self {
+    pub fn with_toolset<T: AbstractToolset<Deps> + 'static>(mut self, toolset: T) -> Self {
         self.toolsets.push(Box::new(toolset));
         self
     }
@@ -290,7 +290,7 @@ mod tests {
         let ts1 = FunctionToolset::new().with_id("ts1").tool(ToolA);
         let ts2 = FunctionToolset::new().with_id("ts2").tool(ToolB);
 
-        let combined = CombinedToolset::new().add(ts1).add(ts2);
+        let combined = CombinedToolset::new().with_toolset(ts1).with_toolset(ts2);
 
         let ctx = RunContext::minimal("test");
         let tools = combined.get_tools(&ctx).await.unwrap();
@@ -305,7 +305,7 @@ mod tests {
         let ts1 = FunctionToolset::new().tool(ToolA);
         let ts2 = FunctionToolset::new().tool(ToolB);
 
-        let combined = CombinedToolset::new().add(ts1).add(ts2);
+        let combined = CombinedToolset::new().with_toolset(ts1).with_toolset(ts2);
 
         let ctx = RunContext::minimal("test");
         let tools = combined.get_tools(&ctx).await.unwrap();
@@ -324,7 +324,7 @@ mod tests {
         let ts1 = FunctionToolset::new().with_id("ts1").tool(ToolA);
         let ts2 = FunctionToolset::new().with_id("ts2").tool(ConflictingTool);
 
-        let combined = CombinedToolset::new().add(ts1).add(ts2);
+        let combined = CombinedToolset::new().with_toolset(ts1).with_toolset(ts2);
 
         let ctx = RunContext::minimal("test");
         let result = combined.get_tools(&ctx).await;
@@ -391,7 +391,7 @@ mod tests {
             exit_count: exit_count.clone(),
         };
 
-        let combined = CombinedToolset::new().add(ts1).add(ts2);
+        let combined = CombinedToolset::new().with_toolset(ts1).with_toolset(ts2);
 
         combined.enter().await.unwrap();
         assert_eq!(enter_count.load(Ordering::SeqCst), 2);

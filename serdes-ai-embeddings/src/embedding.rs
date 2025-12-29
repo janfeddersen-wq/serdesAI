@@ -194,6 +194,7 @@ impl EmbeddingBatch {
     }
 
     /// Calculate pairwise similarity matrix.
+    #[allow(clippy::needless_range_loop)]
     pub fn similarity_matrix(&self) -> Vec<Vec<f32>> {
         let n = self.embeddings.len();
         let mut matrix = vec![vec![0.0; n]; n];

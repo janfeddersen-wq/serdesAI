@@ -1,8 +1,6 @@
 //! Local HTTP callback server for OAuth redirects.
 
 use std::net::TcpListener;
-use std::sync::Arc;
-use tokio::sync::oneshot;
 
 use super::config::OAuthConfig;
 

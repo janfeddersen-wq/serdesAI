@@ -175,7 +175,7 @@ where
     {
         self.tools.push(RegisteredTool {
             definition,
-            executor: Box::new(executor),
+            executor: Arc::new(executor),
             max_retries: self.max_tool_retries,
         });
         self
@@ -208,7 +208,7 @@ where
 
         self.tools.push(RegisteredTool {
             definition,
-            executor: Box::new(executor),
+            executor: Arc::new(executor),
             max_retries: self.max_tool_retries,
         });
         self
@@ -238,7 +238,7 @@ where
 
         self.tools.push(RegisteredTool {
             definition,
-            executor: Box::new(executor),
+            executor: Arc::new(executor),
             max_retries: self.max_tool_retries,
         });
         self

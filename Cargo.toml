@@ -89,6 +89,9 @@ criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 rstest = "0.18"
 pretty_assertions = "1.4"
 
+# Regex
+regex = "1.10"
+
 # Internal crates
 serdes-ai-core = { path = "serdes-ai-core", version = "0.1.0" }
 serdes-ai-agent = { path = "serdes-ai-agent", version = "0.1.0" }

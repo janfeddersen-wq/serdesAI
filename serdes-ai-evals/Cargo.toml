@@ -31,3 +31,8 @@ regex = "1.10"
 [dev-dependencies]
 tokio-test = { workspace = true }
 rstest = { workspace = true }
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "agent_benchmarks"
+harness = false

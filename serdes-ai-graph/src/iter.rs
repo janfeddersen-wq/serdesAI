@@ -168,7 +168,7 @@ mod tests {
 
     #[derive(Debug, Clone, Default)]
     struct TestState {
-        value: i32,
+        _value: i32,
     }
 
     #[test]

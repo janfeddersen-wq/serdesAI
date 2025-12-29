@@ -112,6 +112,7 @@ impl Provider for GoogleProvider {
 
 /// Vertex AI provider.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct VertexAIProvider {
     config: ProviderConfig,
     client: Client,

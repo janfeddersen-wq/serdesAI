@@ -247,6 +247,7 @@ pub struct TruncationConfig {
 /// Input item for the Responses API.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "role")]
+#[allow(missing_docs)]
 pub enum ResponseInput {
     /// User message.
     #[serde(rename = "user")]
@@ -279,6 +280,7 @@ pub enum ResponseInputContent {
 /// Part of multi-part input content.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
+#[allow(missing_docs)]
 pub enum ResponseInputPart {
     /// Text content.
     #[serde(rename = "input_text")]
@@ -309,6 +311,7 @@ pub enum ResponseInputPart {
 /// Tool definition for Responses API.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
+#[allow(missing_docs)]
 pub enum ResponseTool {
     /// Function tool (custom functions).
     #[serde(rename = "function")]
@@ -376,6 +379,7 @@ pub enum ResponseTool {
 
 /// User location for web search.
 #[derive(Debug, Clone, Serialize)]
+#[allow(missing_docs)]
 pub struct UserLocation {
     #[serde(rename = "type")]
     pub location_type: String,
@@ -391,6 +395,7 @@ pub struct UserLocation {
 
 /// Container configuration for code interpreter.
 #[derive(Debug, Clone, Serialize)]
+#[allow(missing_docs)]
 pub struct ContainerConfig {
     #[serde(rename = "type")]
     pub container_type: String,
@@ -400,6 +405,7 @@ pub struct ContainerConfig {
 
 /// Ranking options for file search.
 #[derive(Debug, Clone, Serialize)]
+#[allow(missing_docs)]
 pub struct RankingOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ranker: Option<String>,
@@ -409,6 +415,7 @@ pub struct RankingOptions {
 
 /// Image mask for image generation.
 #[derive(Debug, Clone, Serialize)]
+#[allow(missing_docs)]
 pub struct ImageMask {
     pub image_url: String,
     #[serde(rename = "type")]
@@ -462,6 +469,7 @@ pub enum ResponseStatus {
 
 /// Error in response.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(missing_docs)]
 pub struct ResponseError {
     pub code: String,
     pub message: String,
@@ -470,6 +478,7 @@ pub struct ResponseError {
 /// Output item from the Responses API.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
+#[allow(missing_docs)]
 pub enum ResponseOutputItem {
     /// Reasoning/thinking output.
     #[serde(rename = "reasoning")]
@@ -548,6 +557,7 @@ pub enum ResponseOutputItem {
 /// Reasoning summary item.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
+#[allow(missing_docs)]
 pub enum ReasoningSummaryItem {
     #[serde(rename = "summary_text")]
     Text { text: String },
@@ -556,6 +566,7 @@ pub enum ReasoningSummaryItem {
 /// Message content item.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
+#[allow(missing_docs)]
 pub enum MessageContentItem {
     #[serde(rename = "output_text")]
     Text {
@@ -570,6 +581,7 @@ pub enum MessageContentItem {
 /// Code interpreter result.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
+#[allow(missing_docs)]
 pub enum CodeInterpreterResult {
     #[serde(rename = "logs")]
     Logs { logs: String },
@@ -581,6 +593,7 @@ pub enum CodeInterpreterResult {
 
 /// File search result.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(missing_docs)]
 pub struct FileSearchResult {
     pub file_id: String,
     pub filename: String,
@@ -590,6 +603,7 @@ pub struct FileSearchResult {
 
 /// Image generation result.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(missing_docs)]
 pub struct ImageGenerationResult {
     pub image: Option<String>, // base64 or URL
     pub revised_prompt: Option<String>,
@@ -597,6 +611,7 @@ pub struct ImageGenerationResult {
 
 /// Token usage for Responses API.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(missing_docs)]
 pub struct ResponseUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -607,12 +622,14 @@ pub struct ResponseUsage {
 
 /// Input token details.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(missing_docs)]
 pub struct InputTokensDetails {
     pub cached_tokens: Option<u64>,
 }
 
 /// Output token details.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(missing_docs)]
 pub struct OutputTokensDetails {
     pub reasoning_tokens: Option<u64>,
 }

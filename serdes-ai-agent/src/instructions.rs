@@ -7,7 +7,6 @@ use crate::context::RunContext;
 use async_trait::async_trait;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::pin::Pin;
 
 /// Trait for generating dynamic instructions.
 ///

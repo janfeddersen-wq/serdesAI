@@ -3,11 +3,11 @@
 //! The Agent is the core type of serdes-ai. It orchestrates model calls,
 //! tool execution, and output validation.
 
-use crate::context::{RunContext, RunUsage, UsageLimits};
+use crate::context::{RunContext, UsageLimits};
 use crate::errors::AgentRunError;
 use crate::history::HistoryProcessor;
 use crate::instructions::{InstructionFn, SystemPromptFn};
-use crate::output::{OutputMode, OutputSchema, OutputValidator, TextOutputSchema};
+use crate::output::{OutputMode, OutputSchema, OutputValidator};
 use crate::run::{AgentRun, AgentRunResult, RunOptions};
 use crate::stream::AgentStream;
 use serdes_ai_core::messages::UserContent;
@@ -78,12 +78,14 @@ pub struct Agent<Deps = (), Output = String> {
     /// Maximum retries for output validation.
     pub(crate) max_output_retries: u32,
     /// Maximum retries for tools.
+    #[allow(dead_code)]
     pub(crate) max_tool_retries: u32,
     /// Usage limits.
     pub(crate) usage_limits: Option<UsageLimits>,
     /// History processors.
     pub(crate) history_processors: Vec<Box<dyn HistoryProcessor<Deps>>>,
     /// Instrumentation settings.
+    #[allow(dead_code)]
     pub(crate) instrument: Option<InstrumentationSettings>,
     pub(crate) _phantom: PhantomData<(Deps, Output)>,
 }
@@ -92,10 +94,20 @@ pub struct Agent<Deps = (), Output = String> {
 pub struct RegisteredTool<Deps> {
     /// Tool definition.
     pub definition: ToolDefinition,
-    /// Tool executor.
-    pub executor: Box<dyn ToolExecutor<Deps>>,
+    /// Tool executor (Arc-wrapped for clonability across async boundaries).
+    pub executor: Arc<dyn ToolExecutor<Deps>>,
     /// Max retries for this tool.
     pub max_retries: u32,
+}
+
+impl<Deps> Clone for RegisteredTool<Deps> {
+    fn clone(&self) -> Self {
+        Self {
+            definition: self.definition.clone(),
+            executor: Arc::clone(&self.executor),
+            max_retries: self.max_retries,
+        }
+    }
 }
 
 /// Trait for executing tools.
@@ -203,7 +215,7 @@ where
         prompt: impl Into<UserContent>,
         deps: Deps,
         options: RunOptions,
-    ) -> Result<AgentRun<Deps, Output>, AgentRunError> {
+    ) -> Result<AgentRun<'_, Deps, Output>, AgentRunError> {
         AgentRun::new(self, prompt.into(), deps, options).await
     }
 
@@ -290,6 +302,7 @@ where
     }
 
     /// Get the output tool name if output is via tool.
+    #[allow(dead_code)]
     pub(crate) fn output_tool_name(&self) -> Option<String> {
         self.output_schema.tool_name().map(|s| s.to_string())
     }

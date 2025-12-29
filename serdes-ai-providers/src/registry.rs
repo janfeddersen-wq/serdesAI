@@ -5,7 +5,7 @@
 //! - Model string inference (e.g., "openai:gpt-4o")
 //! - Auto-configuration from environment variables
 
-use crate::provider::{BoxedProvider, Provider, ProviderError};
+use crate::provider::{BoxedProvider, ProviderError};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -152,6 +152,7 @@ pub fn global_registry() -> &'static ProviderRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Provider;
     use reqwest::header::HeaderMap;
     use reqwest::Client;
     use serdes_ai_models::ModelProfile;

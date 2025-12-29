@@ -371,9 +371,9 @@ mod tests {
         }
 
         // Wait for all to complete
-        while let Some(_) = tasks.join_next().await {}
+        while tasks.join_next().await.is_some() {}
 
         // All tools should be there (but with possible overwrites for "echo")
-        assert!(toolset.len() >= 1);
+        assert!(!toolset.is_empty());
     }
 }

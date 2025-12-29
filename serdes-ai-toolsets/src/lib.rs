@@ -52,8 +52,8 @@
 //!
 //! // Combine into one
 //! let all_tools = CombinedToolset::new()
-//!     .add(prefixed_web)
-//!     .add(prefixed_local);
+//!     .with_toolset(prefixed_web)
+//!     .with_toolset(prefixed_local);
 //! ```
 
 #![warn(missing_docs)]

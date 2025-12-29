@@ -262,11 +262,9 @@ impl OpenAIChatModel {
             }
         }
 
-        let content = if content_parts.is_empty() {
-            None
-        } else {
-            Some(MessageContent::Text(content_parts.join("")))
-        };
+        // Always provide content as a string (empty if no text parts).
+        // Some providers (e.g., Cerebras) break when content is null with tool_calls.
+        let content = Some(MessageContent::Text(content_parts.join("")));
 
         ChatMessage {
             role: "assistant".to_string(),
@@ -398,7 +396,7 @@ impl OpenAIChatModel {
 
                 parts.push(ModelResponsePart::ToolCall(
                     ToolCallPart::new(tc.function.name, ToolCallArgs::Json(args))
-                        .with_id(tc.id)
+                        .with_tool_call_id(tc.id)
                 ));
             }
         }
