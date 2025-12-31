@@ -422,12 +422,19 @@ impl ToolCallPartDelta {
     /// Apply this delta to an existing ToolCallPart.
     pub fn apply(&self, part: &mut ToolCallPart) {
         if !self.args_delta.is_empty() {
-            // Append to existing args string representation
+            // Check if current args are empty (just "{}") - if so, replace instead of append
             let current = part
                 .args
                 .to_json_string()
                 .unwrap_or_else(|_| part.args.to_json().to_string());
-            let new_args = format!("{}{}", current, self.args_delta);
+            
+            let new_args = if current == "{}" || current.is_empty() {
+                // Start fresh with the delta
+                self.args_delta.clone()
+            } else {
+                // Append to existing args
+                format!("{}{}", current, self.args_delta)
+            };
             part.args = ToolCallArgs::String(new_args);
         }
         if self.tool_call_id.is_some() && part.tool_call_id.is_none() {
@@ -597,12 +604,19 @@ impl BuiltinToolCallPartDelta {
     /// Apply this delta to an existing BuiltinToolCallPart.
     pub fn apply(&self, part: &mut BuiltinToolCallPart) {
         if !self.args_delta.is_empty() {
-            // Append to existing args string representation
+            // Check if current args are empty (just "{}") - if so, replace instead of append
             let current = part
                 .args
                 .to_json_string()
                 .unwrap_or_else(|_| part.args.to_json().to_string());
-            let new_args = format!("{}{}", current, self.args_delta);
+            
+            let new_args = if current == "{}" || current.is_empty() {
+                // Start fresh with the delta
+                self.args_delta.clone()
+            } else {
+                // Append to existing args
+                format!("{}{}", current, self.args_delta)
+            };
             part.args = ToolCallArgs::String(new_args);
         }
         if self.tool_call_id.is_some() && part.tool_call_id.is_none() {

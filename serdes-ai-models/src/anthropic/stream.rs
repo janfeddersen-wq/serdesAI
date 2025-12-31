@@ -56,6 +56,7 @@ enum BlockState {
     },
     RedactedThinking {
         /// The encrypted signature data.
+        #[allow(dead_code)]
         signature: String,
     },
 }
@@ -231,7 +232,7 @@ fn process_event(
                         name: name.clone(),
                         input_json: serde_json::to_string(&input).unwrap_or_default(),
                     },
-                    ModelResponsePart::ToolCall(ToolCallPart::new(&name, input).with_id(&id)),
+                    ModelResponsePart::ToolCall(ToolCallPart::new(&name, input).with_tool_call_id(&id)),
                 ),
                 ContentBlockStart::Thinking { thinking } => (
                     BlockState::Thinking {

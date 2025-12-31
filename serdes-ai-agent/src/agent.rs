@@ -87,6 +87,10 @@ pub struct Agent<Deps = (), Output = String> {
     /// Instrumentation settings.
     #[allow(dead_code)]
     pub(crate) instrument: Option<InstrumentationSettings>,
+    /// Whether to execute tool calls in parallel (default: true).
+    pub(crate) parallel_tool_calls: bool,
+    /// Maximum number of concurrent tool calls (None = unlimited).
+    pub(crate) max_concurrent_tools: Option<usize>,
     pub(crate) _phantom: PhantomData<(Deps, Output)>,
 }
 
@@ -164,6 +168,16 @@ where
     /// Get usage limits.
     pub fn usage_limits(&self) -> Option<&UsageLimits> {
         self.usage_limits.as_ref()
+    }
+
+    /// Check if parallel tool execution is enabled.
+    pub fn parallel_tool_calls(&self) -> bool {
+        self.parallel_tool_calls
+    }
+
+    /// Get the maximum number of concurrent tool calls.
+    pub fn max_concurrent_tools(&self) -> Option<usize> {
+        self.max_concurrent_tools
     }
 
     /// Run the agent with a prompt.

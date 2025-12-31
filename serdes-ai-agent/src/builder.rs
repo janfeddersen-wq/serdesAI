@@ -41,6 +41,8 @@ pub struct AgentBuilder<Deps = (), Output = String> {
     usage_limits: Option<UsageLimits>,
     history_processors: Vec<Box<dyn HistoryProcessor<Deps>>>,
     instrument: Option<InstrumentationSettings>,
+    parallel_tool_calls: bool,
+    max_concurrent_tools: Option<usize>,
     _phantom: PhantomData<(Deps, Output)>,
 }
 
@@ -68,6 +70,8 @@ where
             usage_limits: None,
             history_processors: Vec::new(),
             instrument: None,
+            parallel_tool_calls: true,
+            max_concurrent_tools: None,
             _phantom: PhantomData,
         }
     }
@@ -317,6 +321,30 @@ where
         self
     }
 
+    /// Enable or disable parallel tool execution.
+    ///
+    /// When enabled (default), multiple tool calls from the model will be
+    /// executed concurrently using `futures::future::join_all`.
+    ///
+    /// When disabled, tools are executed sequentially in order.
+    #[must_use]
+    pub fn parallel_tool_calls(mut self, enabled: bool) -> Self {
+        self.parallel_tool_calls = enabled;
+        self
+    }
+
+    /// Set the maximum number of concurrent tool calls.
+    ///
+    /// When set, limits the number of tools that can execute simultaneously
+    /// using a semaphore. This is useful for rate-limiting or resource control.
+    ///
+    /// Only applies when `parallel_tool_calls` is enabled.
+    #[must_use]
+    pub fn max_concurrent_tools(mut self, max: usize) -> Self {
+        self.max_concurrent_tools = Some(max);
+        self
+    }
+
     /// Build the agent.
     pub fn build(self) -> Agent<Deps, Output>
     where
@@ -374,6 +402,8 @@ where
             usage_limits: self.usage_limits,
             history_processors: self.history_processors,
             instrument: self.instrument,
+            parallel_tool_calls: self.parallel_tool_calls,
+            max_concurrent_tools: self.max_concurrent_tools,
             _phantom: PhantomData,
         }
     }
@@ -404,6 +434,8 @@ impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
             usage_limits: self.usage_limits,
             history_processors: self.history_processors,
             instrument: self.instrument,
+            parallel_tool_calls: self.parallel_tool_calls,
+            max_concurrent_tools: self.max_concurrent_tools,
             _phantom: PhantomData,
         }
     }
@@ -431,6 +463,8 @@ impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
             usage_limits: self.usage_limits,
             history_processors: self.history_processors,
             instrument: self.instrument,
+            parallel_tool_calls: self.parallel_tool_calls,
+            max_concurrent_tools: self.max_concurrent_tools,
             _phantom: PhantomData,
         }
     }
@@ -461,6 +495,8 @@ impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
             usage_limits: self.usage_limits,
             history_processors: self.history_processors,
             instrument: self.instrument,
+            parallel_tool_calls: self.parallel_tool_calls,
+            max_concurrent_tools: self.max_concurrent_tools,
             _phantom: PhantomData,
         }
     }
@@ -614,5 +650,50 @@ mod tests {
             .build();
 
         assert_eq!(agent.name(), Some("quick-agent"));
+    }
+
+    #[test]
+    fn test_builder_parallel_tool_calls_default() {
+        let model = create_mock_model();
+        let agent = AgentBuilder::<(), String>::new(model).build();
+
+        // Default should be true (parallel enabled)
+        assert!(agent.parallel_tool_calls());
+        assert!(agent.max_concurrent_tools().is_none());
+    }
+
+    #[test]
+    fn test_builder_parallel_tool_calls_disabled() {
+        let model = create_mock_model();
+        let agent = AgentBuilder::<(), String>::new(model)
+            .parallel_tool_calls(false)
+            .build();
+
+        assert!(!agent.parallel_tool_calls());
+    }
+
+    #[test]
+    fn test_builder_max_concurrent_tools() {
+        let model = create_mock_model();
+        let agent = AgentBuilder::<(), String>::new(model)
+            .max_concurrent_tools(4)
+            .build();
+
+        assert!(agent.parallel_tool_calls());
+        assert_eq!(agent.max_concurrent_tools(), Some(4));
+    }
+
+    #[test]
+    fn test_builder_parallel_config_preserved_on_output_type() {
+        let model = create_mock_model();
+        let agent: Agent<(), serde_json::Value> = AgentBuilder::<(), String>::new(model)
+            .parallel_tool_calls(false)
+            .max_concurrent_tools(2)
+            .output_type()
+            .build();
+
+        // Config should be preserved when changing output type
+        assert!(!agent.parallel_tool_calls());
+        assert_eq!(agent.max_concurrent_tools(), Some(2));
     }
 }

@@ -63,7 +63,7 @@ impl AzureOpenAIModel {
     ) -> Self {
         let deployment_name = deployment_name.into();
         let endpoint = endpoint.into().trim_end_matches('/').to_string();
-        let api_version = api_version.into();
+        let _api_version = api_version.into(); // TODO: Include in URL query params
 
         // Construct the Azure-specific URL
         let base_url = format!(

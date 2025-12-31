@@ -60,6 +60,7 @@ pub struct BedrockModel {
     /// AWS region.
     region: String,
     /// AWS credentials.
+    #[allow(dead_code)] // Used for future AWS SigV4 signing
     credentials: AwsCredentials,
     /// Model profile.
     profile: ModelProfile,

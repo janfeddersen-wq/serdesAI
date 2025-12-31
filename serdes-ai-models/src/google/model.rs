@@ -659,7 +659,7 @@ impl Model for GoogleModel {
 
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
-        let mut request = self
+        let request = self
             .client
             .post(&url)
             .header("Content-Type", "application/json")

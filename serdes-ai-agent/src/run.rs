@@ -372,6 +372,18 @@ where
         &mut self,
         calls: Vec<serdes_ai_core::messages::ToolCallPart>,
     ) -> Vec<(String, Option<String>, Result<ToolReturn, ToolError>)> {
+        if self.agent.parallel_tool_calls {
+            self.execute_tools_parallel(calls).await
+        } else {
+            self.execute_tools_sequential(calls).await
+        }
+    }
+
+    /// Execute tool calls sequentially (original behavior).
+    async fn execute_tools_sequential(
+        &mut self,
+        calls: Vec<serdes_ai_core::messages::ToolCallPart>,
+    ) -> Vec<(String, Option<String>, Result<ToolReturn, ToolError>)> {
         let mut returns = Vec::new();
 
         for tc in calls {
@@ -410,6 +422,103 @@ where
         }
 
         returns
+    }
+
+    /// Execute tool calls in parallel.
+    async fn execute_tools_parallel(
+        &mut self,
+        calls: Vec<serdes_ai_core::messages::ToolCallPart>,
+    ) -> Vec<(String, Option<String>, Result<ToolReturn, ToolError>)> {
+        use futures::future::join_all;
+
+        // Record all tool calls upfront
+        for _ in &calls {
+            self.state.usage.record_tool_call();
+        }
+
+        // Build futures for each tool call
+        let futures: Vec<_> = calls
+            .into_iter()
+            .map(|tc| {
+                let tool_name = tc.tool_name.clone();
+                let tool_call_id = tc.tool_call_id.clone();
+                let args = tc.args.to_json();
+
+                // Look up tool (we need to clone Arc references for async move)
+                let tool = self.agent.find_tool(&tc.tool_name).cloned();
+                let tool_ctx = self.ctx.for_tool(&tc.tool_name, tc.tool_call_id.clone());
+
+                async move {
+                    let tool = match tool {
+                        Some(t) => t,
+                        None => {
+                            return (
+                                tool_name.clone(),
+                                tool_call_id,
+                                Err(ToolError::NotFound(tool_name)),
+                            );
+                        }
+                    };
+
+                    // Execute with retries
+                    let max_retries = tool.max_retries;
+                    let executor = tool.executor;
+                    let mut retries = 0;
+
+                    let result = loop {
+                        match executor.execute(args.clone(), &tool_ctx).await {
+                            Ok(r) => break Ok(r),
+                            Err(e) if e.is_retryable() && retries < max_retries => {
+                                retries += 1;
+                                continue;
+                            }
+                            Err(e) => break Err(e),
+                        }
+                    };
+
+                    (tool_name, tool_call_id, result)
+                }
+            })
+            .collect();
+
+        // Execute all futures, respecting concurrency limit if set
+        if let Some(max_concurrent) = self.agent.max_concurrent_tools {
+            self.execute_with_semaphore(futures, max_concurrent).await
+        } else {
+            join_all(futures).await
+        }
+    }
+
+    /// Execute futures with a concurrency limit using a semaphore.
+    ///
+    /// Uses `join_all` to preserve the order of results while limiting
+    /// how many futures execute concurrently via a semaphore.
+    async fn execute_with_semaphore<F, T>(&self, futures: Vec<F>, max_concurrent: usize) -> Vec<T>
+    where
+        F: std::future::Future<Output = T> + Send,
+        T: Send,
+    {
+        use futures::future::join_all;
+        use std::sync::Arc;
+        use tokio::sync::Semaphore;
+
+        let semaphore = Arc::new(Semaphore::new(max_concurrent));
+
+        let wrapped_futures: Vec<_> = futures
+            .into_iter()
+            .map(|fut| {
+                let sem = Arc::clone(&semaphore);
+                async move {
+                    // Acquire permit before executing - this limits concurrency
+                    let _permit = sem.acquire().await.expect("Semaphore closed unexpectedly");
+                    fut.await
+                    // Permit is dropped here, allowing another future to proceed
+                }
+            })
+            .collect();
+
+        // join_all preserves order - results[i] corresponds to futures[i]
+        join_all(wrapped_futures).await
     }
 
     fn add_tool_returns(

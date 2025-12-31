@@ -486,7 +486,7 @@ impl AnthropicModel {
                 }
                 ResponseContentBlock::ToolUse { id, name, input } => {
                     parts.push(ModelResponsePart::ToolCall(
-                        ToolCallPart::new(name, ToolCallArgs::Json(input)).with_id(id),
+                        ToolCallPart::new(name, ToolCallArgs::Json(input)).with_tool_call_id(id),
                     ));
                 }
                 ResponseContentBlock::Thinking { thinking, signature } => {

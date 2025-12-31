@@ -51,7 +51,7 @@ pub enum AgentStreamEvent {
     /// Tool call completed.
     ToolCallComplete { tool_name: String },
     /// Tool executed.
-    ToolExecuted { tool_name: String, success: bool },
+    ToolExecuted { tool_name: String, success: bool, error: Option<String> },
     /// Thinking delta (for reasoning models).
     ThinkingDelta { text: String },
     /// Model response completed.
@@ -285,12 +285,11 @@ impl AgentStream {
                                                     delta: tc.args_delta.clone(),
                                                 }))
                                                 .await;
-                                            // Update args
-                                            if let Some(ModelResponsePart::ToolCall(ref mut _tool_call)) =
+                                            // Update args - accumulate the delta into the tool call
+                                            if let Some(ModelResponsePart::ToolCall(ref mut tool_call)) =
                                                 response_parts.get_mut(delta.index)
                                             {
-                                                // Accumulate args - this is a simplification
-                                                // Real implementation would parse and merge JSON
+                                                tc.apply(tool_call);
                                             }
                                         }
                                         ModelResponsePartDelta::Thinking(t) => {
@@ -395,6 +394,7 @@ impl AgentStream {
                                             .send(Ok(AgentStreamEvent::ToolExecuted {
                                                 tool_name: tc.tool_name.clone(),
                                                 success: true,
+                                                error: None,
                                             }))
                                             .await;
 
@@ -406,10 +406,12 @@ impl AgentStream {
                                         tool_req.parts.push(ModelRequestPart::ToolReturn(part));
                                     }
                                     Err(e) => {
+                                        let error_msg = e.to_string();
                                         let _ = tx
                                             .send(Ok(AgentStreamEvent::ToolExecuted {
                                                 tool_name: tc.tool_name.clone(),
                                                 success: false,
+                                                error: Some(error_msg.clone()),
                                             }))
                                             .await;
 
@@ -426,10 +428,12 @@ impl AgentStream {
                                 }
                             }
                             None => {
+                                let error_msg = format!("Unknown tool: {}", tc.tool_name);
                                 let _ = tx
                                     .send(Ok(AgentStreamEvent::ToolExecuted {
                                         tool_name: tc.tool_name.clone(),
                                         success: false,
+                                        error: Some(error_msg.clone()),
                                     }))
                                     .await;
 

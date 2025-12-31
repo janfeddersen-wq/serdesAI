@@ -1,4 +1,8 @@
 //! ChatGPT OAuth types.
+//!
+//! These are API request/response types for the ChatGPT OAuth flow.
+
+#![allow(missing_docs)] // DTO fields are self-documenting
 
 use serde::{Deserialize, Serialize};
 

@@ -1,4 +1,8 @@
 //! Claude Code OAuth types.
+//!
+//! These are API request/response types for the Claude Code OAuth flow.
+
+#![allow(missing_docs)] // DTO fields are self-documenting
 
 use serde::{Deserialize, Serialize};
 
