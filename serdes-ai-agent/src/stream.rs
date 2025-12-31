@@ -249,6 +249,15 @@ impl AgentStream {
                                                     tool_call_id: tc.tool_call_id.clone(),
                                                 }))
                                                 .await;
+                                            // If args are already present (non-streaming models),
+                                            // send them as a delta immediately
+                                            if !tc.args.is_empty() {
+                                                let _ = tx
+                                                    .send(Ok(AgentStreamEvent::ToolCallDelta {
+                                                        delta: tc.args.clone(),
+                                                    }))
+                                                    .await;
+                                            }
                                         }
                                         ModelResponsePart::Thinking(t) => {
                                             if !t.content.is_empty() {
