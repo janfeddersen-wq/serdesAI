@@ -47,11 +47,22 @@ pub enum AgentStreamEvent {
         tool_call_id: Option<String>,
     },
     /// Tool call arguments delta.
-    ToolCallDelta { delta: String },
-    /// Tool call completed.
-    ToolCallComplete { tool_name: String },
+    ToolCallDelta {
+        delta: String,
+        tool_call_id: Option<String>,
+    },
+    /// Tool call completed (arguments fully received).
+    ToolCallComplete {
+        tool_name: String,
+        tool_call_id: Option<String>,
+    },
     /// Tool executed.
-    ToolExecuted { tool_name: String, success: bool, error: Option<String> },
+    ToolExecuted {
+        tool_name: String,
+        tool_call_id: Option<String>,
+        success: bool,
+        error: Option<String>,
+    },
     /// Thinking delta (for reasoning models).
     ThinkingDelta { text: String },
     /// Model response completed.
@@ -256,6 +267,7 @@ impl AgentStream {
                                                     let _ = tx
                                                         .send(Ok(AgentStreamEvent::ToolCallDelta {
                                                             delta: args_str,
+                                                            tool_call_id: tc.tool_call_id.clone(),
                                                         }))
                                                         .await;
                                                 }
@@ -291,9 +303,19 @@ impl AgentStream {
                                             }
                                         }
                                         ModelResponsePartDelta::ToolCall(tc) => {
+                                            // Get tool_call_id from the existing response part
+                                            let tool_call_id = response_parts.get(delta.index)
+                                                .and_then(|p| {
+                                                    if let ModelResponsePart::ToolCall(tc) = p {
+                                                        tc.tool_call_id.clone()
+                                                    } else {
+                                                        None
+                                                    }
+                                                });
                                             let _ = tx
                                                 .send(Ok(AgentStreamEvent::ToolCallDelta {
                                                     delta: tc.args_delta.clone(),
+                                                    tool_call_id,
                                                 }))
                                                 .await;
                                             // Update args - accumulate the delta into the tool call
@@ -380,6 +402,7 @@ impl AgentStream {
                         let _ = tx
                             .send(Ok(AgentStreamEvent::ToolCallComplete {
                                 tool_name: tc.tool_name.clone(),
+                                tool_call_id: tc.tool_call_id.clone(),
                             }))
                             .await;
 
@@ -404,6 +427,7 @@ impl AgentStream {
                                         let _ = tx
                                             .send(Ok(AgentStreamEvent::ToolExecuted {
                                                 tool_name: tc.tool_name.clone(),
+                                                tool_call_id: tc.tool_call_id.clone(),
                                                 success: true,
                                                 error: None,
                                             }))
@@ -421,6 +445,7 @@ impl AgentStream {
                                         let _ = tx
                                             .send(Ok(AgentStreamEvent::ToolExecuted {
                                                 tool_name: tc.tool_name.clone(),
+                                                tool_call_id: tc.tool_call_id.clone(),
                                                 success: false,
                                                 error: Some(error_msg.clone()),
                                             }))
@@ -443,6 +468,7 @@ impl AgentStream {
                                 let _ = tx
                                     .send(Ok(AgentStreamEvent::ToolExecuted {
                                         tool_name: tc.tool_name.clone(),
+                                        tool_call_id: tc.tool_call_id.clone(),
                                         success: false,
                                         error: Some(error_msg.clone()),
                                     }))

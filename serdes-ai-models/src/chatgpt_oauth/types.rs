@@ -27,21 +27,62 @@ impl Default for ChatGptConfig {
     }
 }
 
-/// Request body for ChatGPT Codex completions.
+/// Request body for ChatGPT Codex Responses API.
 #[derive(Debug, Serialize)]
 pub struct CodexRequest {
     pub model: String,
-    pub messages: Vec<CodexMessage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_tokens: Option<u32>,
+    /// System instructions (REQUIRED by Responses API)
+    pub instructions: String,
+    /// User input - list of messages and function outputs
+    pub input: Vec<InputItem>,
+    /// Required by ChatGPT Codex API - must be false
+    #[serde(default)]
+    pub store: bool,
+    /// Required by ChatGPT Codex API - must be true
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+    /// Reasoning settings for GPT-5 and o-series models
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningConfig>,
+}
+
+/// Reasoning configuration for GPT-5 and o-series models
+#[derive(Debug, Serialize, Clone)]
+pub struct ReasoningConfig {
+    pub effort: String,
+    pub summary: String,
+}
+
+/// Function call from assistant for Responses API
+#[derive(Debug, Serialize, Clone)]
+pub struct FunctionCallItem {
+    #[serde(rename = "type")]
+    pub call_type: String,  // Always "function_call"
+    pub name: String,
+    pub arguments: String,
+    pub call_id: String,
+}
+
+/// Function call output for Responses API (tool return)
+#[derive(Debug, Serialize, Clone)]
+pub struct FunctionCallOutput {
+    #[serde(rename = "type")]
+    pub output_type: String,  // Always "function_call_output"
+    pub call_id: String,
+    pub output: String,
+}
+
+/// Input item for Responses API - can be a message, function call, or function output
+#[derive(Debug, Serialize, Clone)]
+#[serde(untagged)]
+pub enum InputItem {
+    Message(CodexMessage),
+    FunctionCall(FunctionCallItem),
+    FunctionOutput(FunctionCallOutput),
 }
 
 /// Message in a Codex request.
