@@ -108,8 +108,9 @@ impl McpClient {
     pub async fn list_tools(&self) -> McpResult<Vec<McpTool>> {
         self.ensure_initialized().await?;
 
+        // Use empty object {} instead of null for params - some servers are picky
         let result: ListToolsResult = self
-            .call("tools/list", serde_json::Value::Null)
+            .call("tools/list", serde_json::json!({}))
             .await?;
         Ok(result.tools)
     }

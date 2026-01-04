@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 use tokio::sync::{oneshot, Mutex};
 
 /// Trait for MCP transport implementations.
@@ -58,10 +58,19 @@ impl StdioTransport {
             .take()
             .ok_or_else(|| McpError::Transport("No stdout".to_string()))?;
 
+        let stderr = child
+            .stderr
+            .take();
+
         let pending = Arc::new(Mutex::new(HashMap::new()));
 
-        // Spawn reader task
+        // Spawn reader task for stdout
         tokio::spawn(Self::reader_task(stdout, pending.clone()));
+
+        // Spawn stderr drainer to prevent blocking if server writes to stderr
+        if let Some(stderr) = stderr {
+            tokio::spawn(Self::stderr_drainer(stderr));
+        }
 
         Ok(Self {
             child: Arc::new(Mutex::new(Some(child))),
@@ -109,6 +118,24 @@ impl StdioTransport {
                         }
                     }
                 }
+                Err(_) => break,
+            }
+        }
+    }
+
+    /// Drain stderr to prevent the process from blocking.
+    ///
+    /// Some MCP servers (especially those launched via npx) write to stderr.
+    /// If we don't read from stderr, the pipe buffer fills up and blocks the process.
+    async fn stderr_drainer(stderr: ChildStderr) {
+        let mut reader = BufReader::new(stderr);
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => break, // EOF
+                Ok(_) => {} // Discard stderr output
                 Err(_) => break,
             }
         }
