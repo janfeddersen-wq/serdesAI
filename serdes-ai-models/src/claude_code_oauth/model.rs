@@ -275,7 +275,11 @@ impl ClaudeCodeOAuthModel {
         ClaudeRequest {
             model: self.model_name.clone(),
             messages: api_messages,
-            max_tokens: settings.max_tokens.map(|t| t as u32).unwrap_or(4096),
+            // Use profile max_tokens as default, or 16384 if not set
+            max_tokens: settings.max_tokens
+                .map(|t| t as u32)
+                .or(self.profile.max_tokens.map(|t| t as u32))
+                .unwrap_or(16384),
             system,
             temperature: settings.temperature.map(|t| t as f32),
             stream: Some(stream),

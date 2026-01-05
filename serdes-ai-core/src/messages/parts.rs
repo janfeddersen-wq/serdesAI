@@ -91,6 +91,147 @@ pub enum ToolCallArgs {
     String(String),
 }
 
+/// Attempt to repair common JSON malformations from LLM outputs.
+///
+/// This function tries various repairs on malformed JSON strings:
+/// - Removes trailing commas before `}` or `]`
+/// - Fixes unquoted keys: `{foo: "bar"}` -> `{"foo": "bar"}`
+/// - Replaces single quotes with double quotes
+/// - Closes unclosed braces/brackets
+///
+/// Returns `Some(Value)` if parsing succeeds (before or after repair),
+/// or `None` if the string cannot be salvaged.
+fn repair_json(s: &str) -> Option<serde_json::Value> {
+    let s = s.trim();
+
+    // Already valid JSON?
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+        return Some(v);
+    }
+
+    let mut repaired = s.to_string();
+
+    // 1. Remove trailing commas before } or ]
+    repaired = remove_trailing_commas(&repaired);
+
+    // 2. Try to fix unquoted keys: {foo: "bar"} -> {"foo": "bar"}
+    repaired = quote_unquoted_keys(&repaired);
+
+    // 3. Replace single quotes with double quotes (only if no double quotes present)
+    if repaired.contains('\'') && !repaired.contains('"') {
+        repaired = repaired.replace('\'', "\"");
+    }
+
+    // 4. Try to close unclosed braces/brackets
+    let open_braces = repaired.matches('{').count();
+    let close_braces = repaired.matches('}').count();
+    if open_braces > close_braces {
+        repaired.push_str(&"}".repeat(open_braces - close_braces));
+    }
+
+    let open_brackets = repaired.matches('[').count();
+    let close_brackets = repaired.matches(']').count();
+    if open_brackets > close_brackets {
+        repaired.push_str(&"]".repeat(open_brackets - close_brackets));
+    }
+
+    // Try parsing the repaired string
+    serde_json::from_str(&repaired).ok()
+}
+
+/// Remove trailing commas before `}` or `]`.
+/// E.g., `{"a": 1,}` -> `{"a": 1}`
+fn remove_trailing_commas(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+
+    let mut i = 0;
+    while i < len {
+        let c = chars[i];
+        if c == ',' {
+            // Look ahead for whitespace followed by } or ]
+            let mut j = i + 1;
+            while j < len && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < len && (chars[j] == '}' || chars[j] == ']') {
+                // Skip this comma
+                i += 1;
+                continue;
+            }
+        }
+        result.push(c);
+        i += 1;
+    }
+    result
+}
+
+/// Attempt to quote unquoted keys in JSON-like strings.
+/// E.g., `{foo: "bar"}` -> `{"foo": "bar"}`
+fn quote_unquoted_keys(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() + 32);
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len();
+
+    let mut i = 0;
+    while i < len {
+        let c = chars[i];
+
+        // After { or , we might have an unquoted key
+        if c == '{' || c == ',' {
+            result.push(c);
+            i += 1;
+
+            // Skip whitespace
+            while i < len && chars[i].is_whitespace() {
+                result.push(chars[i]);
+                i += 1;
+            }
+
+            // Check if we have an unquoted identifier followed by :
+            if i < len && is_ident_start(chars[i]) {
+                let key_start = i;
+                while i < len && is_ident_char(chars[i]) {
+                    i += 1;
+                }
+                let key = &s[key_start..i];
+
+                // Skip whitespace after key
+                while i < len && chars[i].is_whitespace() {
+                    i += 1;
+                }
+
+                // If followed by :, this was an unquoted key
+                if i < len && chars[i] == ':' {
+                    result.push('"');
+                    result.push_str(key);
+                    result.push('"');
+                } else {
+                    // Not a key, just push what we read
+                    result.push_str(key);
+                }
+            }
+        } else {
+            result.push(c);
+            i += 1;
+        }
+    }
+    result
+}
+
+/// Check if a character can start an identifier.
+#[inline]
+fn is_ident_start(c: char) -> bool {
+    c.is_ascii_alphabetic() || c == '_'
+}
+
+/// Check if a character can be part of an identifier.
+#[inline]
+fn is_ident_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
 impl ToolCallArgs {
     /// Create from JSON value.
     #[must_use]
@@ -119,14 +260,64 @@ impl ToolCallArgs {
         }
     }
 
-    /// Convert to JSON value, parsing if necessary.
+    /// Convert to JSON value, guaranteeing a valid JSON object.
+    ///
+    /// This method ensures the result is always a JSON object (dictionary),
+    /// which is required by APIs like Anthropic's `tool_use.input` field.
+    ///
+    /// # Behavior
+    ///
+    /// - If already a JSON object, returns it as-is
+    /// - If a JSON array or primitive, wraps in `{"_value": ...}`
+    /// - If a string, attempts to parse and repair malformed JSON
+    /// - If all parsing fails, returns `{"_raw": "<original>", "_error": "parse_failed"}`
     #[must_use]
     pub fn to_json(&self) -> serde_json::Value {
         match self {
-            Self::Json(v) => v.clone(),
-            Self::String(s) => {
-                serde_json::from_str(s).unwrap_or(serde_json::Value::String(s.clone()))
+            Self::Json(v) => {
+                if v.is_object() {
+                    v.clone()
+                } else {
+                    // Wrap non-objects
+                    serde_json::json!({ "_value": v })
+                }
             }
+            Self::String(s) => {
+                // Try direct parse first
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(s) {
+                    if v.is_object() {
+                        return v;
+                    }
+                    return serde_json::json!({ "_value": v });
+                }
+
+                // Try to repair malformed JSON
+                if let Some(v) = repair_json(s) {
+                    if v.is_object() {
+                        return v;
+                    }
+                    return serde_json::json!({ "_value": v });
+                }
+
+                // All parsing failed - wrap the raw string
+                serde_json::json!({
+                    "_raw": s,
+                    "_error": "parse_failed"
+                })
+            }
+        }
+    }
+
+    /// Convert to a JSON object map, guaranteed.
+    ///
+    /// Similar to [`to_json()`](Self::to_json) but returns the inner `Map` directly.
+    /// This is useful when you need to work with the map directly.
+    #[must_use]
+    pub fn to_json_object(&self) -> serde_json::Map<String, serde_json::Value> {
+        match self.to_json() {
+            serde_json::Value::Object(map) => map,
+            // SAFETY: to_json() guarantees an object, so this is unreachable
+            _ => unreachable!("to_json() guarantees an object"),
         }
     }
 
@@ -1085,6 +1276,140 @@ mod tests {
             panic!("Expected Json variant");
         }
     }
+
+    // ==================== JSON Repair Tests ====================
+
+    #[test]
+    fn test_to_json_always_returns_object() {
+        // Valid JSON object should pass through
+        let args = ToolCallArgs::json(serde_json::json!({"foo": "bar"}));
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["foo"], "bar");
+    }
+
+    #[test]
+    fn test_to_json_wraps_array() {
+        // Arrays should be wrapped in {"_value": ...}
+        let args = ToolCallArgs::json(serde_json::json!([1, 2, 3]));
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["_value"], serde_json::json!([1, 2, 3]));
+    }
+
+    #[test]
+    fn test_to_json_wraps_primitive() {
+        // Primitives should be wrapped in {"_value": ...}
+        let args = ToolCallArgs::json(serde_json::json!(42));
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["_value"], 42);
+
+        let args = ToolCallArgs::json(serde_json::json!("hello"));
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["_value"], "hello");
+    }
+
+    #[test]
+    fn test_to_json_repairs_trailing_comma() {
+        // Trailing commas should be repaired
+        let args = ToolCallArgs::string(r#"{"a": 1,}"#.to_string());
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["a"], 1);
+    }
+
+    #[test]
+    fn test_to_json_repairs_unquoted_keys() {
+        // Unquoted keys should be repaired
+        let args = ToolCallArgs::string(r#"{foo: "bar"}"#.to_string());
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["foo"], "bar");
+    }
+
+    #[test]
+    fn test_to_json_repairs_single_quotes() {
+        // Single quotes should be converted to double quotes
+        let args = ToolCallArgs::string("{'a': 'b'}".to_string());
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["a"], "b");
+    }
+
+    #[test]
+    fn test_to_json_repairs_unclosed_braces() {
+        // Unclosed braces should be closed
+        let args = ToolCallArgs::string(r#"{"x": 1"#.to_string());
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["x"], 1);
+    }
+
+    #[test]
+    fn test_to_json_handles_completely_invalid() {
+        // Completely invalid JSON should return error object
+        let args = ToolCallArgs::string("this is not json at all".to_string());
+        let result = args.to_json();
+        assert!(result.is_object());
+        assert_eq!(result["_error"], "parse_failed");
+        assert_eq!(result["_raw"], "this is not json at all");
+    }
+
+    #[test]
+    fn test_to_json_object_returns_map() {
+        let args = ToolCallArgs::json(serde_json::json!({"key": "value"}));
+        let map = args.to_json_object();
+        assert_eq!(map.get("key"), Some(&serde_json::json!("value")));
+    }
+
+    #[test]
+    fn test_repair_json_valid_passthrough() {
+        // Already valid JSON should pass through
+        let result = repair_json(r#"{"valid": true}"#);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["valid"], true);
+    }
+
+    #[test]
+    fn test_repair_json_nested_trailing_comma() {
+        let result = repair_json(r#"{"outer": {"inner": 1,},}"#);
+        assert!(result.is_some());
+        let v = result.unwrap();
+        assert_eq!(v["outer"]["inner"], 1);
+    }
+
+    #[test]
+    fn test_repair_json_array_trailing_comma() {
+        let result = repair_json(r#"[1, 2, 3,]"#);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), serde_json::json!([1, 2, 3]));
+    }
+
+    #[test]
+    fn test_repair_json_multiple_unquoted_keys() {
+        let result = repair_json(r#"{foo: 1, bar: 2}"#);
+        assert!(result.is_some());
+        let v = result.unwrap();
+        assert_eq!(v["foo"], 1);
+        assert_eq!(v["bar"], 2);
+    }
+
+    #[test]
+    fn test_remove_trailing_commas_helper() {
+        assert_eq!(remove_trailing_commas("{\"a\": 1,}"), "{\"a\": 1}");
+        assert_eq!(remove_trailing_commas("[1, 2,]"), "[1, 2]");
+        assert_eq!(remove_trailing_commas("{\"a\": 1,  }"), "{\"a\": 1  }");
+    }
+
+    #[test]
+    fn test_quote_unquoted_keys_helper() {
+        assert_eq!(quote_unquoted_keys("{foo: 1}"), "{\"foo\": 1}");
+        assert_eq!(quote_unquoted_keys("{foo: 1, bar: 2}"), "{\"foo\": 1, \"bar\": 2}");
+    }
+
+    // ==================== End JSON Repair Tests ====================
 
     #[test]
     fn test_tool_call_part() {

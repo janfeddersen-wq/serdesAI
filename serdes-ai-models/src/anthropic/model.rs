@@ -461,7 +461,10 @@ impl AnthropicModel {
         MessagesRequest {
             model: self.model_name.clone(),
             messages: api_messages,
-            max_tokens: settings.max_tokens.unwrap_or(4096),
+            // Use profile max_tokens as default, or 16384 if not set
+            max_tokens: settings.max_tokens
+                .or(self.profile.max_tokens)
+                .unwrap_or(16384),
             system,
             temperature: settings.temperature,
             top_p: settings.top_p,
