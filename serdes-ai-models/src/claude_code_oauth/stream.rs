@@ -7,7 +7,7 @@ use crate::anthropic::stream::AnthropicStreamParser;
 use crate::error::ModelError;
 use bytes::Bytes;
 use futures::Stream;
-use serdes_ai_core::messages::ModelResponseStreamEvent;
+use serdes_ai_core::messages::{ModelResponsePart, ModelResponseStreamEvent, PartStartEvent};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -37,20 +37,14 @@ where
     /// Strip the cp_ prefix from tool names in a stream event.
     fn unprefix_tool_names(event: ModelResponseStreamEvent) -> ModelResponseStreamEvent {
         match event {
-            ModelResponseStreamEvent::ToolCallStart { 
-                index, 
-                tool_call_id, 
-                tool_name 
-            } => {
-                let unprefixed_name = tool_name
-                    .strip_prefix(TOOL_PREFIX)
-                    .map(|s| s.to_string())
-                    .unwrap_or(tool_name);
-                ModelResponseStreamEvent::ToolCallStart {
-                    index,
-                    tool_call_id,
-                    tool_name: unprefixed_name,
+            ModelResponseStreamEvent::PartStart(mut start_event) => {
+                // Check if this is a tool call and strip the prefix
+                if let ModelResponsePart::ToolCall(ref mut tc) = start_event.part {
+                    if let Some(unprefixed) = tc.tool_name.strip_prefix(TOOL_PREFIX) {
+                        tc.tool_name = unprefixed.to_string();
+                    }
                 }
+                ModelResponseStreamEvent::PartStart(start_event)
             }
             // Pass through all other events unchanged
             other => other,
