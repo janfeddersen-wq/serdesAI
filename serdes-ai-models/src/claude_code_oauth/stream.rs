@@ -1,7 +1,7 @@
 //! Claude Code OAuth SSE stream parser.
 //!
-//! This module reuses the Anthropic SSE parsing since Claude Code
-//! uses the same API format.
+//! This module wraps the Anthropic SSE parsing and adds tool name
+//! unprefixing for Claude Code OAuth compatibility.
 
 use crate::anthropic::stream::AnthropicStreamParser;
 use crate::error::ModelError;
@@ -11,10 +11,14 @@ use serdes_ai_core::messages::ModelResponseStreamEvent;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+/// Tool name prefix that must be stripped from responses.
+const TOOL_PREFIX: &str = "cp_";
+
 /// Claude Code SSE stream wrapper.
-/// 
-/// This is a thin wrapper around `AnthropicStreamParser` since
-/// Claude Code uses the same Anthropic Messages API.
+///
+/// This wraps `AnthropicStreamParser` and adds tool name unprefixing
+/// since Claude Code OAuth requires the `cp_` prefix on outgoing tools
+/// but we need to strip it from incoming responses.
 pub struct ClaudeCodeStreamParser<S> {
     inner: AnthropicStreamParser<S>,
 }
@@ -29,6 +33,29 @@ where
             inner: AnthropicStreamParser::new(byte_stream),
         }
     }
+
+    /// Strip the cp_ prefix from tool names in a stream event.
+    fn unprefix_tool_names(event: ModelResponseStreamEvent) -> ModelResponseStreamEvent {
+        match event {
+            ModelResponseStreamEvent::ToolCallStart { 
+                index, 
+                tool_call_id, 
+                tool_name 
+            } => {
+                let unprefixed_name = tool_name
+                    .strip_prefix(TOOL_PREFIX)
+                    .map(|s| s.to_string())
+                    .unwrap_or(tool_name);
+                ModelResponseStreamEvent::ToolCallStart {
+                    index,
+                    tool_call_id,
+                    tool_name: unprefixed_name,
+                }
+            }
+            // Pass through all other events unchanged
+            other => other,
+        }
+    }
 }
 
 impl<S> Stream for ClaudeCodeStreamParser<S>
@@ -38,6 +65,13 @@ where
     type Item = Result<ModelResponseStreamEvent, ModelError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.inner).poll_next(cx)
+        match Pin::new(&mut self.inner).poll_next(cx) {
+            Poll::Ready(Some(Ok(event))) => {
+                Poll::Ready(Some(Ok(Self::unprefix_tool_names(event))))
+            }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }

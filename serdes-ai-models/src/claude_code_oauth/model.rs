@@ -22,6 +22,10 @@ use std::time::Duration;
 /// This matches the Python code_puppy implementation.
 const CLAUDE_CODE_INSTRUCTIONS: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 
+/// Tool name prefix for Claude Code OAuth compatibility.
+/// Tools must be prefixed on outgoing requests and unprefixed on incoming responses.
+const TOOL_PREFIX: &str = "cp_";
+
 /// Claude Code OAuth model.
 ///
 /// Uses OAuth access tokens to authenticate with the Anthropic API.
@@ -238,7 +242,7 @@ impl ClaudeCodeOAuthModel {
         tools
             .iter()
             .map(|t| ClaudeTool {
-                name: t.name.clone(),
+                name: format!("{}{}", TOOL_PREFIX, t.name),
                 description: t.description.clone(),
                 input_schema: t.parameters_json_schema.clone(),
             })
@@ -305,8 +309,10 @@ impl ClaudeCodeOAuthModel {
                     parts.push(ModelResponsePart::Text(TextPart::new(text)));
                 }
                 ResponseContentBlock::ToolUse { id, name, input } => {
+                    // Strip the cp_ prefix from tool names in responses
+                    let unprefixed_name = name.strip_prefix(TOOL_PREFIX).unwrap_or(name);
                     parts.push(ModelResponsePart::ToolCall(
-                        ToolCallPart::new(name, ToolCallArgs::Json(input.clone()))
+                        ToolCallPart::new(unprefixed_name, ToolCallArgs::Json(input.clone()))
                             .with_tool_call_id(id),
                     ));
                 }
@@ -371,9 +377,15 @@ impl ClaudeCodeOAuthModel {
                     });
                 }
                 ModelResponsePart::ToolCall(tc) => {
+                    // Re-add the cp_ prefix when building messages for Claude
+                    let prefixed_name = if tc.tool_name.starts_with(TOOL_PREFIX) {
+                        tc.tool_name.clone()
+                    } else {
+                        format!("{}{}", TOOL_PREFIX, tc.tool_name)
+                    };
                     blocks.push(ContentBlock::ToolUse {
                         id: tc.tool_call_id.clone().unwrap_or_default(),
-                        name: tc.tool_name.clone(),
+                        name: prefixed_name,
                         input: tc.args.to_json(),
                     });
                 }
@@ -425,7 +437,7 @@ impl Model for ClaudeCodeOAuthModel {
         };
 
         let request_body = self.build_request(messages, settings, params, false);
-        let url = format!("{}/v1/messages", self.config.api_base_url);
+        let url = format!("{}/v1/messages?beta=true", self.config.api_base_url);
         
         info!(
             model = %self.model_name,
@@ -511,7 +523,7 @@ impl Model for ClaudeCodeOAuthModel {
         
         // Build request with stream: true
         let request_body = self.build_request(messages, settings, params, true);
-        let url = format!("{}/v1/messages", self.config.api_base_url);
+        let url = format!("{}/v1/messages?beta=true", self.config.api_base_url);
         
         info!(
             model = %self.model_name,
