@@ -65,7 +65,10 @@ impl EvalSuite {
 
     /// Filter cases by tag.
     pub fn filter_by_tag(&self, tag: &str) -> Vec<&EvalCase> {
-        self.cases.iter().filter(|c| c.tags.contains(&tag.to_string())).collect()
+        self.cases
+            .iter()
+            .filter(|c| c.tags.contains(&tag.to_string()))
+            .collect()
     }
 
     /// Get a subset of cases by indices.
@@ -108,8 +111,7 @@ mod tests {
 
     #[test]
     fn test_suite_new() {
-        let suite = EvalSuite::new("test")
-            .description("Test suite");
+        let suite = EvalSuite::new("test").description("Test suite");
 
         assert_eq!(suite.name, "test");
         assert_eq!(suite.description, Some("Test suite".to_string()));

@@ -145,7 +145,10 @@ impl<Deps: Send + Sync + 'static> AbstractToolset<Deps> for DynamicToolset<Deps>
         // Clone the tools under the lock to avoid holding it across await
         let tools_snapshot: Vec<(String, Arc<dyn Tool<Deps>>)> = {
             let tools = self.tools.read();
-            tools.iter().map(|(k, v)| (k.clone(), Arc::clone(v))).collect()
+            tools
+                .iter()
+                .map(|(k, v)| (k.clone(), Arc::clone(v)))
+                .collect()
         };
 
         let mut result = HashMap::with_capacity(tools_snapshot.len());

@@ -2,21 +2,21 @@
 
 use super::types::*;
 use crate::error::ModelError;
-use tracing::{debug, info, error};
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{anthropic_claude_profile, ModelProfile};
 use async_trait::async_trait;
-use reqwest::Client;
-use serdes_ai_core::{
-    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, 
-    ModelSettings, RequestUsage,
-};
-use serdes_ai_core::messages::{
-    ImageContent, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart, 
-    UserContent, UserContentPart, UserPromptPart,
-};
 use base64::Engine;
+use reqwest::Client;
+use serdes_ai_core::messages::{
+    ImageContent, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart, UserContent, UserContentPart,
+    UserPromptPart,
+};
+use serdes_ai_core::{
+    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
+    RequestUsage,
+};
 use std::time::Duration;
+use tracing::{debug, error, info};
 
 /// The hardcoded system prompt for Claude Code OAuth models.
 /// This matches the Python code_puppy implementation.
@@ -36,6 +36,10 @@ pub struct ClaudeCodeOAuthModel {
     client: Client,
     config: ClaudeCodeConfig,
     profile: ModelProfile,
+    /// Enable extended thinking.
+    enable_thinking: bool,
+    /// Thinking budget tokens.
+    thinking_budget: Option<u64>,
 }
 
 impl ClaudeCodeOAuthModel {
@@ -58,7 +62,19 @@ impl ClaudeCodeOAuthModel {
             client,
             config,
             profile,
+            enable_thinking: false,
+            thinking_budget: None,
         }
+    }
+
+    /// Enable extended thinking.
+    #[must_use]
+    pub fn with_thinking(mut self, budget: Option<u64>) -> Self {
+        self.enable_thinking = true;
+        self.thinking_budget = budget;
+        // Update profile to indicate reasoning support
+        self.profile.supports_reasoning = true;
+        self
     }
 
     /// Set a custom config.
@@ -90,7 +106,7 @@ impl ClaudeCodeOAuthModel {
     }
 
     /// Convert our messages to Claude format.
-    /// 
+    ///
     /// For Claude Code OAuth models, we use special system prompt handling:
     /// 1. The actual system prompt is always the hardcoded CLAUDE_CODE_INSTRUCTIONS
     /// 2. Any user-provided system prompts are prepended to the first user message
@@ -110,14 +126,14 @@ impl ClaudeCodeOAuthModel {
                     }
                     ModelRequestPart::UserPrompt(user) => {
                         let mut content = self.convert_user_content(user);
-                        
+
                         // Prepend collected system prompts to the FIRST user message only
                         if !first_user_message_processed && !collected_system_prompts.is_empty() {
                             let system_prefix = collected_system_prompts.join("\n\n");
                             content = self.prepend_to_content(content, &system_prefix);
                             first_user_message_processed = true;
                         }
-                        
+
                         messages.push(ClaudeMessage {
                             role: "user".to_string(),
                             content,
@@ -170,15 +186,16 @@ impl ClaudeCodeOAuthModel {
     /// Used to prepend user-provided system prompts to the first user message.
     fn prepend_to_content(&self, content: ClaudeContent, prefix: &str) -> ClaudeContent {
         match content {
-            ClaudeContent::Text(text) => {
-                ClaudeContent::Text(format!("{}\n\n{}", prefix, text))
-            }
+            ClaudeContent::Text(text) => ClaudeContent::Text(format!("{}\n\n{}", prefix, text)),
             ClaudeContent::Blocks(mut blocks) => {
                 // Prepend as a text block at the beginning
-                blocks.insert(0, ContentBlock::Text { 
-                    text: prefix.to_string(),
-                    cache_control: None,
-                });
+                blocks.insert(
+                    0,
+                    ContentBlock::Text {
+                        text: prefix.to_string(),
+                        cache_control: None,
+                    },
+                );
                 ClaudeContent::Blocks(blocks)
             }
         }
@@ -191,9 +208,10 @@ impl ClaudeCodeOAuthModel {
                 let blocks: Vec<ContentBlock> = parts
                     .iter()
                     .filter_map(|part| match part {
-                        UserContentPart::Text { text } => {
-                            Some(ContentBlock::Text { text: text.clone(), cache_control: None })
-                        }
+                        UserContentPart::Text { text } => Some(ContentBlock::Text {
+                            text: text.clone(),
+                            cache_control: None,
+                        }),
                         UserContentPart::Image { image } => {
                             // Claude expects base64 image data
                             match image {
@@ -257,7 +275,7 @@ impl ClaudeCodeOAuthModel {
         stream: bool,
     ) -> ClaudeRequest {
         let (system, mut api_messages) = self.convert_messages(messages);
-        
+
         // Inject cache_control on the last content block of the last message
         // This matches the Python ClaudeCacheAsyncClient behavior
         if let Some(last_msg) = api_messages.last_mut() {
@@ -269,18 +287,29 @@ impl ClaudeCodeOAuthModel {
                 }
             }
         }
-        
+
         let tools = if params.tools.is_empty() {
             None
         } else {
             Some(self.convert_tools(&params.tools))
         };
 
+        // Build thinking config if enabled
+        let thinking = if self.enable_thinking {
+            Some(match self.thinking_budget {
+                Some(budget) => ThinkingConfig::with_budget(budget),
+                None => ThinkingConfig::enabled(),
+            })
+        } else {
+            None
+        };
+
         ClaudeRequest {
             model: self.model_name.clone(),
             messages: api_messages,
             // Use profile max_tokens as default, or 16384 if not set
-            max_tokens: settings.max_tokens
+            max_tokens: settings
+                .max_tokens
                 .map(|t| t as u32)
                 .or(self.profile.max_tokens.map(|t| t as u32))
                 .unwrap_or(16384),
@@ -297,6 +326,7 @@ impl ClaudeCodeOAuthModel {
                     "name": name
                 }),
             }),
+            thinking,
         }
     }
 
@@ -316,7 +346,10 @@ impl ClaudeCodeOAuthModel {
                             .with_tool_call_id(id),
                     ));
                 }
-                ResponseContentBlock::Thinking { thinking, signature } => {
+                ResponseContentBlock::Thinking {
+                    thinking,
+                    signature,
+                } => {
                     let mut thinking_part = ThinkingPart::new(thinking);
                     if let Some(sig) = signature {
                         thinking_part = thinking_part.with_signature(sig);
@@ -324,9 +357,10 @@ impl ClaudeCodeOAuthModel {
                     parts.push(ModelResponsePart::Thinking(thinking_part));
                 }
                 ResponseContentBlock::RedactedThinking { data } => {
-                    parts.push(ModelResponsePart::Thinking(
-                        ThinkingPart::redacted(data, "anthropic"),
-                    ));
+                    parts.push(ModelResponsePart::Thinking(ThinkingPart::redacted(
+                        data,
+                        "anthropic",
+                    )));
                 }
             }
         }
@@ -371,7 +405,7 @@ impl ClaudeCodeOAuthModel {
         for part in &response.parts {
             match part {
                 ModelResponsePart::Text(text) => {
-                    blocks.push(ContentBlock::Text { 
+                    blocks.push(ContentBlock::Text {
                         text: text.content.clone(),
                         cache_control: None,
                     });
@@ -392,9 +426,7 @@ impl ClaudeCodeOAuthModel {
                 ModelResponsePart::Thinking(think) => {
                     if think.is_redacted() {
                         if let Some(sig) = &think.signature {
-                            blocks.push(ContentBlock::RedactedThinking {
-                                data: sig.clone(),
-                            });
+                            blocks.push(ContentBlock::RedactedThinking { data: sig.clone() });
                         }
                     } else {
                         blocks.push(ContentBlock::Thinking {
@@ -438,7 +470,7 @@ impl Model for ClaudeCodeOAuthModel {
 
         let request_body = self.build_request(messages, settings, params, false);
         let url = format!("{}/v1/messages?beta=true", self.config.api_base_url);
-        
+
         info!(
             model = %self.model_name,
             url = %url,
@@ -485,7 +517,7 @@ impl Model for ClaudeCodeOAuthModel {
 
         let status = response.status();
         debug!(status = %status, "ClaudeCodeOAuth: received response");
-        
+
         if !status.is_success() {
             let status_code = status.as_u16();
             let body = response.text().await.unwrap_or_default();
@@ -516,15 +548,15 @@ impl Model for ClaudeCodeOAuthModel {
         settings: &ModelSettings,
         params: &ModelRequestParameters,
     ) -> Result<StreamedResponse, ModelError> {
+        use super::stream::ClaudeCodeStreamParser;
         use reqwest::header::{
             HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT,
         };
-        use super::stream::ClaudeCodeStreamParser;
-        
+
         // Build request with stream: true
         let request_body = self.build_request(messages, settings, params, true);
         let url = format!("{}/v1/messages?beta=true", self.config.api_base_url);
-        
+
         info!(
             model = %self.model_name,
             url = %url,
@@ -570,7 +602,7 @@ impl Model for ClaudeCodeOAuthModel {
 
         let status = response.status();
         debug!(status = %status, "ClaudeCodeOAuth: received response");
-        
+
         if !status.is_success() {
             let status_code = status.as_u16();
             let body = response.text().await.unwrap_or_default();
@@ -588,7 +620,7 @@ impl Model for ClaudeCodeOAuthModel {
         }
 
         info!("ClaudeCodeOAuth: streaming response started, creating parser");
-        
+
         // Get the byte stream and wrap with SSE parser
         let byte_stream = response.bytes_stream();
         let parser = ClaudeCodeStreamParser::new(byte_stream);

@@ -414,9 +414,7 @@ impl ToolCallPartDelta {
     /// Check if the delta is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.args_delta.is_empty()
-            && self.tool_call_id.is_none()
-            && self.provider_details.is_none()
+        self.args_delta.is_empty() && self.tool_call_id.is_none() && self.provider_details.is_none()
     }
 
     /// Apply this delta to an existing ToolCallPart.
@@ -427,7 +425,7 @@ impl ToolCallPartDelta {
                 .args
                 .to_json_string()
                 .unwrap_or_else(|_| part.args.to_json().to_string());
-            
+
             let new_args = if current == "{}" || current.is_empty() {
                 // Start fresh with the delta
                 self.args_delta.clone()
@@ -596,9 +594,7 @@ impl BuiltinToolCallPartDelta {
     /// Check if the delta is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.args_delta.is_empty()
-            && self.tool_call_id.is_none()
-            && self.provider_details.is_none()
+        self.args_delta.is_empty() && self.tool_call_id.is_none() && self.provider_details.is_none()
     }
 
     /// Apply this delta to an existing BuiltinToolCallPart.
@@ -609,7 +605,7 @@ impl BuiltinToolCallPartDelta {
                 .args
                 .to_json_string()
                 .unwrap_or_else(|_| part.args.to_json().to_string());
-            
+
             let new_args = if current == "{}" || current.is_empty() {
                 // Start fresh with the delta
                 self.args_delta.clone()
@@ -678,10 +674,7 @@ mod tests {
 
     #[test]
     fn test_stream_event_helpers() {
-        let start = ModelResponseStreamEvent::part_start(
-            0,
-            ModelResponsePart::text("Hello"),
-        );
+        let start = ModelResponseStreamEvent::part_start(0, ModelResponsePart::text("Hello"));
         assert!(start.is_start());
         assert_eq!(start.index(), 0);
 
@@ -711,13 +704,13 @@ mod tests {
     #[test]
     fn test_text_delta_apply_with_provider_details() {
         let mut part = TextPart::new("Hello");
-        
+
         let mut details = Map::new();
         details.insert("model".to_string(), Value::String("gpt-4".to_string()));
-        
+
         let delta = TextPartDelta::new(" world").with_provider_details(details);
         delta.apply(&mut part);
-        
+
         assert_eq!(part.content, "Hello world");
         assert!(part.provider_details.is_some());
         assert_eq!(
@@ -730,19 +723,25 @@ mod tests {
     fn test_text_delta_merge_provider_details() {
         let mut initial_details = Map::new();
         initial_details.insert("key1".to_string(), Value::String("value1".to_string()));
-        
+
         let mut part = TextPart::new("Hello").with_provider_details(initial_details);
-        
+
         let mut new_details = Map::new();
         new_details.insert("key2".to_string(), Value::String("value2".to_string()));
-        
+
         let delta = TextPartDelta::new("").with_provider_details(new_details);
         delta.apply(&mut part);
-        
+
         let details = part.provider_details.as_ref().unwrap();
         assert_eq!(details.len(), 2);
-        assert_eq!(details.get("key1"), Some(&Value::String("value1".to_string())));
-        assert_eq!(details.get("key2"), Some(&Value::String("value2".to_string())));
+        assert_eq!(
+            details.get("key1"),
+            Some(&Value::String("value1".to_string()))
+        );
+        assert_eq!(
+            details.get("key2"),
+            Some(&Value::String("value2".to_string()))
+        );
     }
 
     #[test]
@@ -756,12 +755,12 @@ mod tests {
     #[test]
     fn test_thinking_delta_apply_with_signature() {
         let mut part = ThinkingPart::new("Thinking");
-        
+
         let delta = ThinkingPartDelta::new("")
             .with_signature_delta("sig123")
             .with_provider_name("anthropic");
         delta.apply(&mut part);
-        
+
         assert_eq!(part.signature, Some("sig123".to_string()));
         assert_eq!(part.provider_name, Some("anthropic".to_string()));
     }
@@ -769,21 +768,20 @@ mod tests {
     #[test]
     fn test_thinking_delta_signature_accumulation() {
         let mut part = ThinkingPart::new("Thinking").with_signature("sig1");
-        
+
         let delta = ThinkingPartDelta::new("").with_signature_delta("23");
         delta.apply(&mut part);
-        
+
         assert_eq!(part.signature, Some("sig123".to_string()));
     }
 
     #[test]
     fn test_tool_call_delta_apply() {
         let mut part = ToolCallPart::new("get_weather", serde_json::json!({}));
-        
-        let delta = ToolCallPartDelta::new(r#"{"city":"NYC"}"#)
-            .with_tool_call_id("call_123");
+
+        let delta = ToolCallPartDelta::new(r#"{"city":"NYC"}"#).with_tool_call_id("call_123");
         delta.apply(&mut part);
-        
+
         assert_eq!(part.tool_call_id, Some("call_123".to_string()));
         // Args should have the delta appended
         assert!(part.args.to_json_string().unwrap().contains("city"));
@@ -791,12 +789,12 @@ mod tests {
 
     #[test]
     fn test_tool_call_delta_doesnt_overwrite_id() {
-        let mut part = ToolCallPart::new("search", serde_json::json!({}))
-            .with_tool_call_id("original_id");
-        
+        let mut part =
+            ToolCallPart::new("search", serde_json::json!({})).with_tool_call_id("original_id");
+
         let delta = ToolCallPartDelta::new("").with_tool_call_id("new_id");
         delta.apply(&mut part);
-        
+
         // Should keep original ID
         assert_eq!(part.tool_call_id, Some("original_id".to_string()));
     }
@@ -805,9 +803,9 @@ mod tests {
     fn test_model_response_part_delta_apply() {
         let mut text_part = ModelResponsePart::Text(TextPart::new("Hello"));
         let delta = ModelResponsePartDelta::Text(TextPartDelta::new(" world"));
-        
+
         assert!(delta.apply(&mut text_part));
-        
+
         if let ModelResponsePart::Text(ref text) = text_part {
             assert_eq!(text.content, "Hello world");
         } else {
@@ -819,10 +817,10 @@ mod tests {
     fn test_model_response_part_delta_apply_type_mismatch() {
         let mut text_part = ModelResponsePart::Text(TextPart::new("Hello"));
         let delta = ModelResponsePartDelta::Thinking(ThinkingPartDelta::new("thinking"));
-        
+
         // Should return false for type mismatch
         assert!(!delta.apply(&mut text_part));
-        
+
         // Part should be unchanged
         if let ModelResponsePart::Text(ref text) = text_part {
             assert_eq!(text.content, "Hello");
@@ -836,29 +834,29 @@ mod tests {
         // Empty text delta
         let text_delta = TextPartDelta::default();
         assert!(text_delta.is_empty());
-        
+
         // Non-empty text delta
         let text_delta = TextPartDelta::new("content");
         assert!(!text_delta.is_empty());
-        
+
         // Text delta with only provider details
         let mut details = Map::new();
         details.insert("key".to_string(), Value::Null);
         let text_delta = TextPartDelta::new("").with_provider_details(details);
         assert!(!text_delta.is_empty());
-        
+
         // Empty thinking delta
         let thinking_delta = ThinkingPartDelta::default();
         assert!(thinking_delta.is_empty());
-        
+
         // Thinking delta with only signature
         let thinking_delta = ThinkingPartDelta::new("").with_signature_delta("sig");
         assert!(!thinking_delta.is_empty());
-        
+
         // Empty tool call delta
         let tool_delta = ToolCallPartDelta::default();
         assert!(tool_delta.is_empty());
-        
+
         // Tool call delta with only tool_call_id
         let tool_delta = ToolCallPartDelta::new("").with_tool_call_id("id");
         assert!(!tool_delta.is_empty());
@@ -866,16 +864,15 @@ mod tests {
 
     #[test]
     fn test_delta_builders() {
-        let text_delta = TextPartDelta::new("content")
-            .with_provider_details(Map::new());
+        let text_delta = TextPartDelta::new("content").with_provider_details(Map::new());
         assert!(!text_delta.is_empty());
-        
+
         let thinking_delta = ThinkingPartDelta::new("thought")
             .with_signature_delta("sig")
             .with_provider_name("provider")
             .with_provider_details(Map::new());
         assert!(!thinking_delta.is_empty());
-        
+
         let tool_delta = ToolCallPartDelta::new(r#"{}"#)
             .with_tool_call_id("call_1")
             .with_provider_details(Map::new());
@@ -891,7 +888,7 @@ mod tests {
         let json = serde_json::to_string(&delta).unwrap();
         let parsed: TextPartDelta = serde_json::from_str(&json).unwrap();
         assert_eq!(delta, parsed);
-        
+
         // Thinking delta with all fields
         let thinking_delta = ThinkingPartDelta::new("thought")
             .with_signature_delta("sig")
@@ -899,10 +896,9 @@ mod tests {
         let json = serde_json::to_string(&thinking_delta).unwrap();
         let parsed: ThinkingPartDelta = serde_json::from_str(&json).unwrap();
         assert_eq!(thinking_delta, parsed);
-        
+
         // Tool call delta with all fields
-        let tool_delta = ToolCallPartDelta::new(r#"{"a":1}"#)
-            .with_tool_call_id("call_123");
+        let tool_delta = ToolCallPartDelta::new(r#"{"a":1}"#).with_tool_call_id("call_123");
         let json = serde_json::to_string(&tool_delta).unwrap();
         let parsed: ToolCallPartDelta = serde_json::from_str(&json).unwrap();
         assert_eq!(tool_delta, parsed);
@@ -913,13 +909,13 @@ mod tests {
         // Verify that None fields are not serialized
         let delta = TextPartDelta::new("hello");
         let json = serde_json::to_string(&delta).unwrap();
-        
+
         assert!(json.contains("content_delta"));
         assert!(!json.contains("provider_details"));
-        
+
         let thinking_delta = ThinkingPartDelta::new("thought");
         let json = serde_json::to_string(&thinking_delta).unwrap();
-        
+
         assert!(!json.contains("signature_delta"));
         assert!(!json.contains("provider_name"));
         assert!(!json.contains("provider_details"));
@@ -932,13 +928,13 @@ mod tests {
         let delta: TextPartDelta = serde_json::from_str(old_json).unwrap();
         assert_eq!(delta.content_delta, "hello");
         assert!(delta.provider_details.is_none());
-        
+
         let old_json = r#"{"content_delta":"thinking"}"#;
         let delta: ThinkingPartDelta = serde_json::from_str(old_json).unwrap();
         assert_eq!(delta.content_delta, "thinking");
         assert!(delta.signature_delta.is_none());
         assert!(delta.provider_name.is_none());
-        
+
         let old_json = r#"{"args_delta":"{}"}"#;
         let delta: ToolCallPartDelta = serde_json::from_str(old_json).unwrap();
         assert_eq!(delta.args_delta, "{}");
@@ -947,9 +943,9 @@ mod tests {
 
     #[test]
     fn test_builtin_tool_call_delta() {
-        let delta = BuiltinToolCallPartDelta::new(r#"{"query":"rust"}"#)
-            .with_tool_call_id("builtin_123");
-        
+        let delta =
+            BuiltinToolCallPartDelta::new(r#"{"query":"rust"}"#).with_tool_call_id("builtin_123");
+
         assert!(!delta.is_empty());
         assert_eq!(delta.args_delta, r#"{"query":"rust"}"#);
         assert_eq!(delta.tool_call_id, Some("builtin_123".to_string()));
@@ -958,11 +954,10 @@ mod tests {
     #[test]
     fn test_builtin_tool_call_delta_apply() {
         let mut part = BuiltinToolCallPart::new("web_search", serde_json::json!({}));
-        
-        let delta = BuiltinToolCallPartDelta::new(r#"{"q":"test"}"#)
-            .with_tool_call_id("call_456");
+
+        let delta = BuiltinToolCallPartDelta::new(r#"{"q":"test"}"#).with_tool_call_id("call_456");
         delta.apply(&mut part);
-        
+
         assert_eq!(part.tool_call_id, Some("call_456".to_string()));
         assert!(part.args.to_json_string().unwrap().contains("test"));
     }
@@ -971,10 +966,10 @@ mod tests {
     fn test_file_part_event() {
         let file = FilePart::from_bytes(vec![0x89, 0x50, 0x4E, 0x47], "image/png");
         let event = ModelResponseStreamEvent::file_part(0, file.clone());
-        
+
         assert!(event.is_start());
         assert_eq!(event.index(), 0);
-        
+
         if let ModelResponseStreamEvent::PartStart(start) = event {
             assert!(matches!(start.part, ModelResponsePart::File(_)));
         } else {
@@ -987,9 +982,9 @@ mod tests {
         let part = BuiltinToolCallPart::new("web_search", serde_json::json!({"query": "rust"}))
             .with_tool_call_id("call_123");
         let event = ModelResponseStreamEvent::builtin_tool_call_start(0, part);
-        
+
         assert!(event.is_start());
-        
+
         if let ModelResponseStreamEvent::PartStart(start) = event {
             assert!(matches!(start.part, ModelResponsePart::BuiltinToolCall(_)));
         } else {
@@ -1000,9 +995,9 @@ mod tests {
     #[test]
     fn test_builtin_tool_call_delta_event() {
         let event = ModelResponseStreamEvent::builtin_tool_call_delta(0, r#"{"q":"rust"}"#);
-        
+
         assert!(event.is_delta());
-        
+
         if let ModelResponseStreamEvent::PartDelta(delta_event) = event {
             assert!(delta_event.delta.is_builtin_tool_call());
         } else {
@@ -1012,8 +1007,12 @@ mod tests {
 
     #[test]
     fn test_part_start_event_builtin_tool_call() {
-        let event = PartStartEvent::builtin_tool_call(0, "code_execution", serde_json::json!({"code": "print(1)"}));
-        
+        let event = PartStartEvent::builtin_tool_call(
+            0,
+            "code_execution",
+            serde_json::json!({"code": "print(1)"}),
+        );
+
         assert_eq!(event.index, 0);
         assert!(matches!(event.part, ModelResponsePart::BuiltinToolCall(_)));
     }
@@ -1021,7 +1020,7 @@ mod tests {
     #[test]
     fn test_part_delta_event_builtin_tool_call() {
         let event = PartDeltaEvent::builtin_tool_call_args(0, r#"{"more":"args"}"#);
-        
+
         assert_eq!(event.index, 0);
         assert!(event.delta.is_builtin_tool_call());
         assert_eq!(event.delta.content_delta(), None); // Builtin tool calls have no content delta
@@ -1029,26 +1028,26 @@ mod tests {
 
     #[test]
     fn test_serde_roundtrip_builtin_tool_call_delta() {
-        let delta = BuiltinToolCallPartDelta::new(r#"{"q":"test"}"#)
-            .with_tool_call_id("call_123");
-        
+        let delta = BuiltinToolCallPartDelta::new(r#"{"q":"test"}"#).with_tool_call_id("call_123");
+
         let json = serde_json::to_string(&delta).unwrap();
         let parsed: BuiltinToolCallPartDelta = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(delta, parsed);
     }
 
     #[test]
     fn test_model_response_part_delta_apply_builtin() {
-        let mut part = ModelResponsePart::BuiltinToolCall(
-            BuiltinToolCallPart::new("search", serde_json::json!({}))
-        );
-        let delta = ModelResponsePartDelta::BuiltinToolCall(
-            BuiltinToolCallPartDelta::new(r#"{"q":"rust"}"#)
-        );
-        
+        let mut part = ModelResponsePart::BuiltinToolCall(BuiltinToolCallPart::new(
+            "search",
+            serde_json::json!({}),
+        ));
+        let delta = ModelResponsePartDelta::BuiltinToolCall(BuiltinToolCallPartDelta::new(
+            r#"{"q":"rust"}"#,
+        ));
+
         assert!(delta.apply(&mut part));
-        
+
         if let ModelResponsePart::BuiltinToolCall(ref builtin) = part {
             assert!(builtin.args.to_json_string().unwrap().contains("rust"));
         } else {

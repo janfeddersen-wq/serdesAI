@@ -215,8 +215,11 @@ mod tests {
 
     #[test]
     fn test_generate_request_serialization() {
-        let req = GenerateRequest::new("Hello, world!")
-            .with_parameters(GenerateParameters::new().max_new_tokens(100).temperature(0.7));
+        let req = GenerateRequest::new("Hello, world!").with_parameters(
+            GenerateParameters::new()
+                .max_new_tokens(100)
+                .temperature(0.7),
+        );
 
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"inputs\":\"Hello, world!\""));

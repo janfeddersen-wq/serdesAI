@@ -3,8 +3,8 @@
 use reqwest::Client;
 use std::time::Duration;
 
-use super::{CallbackServer, OAuthConfig, OAuthContext, TokenResponse};
 use super::server::CallbackError;
+use super::{CallbackServer, OAuthConfig, OAuthContext, TokenResponse};
 
 /// Errors that can occur during OAuth flow.
 #[derive(Debug, thiserror::Error)]
@@ -37,18 +37,18 @@ pub enum OAuthError {
 pub async fn run_pkce_flow(config: &OAuthConfig) -> Result<(String, OAuthFlowHandle), OAuthError> {
     let context = OAuthContext::new();
     let server = CallbackServer::start(config)?;
-    
+
     let redirect_uri = config.redirect_uri(server.port());
     let context = context.with_redirect_uri(redirect_uri.clone());
-    
+
     let auth_url = build_authorization_url(config, &context);
-    
+
     let handle = OAuthFlowHandle {
         server,
         context,
         config: config.clone(),
     };
-    
+
     Ok((auth_url, handle))
 }
 
@@ -74,7 +74,7 @@ impl OAuthFlowHandle {
     pub async fn wait_for_tokens(self) -> Result<TokenResponse, OAuthError> {
         let timeout = Duration::from_secs(self.config.callback_timeout_secs);
         let result = self.server.wait_for_callback(timeout).await?;
-        
+
         // Verify state
         if result.state != self.context.state {
             return Err(OAuthError::StateMismatch {
@@ -82,7 +82,7 @@ impl OAuthFlowHandle {
                 actual: result.state,
             });
         }
-        
+
         // Exchange code for tokens
         exchange_code_for_tokens(&self.config, &self.context, &result.code).await
     }
@@ -91,7 +91,7 @@ impl OAuthFlowHandle {
 /// Build the authorization URL with PKCE parameters.
 fn build_authorization_url(config: &OAuthConfig, context: &OAuthContext) -> String {
     let redirect_uri = context.redirect_uri.as_deref().unwrap_or("");
-    
+
     let mut params = vec![
         ("response_type", "code".to_string()),
         ("client_id", config.client_id.clone()),
@@ -101,18 +101,18 @@ fn build_authorization_url(config: &OAuthConfig, context: &OAuthContext) -> Stri
         ("code_challenge_method", "S256".to_string()),
         ("state", context.state.clone()),
     ];
-    
+
     // Claude Code requires "code=true" parameter
     if config.token_url.contains("anthropic.com") {
         params.push(("code", "true".to_string()));
     }
-    
+
     let query = params
         .iter()
         .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
         .collect::<Vec<_>>()
         .join("&");
-    
+
     format!("{}?{}", config.auth_url, query)
 }
 
@@ -124,10 +124,10 @@ async fn exchange_code_for_tokens(
 ) -> Result<TokenResponse, OAuthError> {
     let redirect_uri = context.redirect_uri.as_deref().unwrap_or("");
     let client = Client::new();
-    
+
     // Check if this is Claude/Anthropic (uses JSON) or others (use form-urlencoded)
     let is_anthropic = config.token_url.contains("anthropic.com");
-    
+
     let response = if is_anthropic {
         // Anthropic/Claude uses JSON body with special headers
         let payload = serde_json::json!({
@@ -138,7 +138,7 @@ async fn exchange_code_for_tokens(
             "code_verifier": context.code_verifier,
             "redirect_uri": redirect_uri,
         });
-        
+
         client
             .post(&config.token_url)
             .header("Content-Type", "application/json")
@@ -156,7 +156,7 @@ async fn exchange_code_for_tokens(
             ("client_id", &config.client_id),
             ("code_verifier", &context.code_verifier),
         ];
-        
+
         client
             .post(&config.token_url)
             .header("Content-Type", "application/x-www-form-urlencoded")
@@ -164,7 +164,7 @@ async fn exchange_code_for_tokens(
             .send()
             .await?
     };
-    
+
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -173,7 +173,7 @@ async fn exchange_code_for_tokens(
             status, body
         )));
     }
-    
+
     let tokens: TokenResponse = response.json().await?;
     Ok(tokens)
 }
@@ -188,14 +188,14 @@ pub async fn refresh_token(
 ) -> Result<TokenResponse, OAuthError> {
     let client = Client::new();
     let is_anthropic = config.token_url.contains("anthropic.com");
-    
+
     let response = if is_anthropic {
         let payload = serde_json::json!({
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
             "client_id": config.client_id,
         });
-        
+
         client
             .post(&config.token_url)
             .header("Content-Type", "application/json")
@@ -210,7 +210,7 @@ pub async fn refresh_token(
             ("refresh_token", refresh_token),
             ("client_id", &config.client_id),
         ];
-        
+
         client
             .post(&config.token_url)
             .header("Content-Type", "application/x-www-form-urlencoded")
@@ -218,7 +218,7 @@ pub async fn refresh_token(
             .send()
             .await?
     };
-    
+
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -227,7 +227,7 @@ pub async fn refresh_token(
             status, body
         )));
     }
-    
+
     let tokens: TokenResponse = response.json().await?;
     Ok(tokens)
 }

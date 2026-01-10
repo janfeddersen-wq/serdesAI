@@ -111,49 +111,58 @@ impl TruncateByTokens {
     }
 
     fn estimate_tokens(&self, message: &ModelRequest) -> u64 {
-        let chars: usize = message.parts.iter().map(|p| {
-            match p {
-                serdes_ai_core::ModelRequestPart::SystemPrompt(s) => s.content.len(),
-                serdes_ai_core::ModelRequestPart::UserPrompt(u) => {
-                    // Estimate based on content
-                    match &u.content {
-                        serdes_ai_core::messages::UserContent::Text(t) => t.len(),
-                        serdes_ai_core::messages::UserContent::Parts(parts) => {
-                            parts.iter().map(|p| {
-                                match p {
-                                    serdes_ai_core::messages::UserContentPart::Text { text } => text.len(),
-                                    _ => 100, // Estimate for non-text
-                                }
-                            }).sum()
+        let chars: usize = message
+            .parts
+            .iter()
+            .map(|p| {
+                match p {
+                    serdes_ai_core::ModelRequestPart::SystemPrompt(s) => s.content.len(),
+                    serdes_ai_core::ModelRequestPart::UserPrompt(u) => {
+                        // Estimate based on content
+                        match &u.content {
+                            serdes_ai_core::messages::UserContent::Text(t) => t.len(),
+                            serdes_ai_core::messages::UserContent::Parts(parts) => {
+                                parts
+                                    .iter()
+                                    .map(|p| {
+                                        match p {
+                                            serdes_ai_core::messages::UserContentPart::Text {
+                                                text,
+                                            } => text.len(),
+                                            _ => 100, // Estimate for non-text
+                                        }
+                                    })
+                                    .sum()
+                            }
                         }
                     }
+                    serdes_ai_core::ModelRequestPart::ToolReturn(t) => {
+                        t.content.to_string_content().len()
+                    }
+                    serdes_ai_core::ModelRequestPart::RetryPrompt(r) => r.content.message().len(),
+                    serdes_ai_core::ModelRequestPart::BuiltinToolReturn(b) => {
+                        // Estimate based on content type
+                        b.content_type().len() + 100
+                    }
+                    serdes_ai_core::ModelRequestPart::ModelResponse(r) => {
+                        // Estimate based on response parts
+                        r.parts
+                            .iter()
+                            .map(|p| match p {
+                                serdes_ai_core::ModelResponsePart::Text(t) => t.content.len(),
+                                serdes_ai_core::ModelResponsePart::ToolCall(tc) => {
+                                    tc.tool_name.len()
+                                        + tc.args.to_json_string().map(|s| s.len()).unwrap_or(50)
+                                }
+                                serdes_ai_core::ModelResponsePart::Thinking(t) => t.content.len(),
+                                serdes_ai_core::ModelResponsePart::File(_) => 100,
+                                serdes_ai_core::ModelResponsePart::BuiltinToolCall(_) => 100,
+                            })
+                            .sum::<usize>()
+                    }
                 }
-                serdes_ai_core::ModelRequestPart::ToolReturn(t) => {
-                    t.content.to_string_content().len()
-                }
-                serdes_ai_core::ModelRequestPart::RetryPrompt(r) => {
-                    r.content.message().len()
-                }
-                serdes_ai_core::ModelRequestPart::BuiltinToolReturn(b) => {
-                    // Estimate based on content type
-                    b.content_type().len() + 100
-                }
-                serdes_ai_core::ModelRequestPart::ModelResponse(r) => {
-                    // Estimate based on response parts
-                    r.parts.iter().map(|p| {
-                        match p {
-                            serdes_ai_core::ModelResponsePart::Text(t) => t.content.len(),
-                            serdes_ai_core::ModelResponsePart::ToolCall(tc) => {
-                                tc.tool_name.len() + tc.args.to_json_string().map(|s| s.len()).unwrap_or(50)
-                            }
-                            serdes_ai_core::ModelResponsePart::Thinking(t) => t.content.len(),
-                            serdes_ai_core::ModelResponsePart::File(_) => 100,
-                            serdes_ai_core::ModelResponsePart::BuiltinToolCall(_) => 100,
-                        }
-                    }).sum::<usize>()
-                }
-            }
-        }).sum();
+            })
+            .sum();
 
         (chars as f64 / self.chars_per_token).ceil() as u64
     }

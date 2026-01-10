@@ -192,10 +192,7 @@ impl EvalRunner {
                 Err(_) => vec![NamedEvaluationResult::new(
                     "Timeout",
                     EvaluationResult::Error {
-                        error: format!(
-                            "Evaluation exceeded timeout of {:?}",
-                            timeout_duration
-                        ),
+                        error: format!("Evaluation exceeded timeout of {:?}", timeout_duration),
                     },
                 )],
             }
@@ -288,10 +285,7 @@ impl EvalRunner {
                 Err(_) => vec![NamedEvaluationResult::new(
                     "Timeout",
                     EvaluationResult::Error {
-                        error: format!(
-                            "Evaluation exceeded timeout of {:?}",
-                            timeout_duration
-                        ),
+                        error: format!("Evaluation exceeded timeout of {:?}", timeout_duration),
                     },
                 )],
             }
@@ -339,8 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_eval_runner_simple() {
-        let runner = EvalRunner::new()
-            .evaluator(ExactMatchScorer::new());
+        let runner = EvalRunner::new().evaluator(ExactMatchScorer::new());
 
         let cases = vec![
             ("hello".to_string(), Some("HELLO".to_string())),
@@ -365,10 +358,7 @@ mod tests {
             .evaluator(ExactMatchScorer::new())
             .evaluator(ContainsScorer::new("hello"));
 
-        let cases = vec![(
-            "test".to_string(),
-            Some("hello world".to_string()),
-        )];
+        let cases = vec![("test".to_string(), Some("hello world".to_string()))];
 
         let report = runner
             .run_simple(&cases, |_| async move { "hello world".to_string() })
@@ -394,16 +384,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_quick_eval() {
-        let report = quick_eval(
-            vec![
-                ("a", Some("a")),
-                ("b", Some("c")),
-            ],
-            |s| {
-                let s = s.to_string();
-                async move { s }
-            },
-        )
+        let report = quick_eval(vec![("a", Some("a")), ("b", Some("c"))], |s| {
+            let s = s.to_string();
+            async move { s }
+        })
         .await
         .unwrap();
 

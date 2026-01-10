@@ -6,13 +6,13 @@ use crate::agent::{Agent, EndStrategy};
 use crate::context::{generate_run_id, RunContext, RunUsage, UsageLimits};
 use crate::errors::{AgentRunError, OutputParseError, OutputValidationError};
 use chrono::Utc;
+use serde_json::Value as JsonValue;
 use serdes_ai_core::messages::{RetryPromptPart, ToolReturnPart, UserContent};
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
 };
 use serdes_ai_models::ModelRequestParameters;
 use serdes_ai_tools::{ToolError, ToolReturn};
-use serde_json::Value as JsonValue;
 use std::sync::Arc;
 
 /// Options for a run.
@@ -258,7 +258,10 @@ where
         messages
     }
 
-    async fn process_response(&mut self, response: ModelResponse) -> Result<StepResult, AgentRunError> {
+    async fn process_response(
+        &mut self,
+        response: ModelResponse,
+    ) -> Result<StepResult, AgentRunError> {
         let mut tool_calls = Vec::new();
         let mut found_output = None;
 
@@ -278,7 +281,11 @@ where
                     // Check if this is the output tool
                     if self.agent.is_output_tool(&tc.tool_name) {
                         let args = tc.args.to_json();
-                        match self.agent.output_schema.parse_tool_call(&tc.tool_name, &args) {
+                        match self
+                            .agent
+                            .output_schema
+                            .parse_tool_call(&tc.tool_name, &args)
+                        {
                             Ok(output) => {
                                 found_output = Some(output);
                                 continue;
@@ -530,9 +537,11 @@ where
         // Without this, we'd send consecutive user messages which violates the API contract.
         if let Some(last_response) = self.state.responses.last() {
             let mut response_req = ModelRequest::new();
-            response_req.parts.push(ModelRequestPart::ModelResponse(
-                Box::new(last_response.clone())
-            ));
+            response_req
+                .parts
+                .push(ModelRequestPart::ModelResponse(Box::new(
+                    last_response.clone(),
+                )));
             self.state.messages.push(response_req);
         }
 

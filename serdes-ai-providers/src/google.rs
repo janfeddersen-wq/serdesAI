@@ -86,10 +86,7 @@ impl Provider for GoogleProvider {
 
     fn default_headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
         headers
     }
 
@@ -122,10 +119,7 @@ pub struct VertexAIProvider {
 
 impl VertexAIProvider {
     /// Create a new Vertex AI provider.
-    pub fn new(
-        project_id: impl Into<String>,
-        location: impl Into<String>,
-    ) -> Self {
+    pub fn new(project_id: impl Into<String>, location: impl Into<String>) -> Self {
         let project_id = project_id.into();
         let location = location.into();
         let config = ProviderConfig::new();
@@ -141,12 +135,18 @@ impl VertexAIProvider {
     /// Create from environment variables.
     pub fn from_env() -> Result<Self, ProviderError> {
         let config = ProviderConfig::from_env("VERTEX");
-        let project = config.project.clone()
+        let project = config
+            .project
+            .clone()
             .or_else(|| std::env::var("GOOGLE_CLOUD_PROJECT").ok())
             .or_else(|| std::env::var("GCLOUD_PROJECT").ok())
-            .ok_or(ProviderError::MissingConfig("VERTEX_PROJECT or GOOGLE_CLOUD_PROJECT".to_string()))?;
+            .ok_or(ProviderError::MissingConfig(
+                "VERTEX_PROJECT or GOOGLE_CLOUD_PROJECT".to_string(),
+            ))?;
 
-        let location = config.region.clone()
+        let location = config
+            .region
+            .clone()
             .or_else(|| std::env::var("GOOGLE_CLOUD_REGION").ok())
             .unwrap_or_else(|| "us-central1".to_string());
 
@@ -176,10 +176,7 @@ impl Provider for VertexAIProvider {
 
     fn default_headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
         // Note: OAuth token would be added per-request
         headers
     }
@@ -215,7 +212,10 @@ mod tests {
     #[test]
     fn test_google_provider_base_url() {
         let provider = GoogleProvider::new("key");
-        assert_eq!(provider.base_url(), "https://generativelanguage.googleapis.com");
+        assert_eq!(
+            provider.base_url(),
+            "https://generativelanguage.googleapis.com"
+        );
     }
 
     #[test]

@@ -14,7 +14,9 @@ use crate::error::OutputValidationError;
 /// Validators are applied after parsing to add custom validation logic.
 /// They can transform the value, return errors, or request model retries.
 #[async_trait]
-pub trait OutputValidator<T: Send + 'static, Deps: Send + Sync + 'static = ()>: Send + Sync {
+pub trait OutputValidator<T: Send + 'static, Deps: Send + Sync + 'static = ()>:
+    Send + Sync
+{
     /// Validate the output, returning it or an error.
     async fn validate(&self, value: T, ctx: &RunContext<Deps>) -> Result<T, OutputValidationError>;
 }
@@ -43,7 +45,11 @@ where
     T: Send + 'static,
     Deps: Send + Sync + 'static,
 {
-    async fn validate(&self, value: T, _ctx: &RunContext<Deps>) -> Result<T, OutputValidationError> {
+    async fn validate(
+        &self,
+        value: T,
+        _ctx: &RunContext<Deps>,
+    ) -> Result<T, OutputValidationError> {
         (self.func)(value)
     }
 }
@@ -221,7 +227,7 @@ where
 }
 
 /// Helper function to create an async validator from a closure.
-/// 
+///
 /// Note: For async validators, consider implementing the trait directly
 /// or using `SyncValidator` with blocking operations.
 pub fn async_validator<F, T>(func: F) -> SyncValidator<F>

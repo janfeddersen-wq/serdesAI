@@ -25,7 +25,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
-    connect_async, tungstenite::protocol::Message as WsMessage, MaybeTlsStream, WebSocketStream as TungsteniteStream,
+    connect_async, tungstenite::protocol::Message as WsMessage, MaybeTlsStream,
+    WebSocketStream as TungsteniteStream,
 };
 
 use crate::error::{StreamError, StreamResult};
@@ -143,8 +144,8 @@ impl WebSocketStream {
 
     /// Send a JSON message.
     pub async fn send_json<T: serde::Serialize>(&mut self, value: &T) -> StreamResult<()> {
-        let json = serde_json::to_string(value)
-            .map_err(|e| StreamError::Serialization(e.to_string()))?;
+        let json =
+            serde_json::to_string(value).map_err(|e| StreamError::Serialization(e.to_string()))?;
         self.send_text(json).await
     }
 
@@ -198,7 +199,9 @@ impl futures::Stream for WebSocketStream {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Ready(Some(Ok(msg))) => Poll::Ready(Some(Ok(msg.into()))),
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(StreamError::Receive(e.to_string())))),
+            Poll::Ready(Some(Err(e))) => {
+                Poll::Ready(Some(Err(StreamError::Receive(e.to_string()))))
+            }
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
@@ -233,7 +236,12 @@ impl WebSocketAgentStream {
                                 part_index: index,
                             }));
                         }
-                        ResponseDelta::ToolCall { index, name, args, id } => {
+                        ResponseDelta::ToolCall {
+                            index,
+                            name,
+                            args,
+                            id,
+                        } => {
                             if let Some(name) = name {
                                 return Some(Ok(AgentStreamEvent::ToolCallStart {
                                     name,
@@ -251,10 +259,7 @@ impl WebSocketAgentStream {
                             }
                         }
                         ResponseDelta::Thinking { index, content, .. } => {
-                            return Some(Ok(AgentStreamEvent::ThinkingDelta {
-                                content,
-                                index,
-                            }));
+                            return Some(Ok(AgentStreamEvent::ThinkingDelta { content, index }));
                         }
                         ResponseDelta::Finish { .. } => {
                             return Some(Ok(AgentStreamEvent::RunComplete {

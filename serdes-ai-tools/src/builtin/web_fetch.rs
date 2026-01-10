@@ -129,9 +129,9 @@ impl WebFetchConfig {
     }
 
     /// Set allowed domains.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if `blocked_domains` is already set.
     #[must_use]
     pub fn allowed_domains(mut self, domains: Vec<String>) -> Self {
@@ -144,9 +144,9 @@ impl WebFetchConfig {
     }
 
     /// Set blocked domains.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if `allowed_domains` is already set.
     #[must_use]
     pub fn blocked_domains(mut self, domains: Vec<String>) -> Self {
@@ -159,9 +159,9 @@ impl WebFetchConfig {
     }
 
     /// Add a single allowed domain.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if `blocked_domains` is already set.
     #[must_use]
     pub fn allow_domain(mut self, domain: impl Into<String>) -> Self {
@@ -176,9 +176,9 @@ impl WebFetchConfig {
     }
 
     /// Add a single blocked domain.
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// Panics if `allowed_domains` is already set.
     #[must_use]
     pub fn block_domain(mut self, domain: impl Into<String>) -> Self {
@@ -233,16 +233,16 @@ impl WebFetchConfig {
 /// Validate a domain string.
 fn validate_domain(domain: &str) -> Result<(), WebFetchError> {
     let domain = domain.trim();
-    
+
     if domain.is_empty() {
         return Err(WebFetchError::InvalidDomain("empty domain".to_string()));
     }
 
     // Basic domain validation: should contain only valid characters
     // Allows: alphanumeric, hyphens, dots, and wildcards (*)
-    let valid = domain.chars().all(|c| {
-        c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '*'
-    });
+    let valid = domain
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.' || c == '*');
 
     if !valid {
         return Err(WebFetchError::InvalidDomain(domain.to_string()));
@@ -372,7 +372,9 @@ impl WebFetchTool {
     /// Returns None if unlimited.
     #[must_use]
     pub fn remaining_uses(&self) -> Option<usize> {
-        self.config.max_uses.map(|max| max.saturating_sub(self.use_count))
+        self.config
+            .max_uses
+            .map(|max| max.saturating_sub(self.use_count))
     }
 
     /// Validate and record a URL fetch attempt.
@@ -475,11 +477,17 @@ impl WebFetchTool {
 
         // Google uses different naming conventions
         if let Some(ref allowed) = self.config.allowed_domains {
-            retrieval_config.insert("allowedDomains".to_string(), JsonValue::from(allowed.clone()));
+            retrieval_config.insert(
+                "allowedDomains".to_string(),
+                JsonValue::from(allowed.clone()),
+            );
         }
 
         if let Some(ref blocked) = self.config.blocked_domains {
-            retrieval_config.insert("blockedDomains".to_string(), JsonValue::from(blocked.clone()));
+            retrieval_config.insert(
+                "blockedDomains".to_string(),
+                JsonValue::from(blocked.clone()),
+            );
         }
 
         if self.config.enable_citations {
@@ -622,7 +630,7 @@ impl WebFetchToolBuilder {
 /// Extract domain from a URL.
 fn extract_domain(url: &str) -> String {
     let url = url.trim();
-    
+
     // Remove protocol
     let without_protocol = url
         .strip_prefix("https://")
@@ -639,10 +647,7 @@ fn extract_domain(url: &str) -> String {
     let domain = domain.split(':').next().unwrap_or(domain);
 
     // Remove www. prefix for normalization
-    domain
-        .strip_prefix("www.")
-        .unwrap_or(domain)
-        .to_lowercase()
+    domain.strip_prefix("www.").unwrap_or(domain).to_lowercase()
 }
 
 /// Normalize a domain for comparison.
@@ -953,12 +958,9 @@ mod tests {
 
     #[test]
     fn test_domain_matches() {
-        let allowed: HashSet<String> = vec![
-            "example.com".to_string(),
-            "*.docs.rs".to_string(),
-        ]
-        .into_iter()
-        .collect();
+        let allowed: HashSet<String> = vec!["example.com".to_string(), "*.docs.rs".to_string()]
+            .into_iter()
+            .collect();
 
         // Direct match
         assert!(domain_matches("example.com", &allowed));
@@ -1029,9 +1031,7 @@ mod tests {
         assert!(result.is_ok());
 
         // The builder prevents conflicting states, so this should succeed
-        let result = WebFetchTool::builder()
-            .block_domain("evil.com")
-            .try_build();
+        let result = WebFetchTool::builder().block_domain("evil.com").try_build();
         assert!(result.is_ok());
     }
 

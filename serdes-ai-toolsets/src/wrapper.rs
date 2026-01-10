@@ -13,8 +13,7 @@ use std::sync::Arc;
 use crate::{AbstractToolset, ToolsetTool};
 
 /// Type alias for before-call hooks.
-pub type BeforeCallHook<Deps> =
-    dyn Fn(&str, &JsonValue, &RunContext<Deps>) + Send + Sync;
+pub type BeforeCallHook<Deps> = dyn Fn(&str, &JsonValue, &RunContext<Deps>) + Send + Sync;
 
 /// Type alias for after-call hooks.
 pub type AfterCallHook<Deps> =
@@ -192,25 +191,23 @@ impl LoggingWrapper {
                     args
                 );
             })
-            .after(move |name, result, _ctx| {
-                match result {
-                    Ok(_) => {
-                        tracing::debug!(
-                            target: "tool_calls",
-                            "[{}] Tool '{}' completed successfully",
-                            after_prefix,
-                            name
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            target: "tool_calls",
-                            "[{}] Tool '{}' failed: {}",
-                            after_prefix,
-                            name,
-                            e
-                        );
-                    }
+            .after(move |name, result, _ctx| match result {
+                Ok(_) => {
+                    tracing::debug!(
+                        target: "tool_calls",
+                        "[{}] Tool '{}' completed successfully",
+                        after_prefix,
+                        name
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "tool_calls",
+                        "[{}] Tool '{}' failed: {}",
+                        after_prefix,
+                        name,
+                        e
+                    );
                 }
             })
     }

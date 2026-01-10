@@ -142,10 +142,6 @@ pub trait AbstractToolset<Deps = ()>: Send + Sync {
     async fn exit(&self) -> Result<(), ToolError> {
         Ok(())
     }
-
-
-
-
 }
 
 /// Boxed toolset for dynamic dispatch.

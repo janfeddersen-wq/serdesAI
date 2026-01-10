@@ -81,7 +81,10 @@ where
 
     /// Get the original name for a (possibly renamed) tool.
     fn original_name<'a>(&'a self, new_name: &'a str) -> &'a str {
-        self.name_map.get(new_name).map(|s| s.as_str()).unwrap_or(new_name)
+        self.name_map
+            .get(new_name)
+            .map(|s| s.as_str())
+            .unwrap_or(new_name)
     }
 
     /// Get the new name for an original tool name.

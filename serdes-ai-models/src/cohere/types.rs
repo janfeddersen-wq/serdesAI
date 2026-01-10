@@ -79,12 +79,20 @@ pub struct ChatMessage {
 impl ChatMessage {
     /// Create a user message.
     pub fn user(message: impl Into<String>) -> Self {
-        Self { role: Role::User, message: message.into(), tool_calls: None }
+        Self {
+            role: Role::User,
+            message: message.into(),
+            tool_calls: None,
+        }
     }
 
     /// Create a chatbot/assistant message.
     pub fn chatbot(message: impl Into<String>) -> Self {
-        Self { role: Role::Chatbot, message: message.into(), tool_calls: None }
+        Self {
+            role: Role::Chatbot,
+            message: message.into(),
+            tool_calls: None,
+        }
     }
 }
 
@@ -225,6 +233,9 @@ mod tests {
     #[test]
     fn test_role_serialization() {
         assert_eq!(serde_json::to_string(&Role::User).unwrap(), "\"USER\"");
-        assert_eq!(serde_json::to_string(&Role::Chatbot).unwrap(), "\"CHATBOT\"");
+        assert_eq!(
+            serde_json::to_string(&Role::Chatbot).unwrap(),
+            "\"CHATBOT\""
+        );
     }
 }

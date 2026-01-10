@@ -60,9 +60,7 @@ where
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match Pin::new(&mut self.inner).poll_next(cx) {
-            Poll::Ready(Some(Ok(event))) => {
-                Poll::Ready(Some(Ok(Self::unprefix_tool_names(event))))
-            }
+            Poll::Ready(Some(Ok(event))) => Poll::Ready(Some(Ok(Self::unprefix_tool_names(event)))),
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,

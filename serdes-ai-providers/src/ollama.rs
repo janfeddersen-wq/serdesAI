@@ -70,10 +70,7 @@ impl Provider for OllamaProvider {
 
     fn default_headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
         headers
     }
 
@@ -85,7 +82,7 @@ impl Provider for OllamaProvider {
 
         // Enable tools for models that support it
         let model_lower = model_name.to_lowercase();
-        if model_lower.contains("llama") 
+        if model_lower.contains("llama")
             || model_lower.contains("mistral")
             || model_lower.contains("mixtral")
             || model_lower.contains("qwen")

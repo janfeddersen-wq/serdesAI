@@ -255,7 +255,7 @@ impl From<&ToolReturn> for SerializableToolResult {
         } else {
             Some(serde_json::to_value(&ret.content).unwrap_or_default())
         };
-        
+
         Self {
             success: !ret.is_error(),
             content,

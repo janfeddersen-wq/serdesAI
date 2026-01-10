@@ -573,8 +573,7 @@ mod tests {
 
     #[test]
     fn test_thinking_tag_accessors() {
-        let profile = ModelProfile::new()
-            .with_thinking_tags("<thought>", "</thought>");
+        let profile = ModelProfile::new().with_thinking_tags("<thought>", "</thought>");
 
         assert_eq!(profile.thinking_open_tag(), "<thought>");
         assert_eq!(profile.thinking_close_tag(), "</thought>");
@@ -582,8 +581,8 @@ mod tests {
 
     #[test]
     fn test_format_prompted_output() {
-        let profile = ModelProfile::new()
-            .with_prompted_output_template("Please output JSON: {schema}");
+        let profile =
+            ModelProfile::new().with_prompted_output_template("Please output JSON: {schema}");
 
         let formatted = profile.format_prompted_output(r#"{"type": "object"}"#);
         assert_eq!(formatted, r#"Please output JSON: {"type": "object"}"#);

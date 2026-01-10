@@ -30,7 +30,10 @@ impl<T> std::fmt::Debug for OutputSpec<T> {
         match self {
             OutputSpec::Text(s) => f.debug_tuple("Text").field(s).finish(),
             OutputSpec::Structured(_) => f.debug_tuple("Structured").field(&"...").finish(),
-            OutputSpec::Custom(_) => f.debug_tuple("Custom").field(&"<dyn OutputSchema>").finish(),
+            OutputSpec::Custom(_) => f
+                .debug_tuple("Custom")
+                .field(&"<dyn OutputSchema>")
+                .finish(),
         }
     }
 }
@@ -165,9 +168,7 @@ impl<T: DeserializeOwned + Send + Sync + 'static> OutputSpecBuilder<T> {
         schema: ObjectJsonSchema,
         tool_name: impl Into<String>,
     ) -> OutputSpec<T> {
-        OutputSpec::Structured(
-            StructuredOutputSchema::new(schema).with_tool_name(tool_name),
-        )
+        OutputSpec::Structured(StructuredOutputSchema::new(schema).with_tool_name(tool_name))
     }
 }
 
@@ -189,9 +190,7 @@ impl IntoOutputSpec<String> for TextOutputSchema {
     }
 }
 
-impl<T: DeserializeOwned + Send + Sync + 'static> IntoOutputSpec<T>
-    for StructuredOutputSchema<T>
-{
+impl<T: DeserializeOwned + Send + Sync + 'static> IntoOutputSpec<T> for StructuredOutputSchema<T> {
     fn into_output_spec(self) -> OutputSpec<T> {
         OutputSpec::Structured(self)
     }
@@ -217,8 +216,11 @@ mod tests {
 
     #[test]
     fn test_output_spec_structured() {
-        let schema = ObjectJsonSchema::new()
-            .with_property("name", PropertySchema::string("Name").build(), true);
+        let schema = ObjectJsonSchema::new().with_property(
+            "name",
+            PropertySchema::string("Name").build(),
+            true,
+        );
 
         let spec = OutputSpec::<TestStruct>::structured(schema);
         assert_eq!(spec.mode(), OutputMode::Tool);
@@ -239,15 +241,17 @@ mod tests {
 
     #[test]
     fn test_builder_text_constrained() {
-        let spec = OutputSpecBuilder::<String>::new()
-            .text_constrained(Some(10), Some(100));
+        let spec = OutputSpecBuilder::<String>::new().text_constrained(Some(10), Some(100));
         assert_eq!(spec.mode(), OutputMode::Text);
     }
 
     #[test]
     fn test_builder_structured() {
-        let schema = ObjectJsonSchema::new()
-            .with_property("name", PropertySchema::string("Name").build(), true);
+        let schema = ObjectJsonSchema::new().with_property(
+            "name",
+            PropertySchema::string("Name").build(),
+            true,
+        );
 
         let spec = OutputSpecBuilder::<TestStruct>::new().structured(schema);
         assert_eq!(spec.mode(), OutputMode::Tool);

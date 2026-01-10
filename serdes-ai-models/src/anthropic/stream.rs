@@ -8,8 +8,8 @@ use bytes::Bytes;
 use futures::Stream;
 use pin_project_lite::pin_project;
 use serdes_ai_core::messages::{
-    ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent, PartStartEvent, TextPart,
-    ThinkingPart, ToolCallPart,
+    ModelResponsePartDelta, ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent, PartStartEvent,
+    TextPart, ThinkingPart, ThinkingPartDelta, ToolCallPart,
 };
 use serdes_ai_core::ModelResponsePart;
 use std::collections::HashMap;
@@ -232,7 +232,9 @@ fn process_event(
                         name: name.clone(),
                         input_json: serde_json::to_string(&input).unwrap_or_default(),
                     },
-                    ModelResponsePart::ToolCall(ToolCallPart::new(&name, input).with_tool_call_id(&id)),
+                    ModelResponsePart::ToolCall(
+                        ToolCallPart::new(&name, input).with_tool_call_id(&id),
+                    ),
                 ),
                 ContentBlockStart::Thinking { thinking } => (
                     BlockState::Thinking {
@@ -250,9 +252,9 @@ fn process_event(
             };
 
             blocks.insert(index, state);
-            Some(Ok(ModelResponseStreamEvent::PartStart(PartStartEvent::new(
-                index, part,
-            ))))
+            Some(Ok(ModelResponseStreamEvent::PartStart(
+                PartStartEvent::new(index, part),
+            )))
         }
 
         StreamEvent::ContentBlockDelta { index, delta } => {
@@ -265,9 +267,9 @@ fn process_event(
                     if let BlockState::Text { content } = state {
                         content.push_str(&text);
                     }
-                    Some(Ok(ModelResponseStreamEvent::PartDelta(PartDeltaEvent::text(
-                        index, text,
-                    ))))
+                    Some(Ok(ModelResponseStreamEvent::PartDelta(
+                        PartDeltaEvent::text(index, text),
+                    )))
                 }
                 ContentBlockDelta::InputJsonDelta { partial_json } => {
                     if let BlockState::ToolUse { input_json, .. } = state {
@@ -286,16 +288,19 @@ fn process_event(
                     )))
                 }
                 ContentBlockDelta::SignatureDelta { signature } => {
-                    if let BlockState::Thinking {
-                        signature: sig, ..
-                    } = state
-                    {
+                    if let BlockState::Thinking { signature: sig, .. } = state {
                         match sig {
                             Some(s) => s.push_str(&signature),
-                            None => *sig = Some(signature),
+                            None => *sig = Some(signature.clone()),
                         }
                     }
-                    None // Don't emit signature deltas as events
+                    // Emit signature delta so agents can track it
+                    Some(Ok(ModelResponseStreamEvent::PartDelta(PartDeltaEvent {
+                        index,
+                        delta: ModelResponsePartDelta::Thinking(
+                            ThinkingPartDelta::new("").with_signature_delta(signature),
+                        ),
+                    })))
                 }
             }
         }
@@ -396,10 +401,8 @@ mod tests {
     async fn test_parse_tool_use_stream() {
         let msg_start = r#"{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-3-5-sonnet-20241022","usage":{"input_tokens":10,"output_tokens":0}}}"#;
         let block_start = r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool_1","name":"search","input":{}}}"#;
-        let delta1 =
-            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"q\":"}}"#;
-        let delta2 =
-            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"rust\"}"}}"#;
+        let delta1 = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"q\":"}}"#;
+        let delta2 = r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"rust\"}"}}"#;
         let block_stop = r#"{"type":"content_block_stop","index":0}"#;
 
         let bytes = vec![
@@ -434,7 +437,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_parse_error() {
-        let error = r#"{"type":"error","error":{"type":"rate_limit_error","message":"Rate limited"}}"#;
+        let error =
+            r#"{"type":"error","error":{"type":"rate_limit_error","message":"Rate limited"}}"#;
         let bytes = vec![Ok(make_sse_bytes("error", error))];
         let stream = stream::iter(bytes);
         let mut parser = AnthropicStreamParser::new(stream);

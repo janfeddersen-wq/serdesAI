@@ -72,7 +72,9 @@ pub mod renamed;
 pub mod wrapper;
 
 // Re-exports
-pub use abstract_toolset::{AbstractToolset, BoxedToolset, ToolsetInfo, ToolsetResult, ToolsetTool};
+pub use abstract_toolset::{
+    AbstractToolset, BoxedToolset, ToolsetInfo, ToolsetResult, ToolsetTool,
+};
 pub use approval::{checkers as approval_checkers, ApprovalRequiredToolset};
 pub use combined::CombinedToolset;
 pub use dynamic::DynamicToolset;

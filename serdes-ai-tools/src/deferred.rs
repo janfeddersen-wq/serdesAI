@@ -25,10 +25,7 @@ pub struct DeferredToolCall {
 impl DeferredToolCall {
     /// Create a new deferred tool call.
     #[must_use]
-    pub fn new(
-        tool_name: impl Into<String>,
-        args: serde_json::Value,
-    ) -> Self {
+    pub fn new(tool_name: impl Into<String>, args: serde_json::Value) -> Self {
         Self {
             tool_name: tool_name.into(),
             args,
@@ -119,7 +116,11 @@ impl DeferredToolRequests {
     #[must_use]
     pub fn approve_all(&self) -> DeferredToolDecisions {
         DeferredToolDecisions {
-            decisions: self.calls.iter().map(|_| DeferredToolDecision::Approved).collect(),
+            decisions: self
+                .calls
+                .iter()
+                .map(|_| DeferredToolDecision::Approved)
+                .collect(),
         }
     }
 
@@ -128,7 +129,11 @@ impl DeferredToolRequests {
     pub fn deny_all(&self, message: impl Into<String>) -> DeferredToolDecisions {
         let msg = message.into();
         DeferredToolDecisions {
-            decisions: self.calls.iter().map(|_| DeferredToolDecision::Denied(msg.clone())).collect(),
+            decisions: self
+                .calls
+                .iter()
+                .map(|_| DeferredToolDecision::Denied(msg.clone()))
+                .collect(),
         }
     }
 }
@@ -192,7 +197,9 @@ impl DeferredToolDecisions {
     /// Create a new empty collection.
     #[must_use]
     pub fn new() -> Self {
-        Self { decisions: Vec::new() }
+        Self {
+            decisions: Vec::new(),
+        }
     }
 
     /// Add a decision.
@@ -283,7 +290,9 @@ impl DeferredToolResults {
     /// Create a new empty collection.
     #[must_use]
     pub fn new() -> Self {
-        Self { results: Vec::new() }
+        Self {
+            results: Vec::new(),
+        }
     }
 
     /// Add a result.
@@ -470,8 +479,7 @@ mod tests {
 
     #[test]
     fn test_deferred_tool_result() {
-        let result = DeferredToolResult::approved()
-            .with_tool_call_id("id1");
+        let result = DeferredToolResult::approved().with_tool_call_id("id1");
         assert_eq!(result.tool_call_id, Some("id1".to_string()));
 
         let denied = DeferredToolResult::denied("Not allowed");
@@ -511,8 +519,8 @@ mod tests {
 
     #[test]
     fn test_serde_roundtrip() {
-        let call = DeferredToolCall::new("test", serde_json::json!({"x": 1}))
-            .with_tool_call_id("id");
+        let call =
+            DeferredToolCall::new("test", serde_json::json!({"x": 1})).with_tool_call_id("id");
         let json = serde_json::to_string(&call).unwrap();
         let parsed: DeferredToolCall = serde_json::from_str(&json).unwrap();
         assert_eq!(call.tool_name, parsed.tool_name);

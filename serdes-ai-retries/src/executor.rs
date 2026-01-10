@@ -86,8 +86,8 @@ where
                 return Ok(result);
             }
             Err(error) => {
-                let should_retry = state.attempt < max_attempts
-                    && config.retry_on.should_retry(&error);
+                let should_retry =
+                    state.attempt < max_attempts && config.retry_on.should_retry(&error);
 
                 if !should_retry {
                     warn!(
@@ -148,8 +148,8 @@ where
                 return (Ok(result), state);
             }
             Err(error) => {
-                let should_retry = state.attempt < max_attempts
-                    && config.retry_on.should_retry(&error);
+                let should_retry =
+                    state.attempt < max_attempts && config.retry_on.should_retry(&error);
 
                 if !should_retry {
                     return (Err(error), state);

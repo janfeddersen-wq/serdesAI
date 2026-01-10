@@ -168,7 +168,10 @@ impl OutputValidationError {
     pub fn retry_message(&self) -> Option<&str> {
         match self {
             Self::ModelRetry(msg) => Some(msg),
-            Self::Failed { message, retry: true } => Some(message),
+            Self::Failed {
+                message,
+                retry: true,
+            } => Some(message),
             _ => None,
         }
     }

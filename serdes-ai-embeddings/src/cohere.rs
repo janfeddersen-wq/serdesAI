@@ -2,9 +2,7 @@
 
 use crate::embedding::Embedding;
 use crate::error::{EmbeddingError, EmbeddingResult};
-use crate::model::{
-    EmbedInput, EmbeddingModel, EmbeddingOutput, EmbeddingSettings, InputType,
-};
+use crate::model::{EmbedInput, EmbeddingModel, EmbeddingOutput, EmbeddingSettings, InputType};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};

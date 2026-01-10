@@ -63,9 +63,7 @@ use futures::StreamExt;
 use serdes_ai_core::{
     messages::ModelResponseStreamEvent, ModelRequest, ModelResponse, ModelSettings,
 };
-use serdes_ai_models::{
-    BoxedModel, Model, ModelError, ModelRequestParameters, StreamedResponse,
-};
+use serdes_ai_models::{BoxedModel, Model, ModelError, ModelRequestParameters, StreamedResponse};
 use thiserror::Error;
 
 // ============================================================================
@@ -263,9 +261,7 @@ pub fn model_request_sync(
     let settings = model_settings;
     let params = model_request_parameters;
 
-    rt.block_on(async move {
-        model_request(model_spec, &messages_owned, settings, params).await
-    })
+    rt.block_on(async move { model_request(model_spec, &messages_owned, settings, params).await })
 }
 
 // ============================================================================
@@ -539,7 +535,7 @@ mod tests {
         // In a normal sync context, this should not error due to runtime detection
         // (but might fail due to missing API keys)
         // We're just testing the runtime detection logic here
-        
+
         // Can't easily test the async context detection without actually being in one
     }
 }

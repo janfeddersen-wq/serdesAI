@@ -12,10 +12,7 @@ use thiserror::Error;
 pub enum TaskError {
     /// Invalid state transition attempted.
     #[error("Invalid state transition from {from} to {to}")]
-    InvalidStateTransition {
-        from: TaskStatus,
-        to: TaskStatus,
-    },
+    InvalidStateTransition { from: TaskStatus, to: TaskStatus },
 }
 
 /// Unique identifier for a task.
@@ -335,7 +332,7 @@ mod tests {
     #[test]
     fn test_task_includes_original_message() {
         let task = Task::new("thread-1", Message::user("Hello"));
-        
+
         // Original message should be in the messages list
         assert_eq!(task.messages.len(), 1);
         assert_eq!(task.messages[0].text_content(), "Hello");
@@ -345,7 +342,7 @@ mod tests {
     #[test]
     fn test_task_with_id_includes_original_message() {
         let task = Task::with_id("my-id", "thread-1", Message::user("Test"));
-        
+
         assert_eq!(task.id, "my-id");
         assert_eq!(task.messages.len(), 1);
         assert_eq!(task.messages[0].text_content(), "Test");
@@ -378,7 +375,7 @@ mod tests {
     fn test_invalid_state_transition_start_from_running() {
         let mut task = Task::new("thread-1", Message::user("Hello"));
         task.start().unwrap();
-        
+
         let result = task.start();
         assert!(result.is_err());
         match result {
@@ -393,7 +390,7 @@ mod tests {
     #[test]
     fn test_invalid_state_transition_complete_from_pending() {
         let mut task = Task::new("thread-1", Message::user("Hello"));
-        
+
         let result = task.complete();
         assert!(result.is_err());
     }
@@ -402,7 +399,7 @@ mod tests {
     fn test_invalid_state_transition_complete_after_cancel() {
         let mut task = Task::new("thread-1", Message::user("Hello"));
         task.cancel().unwrap();
-        
+
         // Can't complete an already cancelled task
         let result = task.complete();
         assert!(result.is_err());
@@ -428,7 +425,7 @@ mod tests {
         let mut task = Task::new("thread-1", Message::user("Hello"));
         task.start().unwrap();
         task.complete().unwrap();
-        
+
         let result = task.cancel();
         assert!(result.is_err());
     }

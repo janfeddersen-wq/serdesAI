@@ -198,7 +198,7 @@ impl FileSearchTool {
         // 2. Search a vector store (e.g., Qdrant, Pinecone, etc.)
         // 3. Filter by file extensions if provided
         // 4. Return the top results with content snippets
-        
+
         vec![FileSearchResult {
             path: "/example/path/file.rs".to_string(),
             filename: "file.rs".to_string(),
@@ -222,24 +222,18 @@ impl Default for FileSearchTool {
 #[async_trait]
 impl<Deps: Send + Sync> Tool<Deps> for FileSearchTool {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            "file_search",
-            "Search files using semantic similarity",
-        )
-        .with_parameters(Self::schema())
+        ToolDefinition::new("file_search", "Search files using semantic similarity")
+            .with_parameters(Self::schema())
     }
 
     async fn call(&self, _ctx: &RunContext<Deps>, args: JsonValue) -> ToolResult {
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::validation_error(
-                    "file_search",
-                    Some("query".to_string()),
-                    "Missing 'query' field",
-                )
-            })?;
+        let query = args.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
+            ToolError::validation_error(
+                "file_search",
+                Some("query".to_string()),
+                "Missing 'query' field",
+            )
+        })?;
 
         if query.trim().is_empty() {
             return Err(ToolError::validation_error(

@@ -73,7 +73,7 @@ impl CallbackServer {
         let result = tokio::time::timeout(timeout, async {
             loop {
                 let (mut stream, _) = listener.accept().await?;
-                
+
                 let mut buffer = [0u8; 4096];
                 let n = stream.read(&mut buffer).await?;
                 let request = String::from_utf8_lossy(&buffer[..n]);
@@ -104,13 +104,13 @@ impl CallbackServer {
         // Parse: GET /callback?code=xxx&state=yyy HTTP/1.1
         let first_line = request.lines().next()?;
         let path = first_line.split_whitespace().nth(1)?;
-        
+
         let query_start = path.find('?')?;
         let query = &path[query_start + 1..];
-        
+
         let mut code = None;
         let mut state = None;
-        
+
         for pair in query.split('&') {
             let mut parts = pair.splitn(2, '=');
             match (parts.next(), parts.next()) {

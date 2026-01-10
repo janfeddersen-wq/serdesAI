@@ -4,6 +4,7 @@
 //! structured output via tool calls.
 
 use async_trait::async_trait;
+use parking_lot::RwLock;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -12,7 +13,6 @@ use serdes_ai_toolsets::{AbstractToolset, ToolsetTool};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 use crate::schema::OutputSchema;
 use crate::structured::StructuredOutputSchema;
@@ -96,8 +96,6 @@ where
     }
 }
 
-
-
 impl<T, Deps> std::fmt::Debug for OutputToolset<T, Deps>
 where
     T: DeserializeOwned + Send + Sync + 'static,
@@ -133,10 +131,7 @@ where
 
         for def in defs {
             let name = def.name.clone();
-            tools.insert(
-                name,
-                ToolsetTool::new(def).with_toolset_id("__output__"),
-            );
+            tools.insert(name, ToolsetTool::new(def).with_toolset_id("__output__"));
         }
 
         Ok(tools)
@@ -206,11 +201,7 @@ mod tests {
                 PropertySchema::string("The message").build(),
                 true,
             )
-            .with_property(
-                "count",
-                PropertySchema::integer("The count").build(),
-                true,
-            );
+            .with_property("count", PropertySchema::integer("The count").build(), true);
 
         StructuredOutputSchema::new(json_schema)
     }
@@ -245,9 +236,7 @@ mod tests {
             "count": 42
         });
 
-        let result = toolset
-            .call_tool("final_result", args, &ctx, tool)
-            .await;
+        let result = toolset.call_tool("final_result", args, &ctx, tool).await;
         assert!(result.is_ok());
 
         // Check captured output
@@ -293,9 +282,7 @@ mod tests {
 
         let args = serde_json::json!({"message": "Test", "count": 1});
 
-        let result = toolset
-            .call_tool("wrong_name", args, &ctx, tool)
-            .await;
+        let result = toolset.call_tool("wrong_name", args, &ctx, tool).await;
 
         assert!(result.is_err());
     }

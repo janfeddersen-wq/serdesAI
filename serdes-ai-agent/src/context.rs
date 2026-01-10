@@ -4,8 +4,8 @@
 //! including dependencies, settings, and execution state.
 
 use chrono::{DateTime, Utc};
-use serdes_ai_core::ModelSettings;
 use serde_json::Value as JsonValue;
+use serdes_ai_core::ModelSettings;
 use std::sync::Arc;
 
 /// Context for an agent run.
@@ -92,7 +92,9 @@ impl<Deps> RunContext<Deps> {
 
     /// Set metadata value.
     pub fn set_metadata(&mut self, key: &str, value: impl serde::Serialize) {
-        let meta = self.metadata.get_or_insert_with(|| JsonValue::Object(Default::default()));
+        let meta = self
+            .metadata
+            .get_or_insert_with(|| JsonValue::Object(Default::default()));
         if let JsonValue::Object(ref mut map) = meta {
             if let Ok(v) = serde_json::to_value(value) {
                 map.insert(key.to_string(), v);
@@ -393,9 +395,7 @@ mod tests {
 
     #[test]
     fn test_usage_limits() {
-        let limits = UsageLimits::new()
-            .total_tokens(1000)
-            .requests(10);
+        let limits = UsageLimits::new().total_tokens(1000).requests(10);
 
         let mut usage = RunUsage::new();
         usage.total_tokens = 500;

@@ -81,9 +81,9 @@ where
 
         // First, emit any pending PartEnd events
         if let Some(idx) = this.pending_part_ends.pop() {
-            return Poll::Ready(Some(Ok(ModelResponseStreamEvent::PartEnd(
-                PartEndEvent { index: idx },
-            ))));
+            return Poll::Ready(Some(Ok(ModelResponseStreamEvent::PartEnd(PartEndEvent {
+                index: idx,
+            }))));
         }
 
         loop {
@@ -190,10 +190,7 @@ fn parse_sse_line(
                             }
 
                             // Emit text delta for subsequent content
-                            let delta = PartDeltaEvent::text(
-                                current_text_index.unwrap(),
-                                content,
-                            );
+                            let delta = PartDeltaEvent::text(current_text_index.unwrap(), content);
                             return Some(Ok(ModelResponseStreamEvent::PartDelta(delta)));
                         }
                     }
@@ -229,20 +226,21 @@ fn parse_sse_line(
                                         let tool_part = ToolCallPart::new(
                                             &state.name,
                                             ToolCallArgs::String(state.arguments.clone()),
-                                        ).with_tool_call_id(&state.id);
+                                        )
+                                        .with_tool_call_id(&state.id);
 
                                         let start = PartStartEvent::new(
                                             state.part_index,
                                             ModelResponsePart::ToolCall(tool_part),
                                         );
-                                        return Some(Ok(ModelResponseStreamEvent::PartStart(start)));
+                                        return Some(Ok(ModelResponseStreamEvent::PartStart(
+                                            start,
+                                        )));
                                     }
 
                                     // Emit args delta
-                                    let delta = PartDeltaEvent::tool_call_args(
-                                        state.part_index,
-                                        args,
-                                    );
+                                    let delta =
+                                        PartDeltaEvent::tool_call_args(state.part_index, args);
                                     return Some(Ok(ModelResponseStreamEvent::PartDelta(delta)));
                                 }
                             }
@@ -343,7 +341,10 @@ mod tests {
         // Second should be PartDelta with " World"
         if let ModelResponseStreamEvent::PartDelta(delta) = &events[1] {
             if let ModelResponsePartDelta::Text(text) = &delta.delta {
-                assert_eq!(text.content_delta, " World", "Delta should contain ' World'");
+                assert_eq!(
+                    text.content_delta, " World",
+                    "Delta should contain ' World'"
+                );
             } else {
                 panic!("Expected Text delta, got {:?}", delta.delta);
             }

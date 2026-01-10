@@ -259,19 +259,35 @@ pub use serdes_ai_core::{ConversationId, RunId, ToolCallId};
 
 // Messages
 pub use serdes_ai_core::{
-    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
-    SystemPromptPart, TextPart, ThinkingPart, ToolCallPart, ToolReturnPart,
-    UserContent,
-    // File and binary content
-    FilePart, BinaryContent,
+    BinaryContent,
     // Builtin tools
-    BuiltinToolCallPart, BuiltinToolReturnPart, BuiltinToolReturnContent,
-    WebSearchResult, WebSearchResults,
+    BuiltinToolCallPart,
+    BuiltinToolReturnContent,
+    BuiltinToolReturnPart,
     CodeExecutionResult,
-    FileSearchResult, FileSearchResults,
+    // File and binary content
+    FilePart,
+    FileSearchResult,
+    FileSearchResults,
+    FinishReason,
+    ModelRequest,
+    ModelRequestPart,
+    ModelResponse,
+    ModelResponsePart,
+    ModelResponsePartDelta,
     // Streaming events
-    ModelResponseStreamEvent, ModelResponsePartDelta,
-    PartStartEvent, PartDeltaEvent, PartEndEvent,
+    ModelResponseStreamEvent,
+    PartDeltaEvent,
+    PartEndEvent,
+    PartStartEvent,
+    SystemPromptPart,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserContent,
+    WebSearchResult,
+    WebSearchResults,
 };
 
 // Settings
@@ -281,12 +297,14 @@ pub use serdes_ai_core::ModelSettings;
 pub use serdes_ai_core::{RequestUsage, RunUsage, UsageLimits};
 
 // Format
-pub use serdes_ai_core::{format_as_xml, format_as_xml_with_options, XmlFormatError, XmlFormatOptions};
+pub use serdes_ai_core::{
+    format_as_xml, format_as_xml_with_options, XmlFormatError, XmlFormatOptions,
+};
 
 // Agent
 pub use serdes_ai_agent::{
-    Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent,
-    EndStrategy, RunContext, RunOptions, StepResult,
+    Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent, EndStrategy,
+    RunContext, RunOptions, StepResult,
 };
 
 // Models
@@ -322,29 +340,34 @@ pub use serdes_ai_models::bedrock::BedrockModel;
 
 // Tools
 pub use serdes_ai_tools::{
-    ObjectJsonSchema, SchemaBuilder, Tool, ToolDefinition,
-    ToolRegistry, ToolResult,
+    ObjectJsonSchema, SchemaBuilder, Tool, ToolDefinition, ToolRegistry, ToolResult,
 };
 
 // Toolsets
 pub use serdes_ai_toolsets::{
-    AbstractToolset, ApprovalRequiredToolset, BoxedToolset, CombinedToolset,
-    DynamicToolset, ExternalToolset, FilteredToolset, FunctionToolset,
-    PrefixedToolset, PreparedToolset, RenamedToolset, ToolsetInfo, ToolsetTool,
-    WrapperToolset,
+    AbstractToolset, ApprovalRequiredToolset, BoxedToolset, CombinedToolset, DynamicToolset,
+    ExternalToolset, FilteredToolset, FunctionToolset, PrefixedToolset, PreparedToolset,
+    RenamedToolset, ToolsetInfo, ToolsetTool, WrapperToolset,
 };
 
 // Output
-pub use serdes_ai_output::{OutputSchema, StructuredOutputSchema, TextOutputSchema, ValidationResult};
+pub use serdes_ai_output::{
+    OutputSchema, StructuredOutputSchema, TextOutputSchema, ValidationResult,
+};
 
 // Streaming
 pub use serdes_ai_streaming::{ResponseDelta, ResponseStream};
 
 // Retries
-pub use serdes_ai_retries::{ExponentialBackoff, FixedDelay, LinearBackoff, RetryConfig, RetryStrategy};
+pub use serdes_ai_retries::{
+    ExponentialBackoff, FixedDelay, LinearBackoff, RetryConfig, RetryStrategy,
+};
 
 // Direct model access
-pub use direct::{model_request, model_request_stream, model_request_sync, model_request_stream_sync, DirectError, ModelSpec, StreamedResponseSync};
+pub use direct::{
+    model_request, model_request_stream, model_request_stream_sync, model_request_sync,
+    DirectError, ModelSpec, StreamedResponseSync,
+};
 
 // ============================================================================
 // Optional Type Re-exports
@@ -364,16 +387,16 @@ pub use serdes_ai_embeddings::{EmbeddingModel, EmbeddingResult};
 #[cfg(feature = "graph")]
 #[cfg_attr(docsrs, doc(cfg(feature = "graph")))]
 pub use serdes_ai_graph::{
-    Graph, GraphError, GraphExecutor, GraphResult, GraphRunContext, 
-    GraphRunResult, BaseNode, NodeResult, End, Edge,
+    BaseNode, Edge, End, Graph, GraphError, GraphExecutor, GraphResult, GraphRunContext,
+    GraphRunResult, NodeResult,
 };
 
 // Evals
 #[cfg(feature = "evals")]
 #[cfg_attr(docsrs, doc(cfg(feature = "evals")))]
 pub use serdes_ai_evals::{
-    Case, ContainsScorer, Dataset, EvalCase, EvalRunner, EvalSuite,
-    EvaluationReport, EvaluationResult, Evaluator, ExactMatchScorer,
+    Case, ContainsScorer, Dataset, EvalCase, EvalRunner, EvalSuite, EvaluationReport,
+    EvaluationResult, Evaluator, ExactMatchScorer,
 };
 
 // ============================================================================
@@ -393,14 +416,14 @@ pub mod prelude {
 
     // Messages
     pub use crate::core::{
-        FinishReason, ModelRequest, ModelResponse, ModelSettings,
-        RequestUsage, RunUsage, UsageLimits, UserContent,
+        FinishReason, ModelRequest, ModelResponse, ModelSettings, RequestUsage, RunUsage,
+        UsageLimits, UserContent,
     };
 
     // Agent
     pub use crate::agent::{
-        Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent,
-        EndStrategy, RunContext, RunOptions,
+        Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent, EndStrategy,
+        RunContext, RunOptions,
     };
 
     // Models
@@ -421,7 +444,9 @@ pub mod prelude {
     };
 
     // Output
-    pub use crate::output::{OutputSchema, StructuredOutputSchema, TextOutputSchema, ValidationResult};
+    pub use crate::output::{
+        OutputSchema, StructuredOutputSchema, TextOutputSchema, ValidationResult,
+    };
 
     // Streaming
     pub use crate::streaming::{ResponseDelta, ResponseStream};
@@ -446,8 +471,8 @@ pub mod prelude {
     // Graph
     #[cfg(feature = "graph")]
     pub use crate::graph::{
-        Graph, GraphError, GraphExecutor, GraphResult, GraphRunContext, 
-        GraphRunResult, BaseNode, NodeResult, End,
+        BaseNode, End, Graph, GraphError, GraphExecutor, GraphResult, GraphRunContext,
+        GraphRunResult, NodeResult,
     };
 
     // Evals

@@ -313,11 +313,7 @@ pub trait OutputSchema<Output>: Send + Sync {
     fn parse_text(&self, text: &str) -> Result<Output, OutputParseError>;
 
     /// Parse tool call output.
-    fn parse_tool_call(
-        &self,
-        _name: &str,
-        _args: &JsonValue,
-    ) -> Result<Output, OutputParseError> {
+    fn parse_tool_call(&self, _name: &str, _args: &JsonValue) -> Result<Output, OutputParseError> {
         Err(OutputParseError::ToolNotCalled)
     }
 }
@@ -545,9 +541,7 @@ mod tests {
         let result = validator.validate("hi".to_string(), &ctx).await;
         assert!(result.is_err());
 
-        let result = validator
-            .validate("hello world!".to_string(), &ctx)
-            .await;
+        let result = validator.validate("hello world!".to_string(), &ctx).await;
         assert!(result.is_err());
     }
 

@@ -59,29 +59,46 @@ pub mod usage;
 
 // Re-exports for convenience
 pub use errors::{Result, SerdesAiError};
-pub use identifier::{ConversationId, RunId, ToolCallId, now_utc};
+pub use format::{format_as_xml, format_as_xml_with_options, XmlFormatError, XmlFormatOptions};
+pub use identifier::{now_utc, ConversationId, RunId, ToolCallId};
 pub use messages::{
-    // Core request/response
-    ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
-    FinishReason, UserContent, UserContentPart,
-    // Text and thinking
-    TextPart, ThinkingPart,
-    // Tool calls and returns
-    ToolCallPart, ToolReturnPart, SystemPromptPart, UserPromptPart,
-    // File and binary content
-    FilePart, BinaryContent,
+    BinaryContent,
     // Builtin tools (web search, code execution, file search)
-    BuiltinToolCallPart, BuiltinToolReturnPart, BuiltinToolReturnContent,
-    WebSearchResult, WebSearchResults,
+    BuiltinToolCallPart,
+    BuiltinToolReturnContent,
+    BuiltinToolReturnPart,
     CodeExecutionResult,
-    FileSearchResult, FileSearchResults,
+    // File and binary content
+    FilePart,
+    FileSearchResult,
+    FileSearchResults,
+    FinishReason,
+    // Core request/response
+    ModelRequest,
+    ModelRequestPart,
+    ModelResponse,
+    ModelResponsePart,
+    ModelResponsePartDelta,
     // Streaming events
-    ModelResponseStreamEvent, ModelResponsePartDelta,
-    PartStartEvent, PartDeltaEvent, PartEndEvent,
+    ModelResponseStreamEvent,
+    PartDeltaEvent,
+    PartEndEvent,
+    PartStartEvent,
+    SystemPromptPart,
+    // Text and thinking
+    TextPart,
+    ThinkingPart,
+    // Tool calls and returns
+    ToolCallPart,
+    ToolReturnPart,
+    UserContent,
+    UserContentPart,
+    UserPromptPart,
+    WebSearchResult,
+    WebSearchResults,
 };
 pub use settings::ModelSettings;
 pub use usage::{RequestUsage, RunUsage, UsageLimits};
-pub use format::{format_as_xml, format_as_xml_with_options, XmlFormatError, XmlFormatOptions};
 
 /// Prelude module for common imports.
 ///
@@ -90,26 +107,42 @@ pub use format::{format_as_xml, format_as_xml_with_options, XmlFormatError, XmlF
 /// ```
 pub mod prelude {
     pub use crate::errors::{Result, SerdesAiError};
+    pub use crate::format::{format_as_xml, format_as_xml_with_options, XmlFormatOptions};
     pub use crate::identifier::{
-        generate_run_id, generate_tool_call_id, now_utc,
-        ConversationId, RunId, ToolCallId,
+        generate_run_id, generate_tool_call_id, now_utc, ConversationId, RunId, ToolCallId,
     };
     pub use crate::messages::{
-        // Core request/response
-        FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
-        SystemPromptPart, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart,
-        ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
-        // File and binary content
-        FilePart, BinaryContent,
+        BinaryContent,
         // Builtin tools
-        BuiltinToolCallPart, BuiltinToolReturnPart, BuiltinToolReturnContent,
-        WebSearchResult, WebSearchResults,
+        BuiltinToolCallPart,
+        BuiltinToolReturnContent,
+        BuiltinToolReturnPart,
         CodeExecutionResult,
-        FileSearchResult, FileSearchResults,
+        // File and binary content
+        FilePart,
+        FileSearchResult,
+        FileSearchResults,
+        // Core request/response
+        FinishReason,
+        ModelRequest,
+        ModelRequestPart,
+        ModelResponse,
+        ModelResponsePart,
+        ModelResponsePartDelta,
         // Streaming
-        ModelResponseStreamEvent, ModelResponsePartDelta,
+        ModelResponseStreamEvent,
+        SystemPromptPart,
+        TextPart,
+        ThinkingPart,
+        ToolCallArgs,
+        ToolCallPart,
+        ToolReturnPart,
+        UserContent,
+        UserContentPart,
+        UserPromptPart,
+        WebSearchResult,
+        WebSearchResults,
     };
     pub use crate::settings::ModelSettings;
     pub use crate::usage::{RequestUsage, RunUsage, UsageLimits};
-    pub use crate::format::{format_as_xml, format_as_xml_with_options, XmlFormatOptions};
 }

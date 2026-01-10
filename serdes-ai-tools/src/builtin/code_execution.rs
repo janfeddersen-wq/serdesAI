@@ -42,10 +42,7 @@ impl Default for CodeExecutionConfig {
         Self {
             timeout: Duration::from_secs(30),
             max_output_size: 1024 * 1024, // 1MB
-            allowed_languages: vec![
-                ProgrammingLanguage::Python,
-                ProgrammingLanguage::JavaScript,
-            ],
+            allowed_languages: vec![ProgrammingLanguage::Python, ProgrammingLanguage::JavaScript],
             capture_stderr: true,
             working_dir: None,
             env_vars: Vec::new(),
@@ -291,7 +288,7 @@ impl CodeExecutionTool {
         // 1. Send the code to a sandbox service (e.g., Docker, Firecracker, etc.)
         // 2. Execute with proper resource limits
         // 3. Capture output and handle timeouts
-        
+
         ExecutionResult {
             stdout: format!(
                 "[Placeholder] Would execute {} code:\n{}\n\n\
@@ -315,11 +312,8 @@ impl Default for CodeExecutionTool {
 #[async_trait]
 impl<Deps: Send + Sync> Tool<Deps> for CodeExecutionTool {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(
-            "code_execution",
-            "Execute code in a sandboxed environment",
-        )
-        .with_parameters(self.schema())
+        ToolDefinition::new("code_execution", "Execute code in a sandboxed environment")
+            .with_parameters(self.schema())
     }
 
     async fn call(&self, _ctx: &RunContext<Deps>, args: JsonValue) -> ToolResult {
@@ -334,14 +328,13 @@ impl<Deps: Send + Sync> Tool<Deps> for CodeExecutionTool {
                 )
             })?;
 
-        let language = ProgrammingLanguage::from_str(language_str)
-            .ok_or_else(|| {
-                ToolError::validation_error(
-                    "code_execution",
-                    Some("language".to_string()),
-                    format!("Unknown language: {}", language_str),
-                )
-            })?;
+        let language = ProgrammingLanguage::from_str(language_str).ok_or_else(|| {
+            ToolError::validation_error(
+                "code_execution",
+                Some("language".to_string()),
+                format!("Unknown language: {}", language_str),
+            )
+        })?;
 
         if !self.config.allowed_languages.contains(&language) {
             return Err(ToolError::validation_error(
@@ -349,22 +342,18 @@ impl<Deps: Send + Sync> Tool<Deps> for CodeExecutionTool {
                 Some("language".to_string()),
                 format!(
                     "Language '{}' is not allowed. Allowed: {:?}",
-                    language,
-                    self.config.allowed_languages
+                    language, self.config.allowed_languages
                 ),
             ));
         }
 
-        let code = args
-            .get("code")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::validation_error(
-                    "code_execution",
-                    Some("code".to_string()),
-                    "Missing 'code' field",
-                )
-            })?;
+        let code = args.get("code").and_then(|v| v.as_str()).ok_or_else(|| {
+            ToolError::validation_error(
+                "code_execution",
+                Some("code".to_string()),
+                "Missing 'code' field",
+            )
+        })?;
 
         if code.trim().is_empty() {
             return Err(ToolError::validation_error(
@@ -477,7 +466,9 @@ mod tests {
             .get("required")
             .and_then(|value| value.as_array())
             .unwrap();
-        assert!(required.iter().any(|value| value.as_str() == Some("language")));
+        assert!(required
+            .iter()
+            .any(|value| value.as_str() == Some("language")));
         assert!(required.iter().any(|value| value.as_str() == Some("code")));
     }
 
@@ -505,8 +496,7 @@ mod tests {
     #[tokio::test]
     async fn test_code_execution_disallowed_language() {
         let tool = CodeExecutionTool::with_config(
-            CodeExecutionConfig::new()
-                .allowed_languages(vec![ProgrammingLanguage::Python]),
+            CodeExecutionConfig::new().allowed_languages(vec![ProgrammingLanguage::Python]),
         );
         let ctx = RunContext::minimal("test");
 

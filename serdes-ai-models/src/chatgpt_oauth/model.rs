@@ -5,16 +5,16 @@ use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{openai_gpt4o_profile, ModelProfile};
 use async_trait::async_trait;
-use reqwest::Client;
-use serdes_ai_core::{
-    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, 
-    ModelSettings, RequestUsage,
-};
-use serdes_ai_core::messages::{
-    ImageContent, PartStartEvent, TextPart, ToolCallArgs, ToolCallPart, 
-    UserContent, UserContentPart, UserPromptPart,
-};
 use base64::Engine;
+use reqwest::Client;
+use serdes_ai_core::messages::{
+    ImageContent, PartStartEvent, TextPart, ToolCallArgs, ToolCallPart, UserContent,
+    UserContentPart, UserPromptPart,
+};
+use serdes_ai_core::{
+    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
+    RequestUsage,
+};
 use std::time::Duration;
 
 /// The standard Codex system prompt used by ChatGPT OAuth models.
@@ -45,7 +45,7 @@ impl ChatGptOAuthModel {
     pub fn new(model_name: impl Into<String>, access_token: impl Into<String>) -> Self {
         let model_name = model_name.into();
         let profile = Self::profile_for_model(&model_name);
-        
+
         Self {
             model_name,
             access_token: access_token.into(),
@@ -88,12 +88,12 @@ impl ChatGptOAuthModel {
     fn profile_for_model(model: &str) -> ModelProfile {
         // ChatGPT Codex models are GPT-4o based
         let mut profile = openai_gpt4o_profile();
-        
+
         if model.contains("o1") || model.contains("o3") {
             // Reasoning models
             profile.supports_reasoning = true;
         }
-        
+
         profile
     }
 
@@ -148,15 +148,15 @@ impl ChatGptOAuthModel {
     fn build_request(
         &self,
         messages: &[ModelRequest],
-        _settings: &ModelSettings,  // Unused: Codex API doesn't support temperature
+        _settings: &ModelSettings, // Unused: Codex API doesn't support temperature
         params: &ModelRequestParameters,
-        _stream: bool,  // Unused: Codex API always requires stream=true
+        _stream: bool, // Unused: Codex API always requires stream=true
     ) -> CodexRequest {
         // Collect custom system prompts to prepend to first user message
         let mut custom_system_prompts: Vec<String> = Vec::new();
         let mut input_items: Vec<InputItem> = Vec::new();
         let mut first_user_message_idx: Option<usize> = None;
-        
+
         for req in messages {
             for part in &req.parts {
                 match part {
@@ -198,7 +198,7 @@ impl ChatGptOAuthModel {
                     ModelRequestPart::ModelResponse(response) => {
                         // Process assistant response parts (text and tool calls)
                         let mut assistant_text = String::new();
-                        
+
                         for resp_part in &response.parts {
                             match resp_part {
                                 ModelResponsePart::Text(text) => {
@@ -208,18 +208,22 @@ impl ChatGptOAuthModel {
                                     // Include the tool call in the input
                                     let call_id = tc.tool_call_id.clone().unwrap_or_default();
                                     if !call_id.is_empty() {
-                                        input_items.push(InputItem::FunctionCall(FunctionCallItem {
-                                            call_type: "function_call".to_string(),
-                                            name: tc.tool_name.clone(),
-                                            arguments: tc.args_as_json_str().unwrap_or_else(|_| "{}".to_string()),
-                                            call_id,
-                                        }));
+                                        input_items.push(InputItem::FunctionCall(
+                                            FunctionCallItem {
+                                                call_type: "function_call".to_string(),
+                                                name: tc.tool_name.clone(),
+                                                arguments: tc
+                                                    .args_as_json_str()
+                                                    .unwrap_or_else(|_| "{}".to_string()),
+                                                call_id,
+                                            },
+                                        ));
                                     }
                                 }
                                 _ => {} // Skip thinking, files, etc.
                             }
                         }
-                        
+
                         // Add assistant text message if any
                         if !assistant_text.is_empty() {
                             input_items.push(InputItem::Message(CodexMessage {
@@ -244,7 +248,7 @@ impl ChatGptOAuthModel {
                 }
             }
         }
-        
+
         // Prepend custom system prompts to first user message (like code_puppy does)
         if !custom_system_prompts.is_empty() {
             if let Some(idx) = first_user_message_idx {
@@ -286,7 +290,7 @@ impl ChatGptOAuthModel {
                 }));
             }
         }
-        
+
         // If still no input, add an empty user message (API requires at least one input)
         if input_items.is_empty() {
             input_items.push(InputItem::Message(CodexMessage {
@@ -297,24 +301,25 @@ impl ChatGptOAuthModel {
                 tool_call_id: None,
             }));
         }
-        
+
         let tools = if params.tools.is_empty() {
             None
         } else {
             Some(self.convert_tools(&params.tools))
         };
-        
+
         // Add reasoning for GPT-5 and o-series models (like code_puppy does)
-        let model_for_check = self.model_name
+        let model_for_check = self
+            .model_name
             .strip_prefix("chatgpt-")
             .or_else(|| self.model_name.strip_prefix("chatgpt_"))
             .unwrap_or(&self.model_name)
             .to_lowercase();
 
-        let reasoning = if model_for_check.starts_with("gpt-5") 
+        let reasoning = if model_for_check.starts_with("gpt-5")
             || model_for_check.starts_with("o1")
             || model_for_check.starts_with("o3")
-            || model_for_check.starts_with("o4") 
+            || model_for_check.starts_with("o4")
         {
             Some(ReasoningConfig {
                 effort: "medium".to_string(),
@@ -323,14 +328,14 @@ impl ChatGptOAuthModel {
         } else {
             None
         };
-        
+
         let input = input_items;
 
         // Use the standard Codex system prompt for instructions (like code_puppy does)
         let instructions = CODEX_SYSTEM_PROMPT.to_string();
 
         CodexRequest {
-            model: model_for_check,  // Reuse the already-stripped model name
+            model: model_for_check, // Reuse the already-stripped model name
             instructions,
             input,
             store: false,
@@ -406,31 +411,34 @@ impl ChatGptOAuthModel {
     }
 
     /// Parse SSE stream from Codex API and reconstruct the response
-    async fn parse_sse_response(&self, response: reqwest::Response) -> Result<ModelResponse, ModelError> {
+    async fn parse_sse_response(
+        &self,
+        response: reqwest::Response,
+    ) -> Result<ModelResponse, ModelError> {
         let mut collected_text = String::new();
         let mut tool_calls: Vec<(String, String, String)> = Vec::new(); // (name, arguments, call_id)
         let mut final_response: Option<serde_json::Value> = None;
-        
+
         let body = response.text().await?;
-        
+
         // Parse SSE format: lines starting with "data: "
         for line in body.lines() {
             if !line.starts_with("data: ") {
                 continue;
             }
-            
+
             let data = &line[6..]; // Skip "data: "
             if data == "[DONE]" {
                 break;
             }
-            
+
             let event: serde_json::Value = match serde_json::from_str(data) {
                 Ok(v) => v,
                 Err(_) => continue,
             };
-            
+
             let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            
+
             match event_type {
                 "response.output_text.delta" => {
                     if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
@@ -438,9 +446,21 @@ impl ChatGptOAuthModel {
                     }
                 }
                 "response.function_call_arguments.done" => {
-                    let name = event.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let arguments = event.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}").to_string();
-                    let call_id = event.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let name = event
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let arguments = event
+                        .get("arguments")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("{}")
+                        .to_string();
+                    let call_id = event
+                        .get("call_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     // Only add if we have both name and call_id
                     if !name.is_empty() && !call_id.is_empty() {
                         // Check for duplicates
@@ -450,11 +470,25 @@ impl ChatGptOAuthModel {
                     }
                 }
                 "response.function_call.done" => {
-                    let name = event.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let arguments = event.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}").to_string();
-                    let call_id = event.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let name = event
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let arguments = event
+                        .get("arguments")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("{}")
+                        .to_string();
+                    let call_id = event
+                        .get("call_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     if !name.is_empty() && !call_id.is_empty() {
-                        if let Some(existing) = tool_calls.iter_mut().find(|(_, _, id)| id == &call_id) {
+                        if let Some(existing) =
+                            tool_calls.iter_mut().find(|(_, _, id)| id == &call_id)
+                        {
                             existing.1 = arguments;
                         } else {
                             tool_calls.push((name, arguments, call_id));
@@ -466,12 +500,26 @@ impl ChatGptOAuthModel {
                     if let Some(item) = event.get("item") {
                         let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
                         if item_type == "function_call" {
-                            let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            let arguments = item.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}").to_string();
-                            let call_id = item.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let name = item
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let arguments = item
+                                .get("arguments")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("{}")
+                                .to_string();
+                            let call_id = item
+                                .get("call_id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string();
                             if !name.is_empty() && !call_id.is_empty() {
                                 // Check for duplicates - update if exists (output_item.done has final args)
-                                if let Some(existing) = tool_calls.iter_mut().find(|(_, _, id)| id == &call_id) {
+                                if let Some(existing) =
+                                    tool_calls.iter_mut().find(|(_, _, id)| id == &call_id)
+                                {
                                     // Update with potentially more complete data
                                     if !arguments.is_empty() && arguments != "{}" {
                                         existing.1 = arguments;
@@ -489,14 +537,14 @@ impl ChatGptOAuthModel {
                 _ => {}
             }
         }
-        
+
         // Build ModelResponse from collected data
         let mut parts = Vec::new();
-        
+
         if !collected_text.is_empty() {
             parts.push(ModelResponsePart::Text(TextPart::new(&collected_text)));
         }
-        
+
         for (name, arguments, call_id) in tool_calls {
             // Skip tool calls with empty name or call_id
             if name.is_empty() {
@@ -507,14 +555,14 @@ impl ChatGptOAuthModel {
                 tracing::warn!(target: "chatgpt_oauth", "Skipping tool call with empty call_id, name={}", name);
                 continue;
             }
-            
+
             let args: serde_json::Value = serde_json::from_str(&arguments)
                 .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
             let mut tc = ToolCallPart::new(&name, ToolCallArgs::Json(args));
             tc = tc.with_tool_call_id(&call_id);
             parts.push(ModelResponsePart::ToolCall(tc));
         }
-        
+
         // Extract metadata from final response if available
         let (model_name, vendor_id, usage) = if let Some(ref resp) = final_response {
             let model = resp.get("model").and_then(|v| v.as_str()).map(String::from);
@@ -524,8 +572,8 @@ impl ChatGptOAuthModel {
                     request_tokens: u.get("input_tokens").and_then(|v| v.as_u64()),
                     response_tokens: u.get("output_tokens").and_then(|v| v.as_u64()),
                     total_tokens: Some(
-                        u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) +
-                        u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+                        u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+                            + u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
                     ),
                     cache_creation_tokens: None,
                     cache_read_tokens: None,
@@ -536,7 +584,7 @@ impl ChatGptOAuthModel {
         } else {
             (None, None, None)
         };
-        
+
         Ok(ModelResponse {
             parts,
             model_name,
@@ -574,7 +622,7 @@ impl Model for ChatGptOAuthModel {
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.access_token))
             .header("Content-Type", "application/json")
-            .header("Accept", "text/event-stream")  // Important for SSE
+            .header("Accept", "text/event-stream") // Important for SSE
             .header("originator", "codex_cli_rs")
             .header("User-Agent", "codex_cli_rs/0.72.0 Terminal_Codex_CLI");
 
@@ -584,7 +632,7 @@ impl Model for ChatGptOAuthModel {
         }
 
         let response = request_builder
-            .timeout(Duration::from_secs(300))  // Longer timeout for streaming
+            .timeout(Duration::from_secs(300)) // Longer timeout for streaming
             .json(&request)
             .send()
             .await?;
@@ -612,18 +660,20 @@ impl Model for ChatGptOAuthModel {
         // For now, fall back to non-streaming
         // TODO: Implement proper SSE streaming
         let response = self.request(messages, settings, params).await?;
-        
+
         use serdes_ai_core::messages::ModelResponseStreamEvent;
-        
+
         let events: Vec<Result<ModelResponseStreamEvent, ModelError>> = response
             .parts
             .into_iter()
             .enumerate()
             .map(|(idx, part)| {
-                Ok(ModelResponseStreamEvent::PartStart(PartStartEvent::new(idx, part)))
+                Ok(ModelResponseStreamEvent::PartStart(PartStartEvent::new(
+                    idx, part,
+                )))
             })
             .collect();
-        
+
         Ok(Box::pin(futures::stream::iter(events)))
     }
 

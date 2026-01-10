@@ -119,7 +119,10 @@ impl Provider for OpenAIProvider {
                 profile.max_tokens = Some(100000);
                 Some(profile)
             }
-            _ if model_name.starts_with("gpt-") || model_name.starts_with("o1") || model_name.starts_with("o3") => {
+            _ if model_name.starts_with("gpt-")
+                || model_name.starts_with("o1")
+                || model_name.starts_with("o3") =>
+            {
                 Some(openai_gpt4o_profile())
             }
             _ => None,

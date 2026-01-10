@@ -46,8 +46,8 @@ use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse};
 use crate::profile::ModelProfile;
 use serdes_ai_core::{
-    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
-    ModelSettings, RequestUsage, TextPart, ThinkingPart, ToolCallPart, UserContent, UserContentPart,
+    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
+    RequestUsage, TextPart, ThinkingPart, ToolCallPart, UserContent, UserContentPart,
 };
 
 /// AWS Bedrock model client.
@@ -81,10 +81,7 @@ pub struct AwsCredentials {
 
 impl AwsCredentials {
     /// Create new credentials.
-    pub fn new(
-        access_key_id: impl Into<String>,
-        secret_access_key: impl Into<String>,
-    ) -> Self {
+    pub fn new(access_key_id: impl Into<String>, secret_access_key: impl Into<String>) -> Self {
         Self {
             access_key_id: access_key_id.into(),
             secret_access_key: secret_access_key.into(),
@@ -136,10 +133,7 @@ impl BedrockModel {
     }
 
     /// Create with explicit credentials.
-    pub fn with_credentials(
-        model_id: impl Into<String>,
-        credentials: AwsCredentials,
-    ) -> Self {
+    pub fn with_credentials(model_id: impl Into<String>, credentials: AwsCredentials) -> Self {
         Self {
             model_id: model_id.into(),
             client: Client::new(),
@@ -237,7 +231,10 @@ impl BedrockModel {
     }
 
     /// Extract system prompt.
-    fn extract_system_prompt(&self, messages: &[ModelRequest]) -> Option<Vec<types::SystemContent>> {
+    fn extract_system_prompt(
+        &self,
+        messages: &[ModelRequest],
+    ) -> Option<Vec<types::SystemContent>> {
         let system_parts: Vec<_> = messages
             .iter()
             .flat_map(|req| &req.parts)
@@ -287,7 +284,9 @@ impl BedrockModel {
                     ModelRequestPart::RetryPrompt(rp) => {
                         result.push(types::Message {
                             role: types::Role::User,
-                            content: vec![types::Content::Text { text: rp.content.message().to_string() }],
+                            content: vec![types::Content::Text {
+                                text: rp.content.message().to_string(),
+                            }],
                         });
                     }
                     ModelRequestPart::BuiltinToolReturn(builtin) => {
@@ -297,9 +296,7 @@ impl BedrockModel {
                             role: types::Role::User,
                             content: vec![types::Content::ToolResult {
                                 tool_use_id: builtin.tool_call_id.clone(),
-                                content: vec![types::ToolResultContent::Text {
-                                    text: content_str,
-                                }],
+                                content: vec![types::ToolResultContent::Text { text: content_str }],
                             }],
                         });
                     }
@@ -311,7 +308,9 @@ impl BedrockModel {
                         for resp_part in &response.parts {
                             match resp_part {
                                 serdes_ai_core::ModelResponsePart::Text(t) => {
-                                    content.push(types::Content::Text { text: t.content.clone() });
+                                    content.push(types::Content::Text {
+                                        text: t.content.clone(),
+                                    });
                                 }
                                 serdes_ai_core::ModelResponsePart::ToolCall(tc) => {
                                     content.push(types::Content::ToolUse {
@@ -343,35 +342,29 @@ impl BedrockModel {
             UserContent::Text(t) => {
                 vec![types::Content::Text { text: t.clone() }]
             }
-            UserContent::Parts(parts) => {
-                parts
-                    .iter()
-                    .filter_map(|p| match p {
-                        UserContentPart::Text { text } => {
-                            Some(types::Content::Text { text: text.clone() })
-                        }
-                        UserContentPart::Image { image } => {
-                            match image {
-                                serdes_ai_core::messages::ImageContent::Binary(binary) => {
-                                    use base64::Engine;
-                                    let encoded = base64::engine::general_purpose::STANDARD
-                                        .encode(&binary.data);
-                                    Some(types::Content::Image {
-                                        image: types::ImageBlock {
-                                            format: binary.media_type.extension().to_string(),
-                                            source: types::ImageSource::Bytes {
-                                                bytes: encoded,
-                                            },
-                                        },
-                                    })
-                                }
-                                _ => None,
-                            }
+            UserContent::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| match p {
+                    UserContentPart::Text { text } => {
+                        Some(types::Content::Text { text: text.clone() })
+                    }
+                    UserContentPart::Image { image } => match image {
+                        serdes_ai_core::messages::ImageContent::Binary(binary) => {
+                            use base64::Engine;
+                            let encoded =
+                                base64::engine::general_purpose::STANDARD.encode(&binary.data);
+                            Some(types::Content::Image {
+                                image: types::ImageBlock {
+                                    format: binary.media_type.extension().to_string(),
+                                    source: types::ImageSource::Bytes { bytes: encoded },
+                                },
+                            })
                         }
                         _ => None,
-                    })
-                    .collect()
-            }
+                    },
+                    _ => None,
+                })
+                .collect(),
         }
     }
 
@@ -389,8 +382,7 @@ impl BedrockModel {
                     name: t.name.clone(),
                     description: Some(t.description.clone()),
                     input_schema: types::ToolInputSchema {
-                        json: serde_json::to_value(&t.parameters_json_schema)
-                            .unwrap_or_default(),
+                        json: serde_json::to_value(&t.parameters_json_schema).unwrap_or_default(),
                     },
                 },
             })
@@ -403,7 +395,10 @@ impl BedrockModel {
     }
 
     /// Parse response.
-    fn parse_response(&self, response: types::ConverseResponse) -> Result<ModelResponse, ModelError> {
+    fn parse_response(
+        &self,
+        response: types::ConverseResponse,
+    ) -> Result<ModelResponse, ModelError> {
         let mut parts = Vec::new();
 
         if let Some(output) = response.output {
@@ -433,9 +428,9 @@ impl BedrockModel {
                             // Handle reasoning/thinking content from Claude via Bedrock
                             if let Some(redacted) = redacted_content {
                                 // Redacted thinking - preserve the signature
-                                parts.push(ModelResponsePart::Thinking(
-                                    ThinkingPart::redacted(redacted, "bedrock"),
-                                ));
+                                parts.push(ModelResponsePart::Thinking(ThinkingPart::redacted(
+                                    redacted, "bedrock",
+                                )));
                             } else if let Some(reasoning) = reasoning_text {
                                 // Regular thinking content
                                 let mut thinking = ThinkingPart::new(&reasoning.text);
@@ -568,17 +563,14 @@ mod tests {
         );
         assert_eq!(model.model_family(), ModelFamily::Anthropic);
 
-        let model = BedrockModel::with_credentials(
-            "meta.llama3-70b",
-            AwsCredentials::new("key", "secret"),
-        );
+        let model =
+            BedrockModel::with_credentials("meta.llama3-70b", AwsCredentials::new("key", "secret"));
         assert_eq!(model.model_family(), ModelFamily::Meta);
     }
 
     #[test]
     fn test_credentials() {
-        let creds = AwsCredentials::new("access", "secret")
-            .with_session_token("token");
+        let creds = AwsCredentials::new("access", "secret").with_session_token("token");
         assert_eq!(creds.access_key_id, "access");
         assert_eq!(creds.session_token, Some("token".to_string()));
     }

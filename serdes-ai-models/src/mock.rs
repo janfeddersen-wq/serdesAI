@@ -694,8 +694,7 @@ mod tests {
     async fn test_function_model_dynamic_behavior() {
         // Test a truly dynamic function that inspects messages
         let model = FunctionModel::new(|messages, _| {
-            let total_user_prompts: usize =
-                messages.iter().map(|m| m.user_prompts().count()).sum();
+            let total_user_prompts: usize = messages.iter().map(|m| m.user_prompts().count()).sum();
 
             if total_user_prompts > 2 {
                 ModelResponse::text("That's a lot of messages!")

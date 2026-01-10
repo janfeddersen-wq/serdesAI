@@ -128,7 +128,9 @@ impl McpServer {
             info: Implementation::new(name, version),
             tools: RwLock::new(HashMap::new()),
             capabilities: ServerCapabilities {
-                tools: Some(ToolsCapability { list_changed: false }),
+                tools: Some(ToolsCapability {
+                    list_changed: false,
+                }),
                 ..Default::default()
             },
         }
@@ -137,7 +139,9 @@ impl McpServer {
     /// Add a tool handler.
     pub fn tool(self, handler: impl ToolHandler + 'static) -> Self {
         let def = handler.definition();
-        self.tools.write().insert(def.name.clone(), Arc::new(handler));
+        self.tools
+            .write()
+            .insert(def.name.clone(), Arc::new(handler));
         self
     }
 
@@ -172,8 +176,7 @@ impl McpServer {
                     let response = self.handle_message(trimmed).await;
 
                     if let Some(resp) = response {
-                        let json = serde_json::to_string(&resp)
-                            .map_err(|e| McpError::Json(e))?;
+                        let json = serde_json::to_string(&resp).map_err(|e| McpError::Json(e))?;
                         stdout.write_all(json.as_bytes()).await?;
                         stdout.write_all(b"\n").await?;
                         stdout.flush().await?;
@@ -219,12 +222,8 @@ impl McpServer {
                 Some(JsonRpcResponse::success(request.id, result))
             }
             "tools/list" => {
-                let tools: Vec<McpTool> = self
-                    .tools
-                    .read()
-                    .values()
-                    .map(|h| h.definition())
-                    .collect();
+                let tools: Vec<McpTool> =
+                    self.tools.read().values().map(|h| h.definition()).collect();
                 let result = ListToolsResult {
                     tools,
                     next_cursor: None,
@@ -244,11 +243,7 @@ impl McpServer {
                         }
                     },
                     None => {
-                        return Some(JsonRpcResponse::error(
-                            request.id,
-                            -32602,
-                            "Missing params",
-                        ));
+                        return Some(JsonRpcResponse::error(request.id, -32602, "Missing params"));
                     }
                 };
 
@@ -330,15 +325,13 @@ mod tests {
     #[tokio::test]
     async fn test_handle_tools_list() {
         let tool = McpTool::new("test", serde_json::json!({"type": "object"}));
-        let server = McpServer::new("test", "1.0.0")
-            .tool_fn(tool, |_| CallToolResult::text("ok"));
+        let server = McpServer::new("test", "1.0.0").tool_fn(tool, |_| CallToolResult::text("ok"));
 
         let message = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
         let response = server.handle_message(message).await.unwrap();
 
         assert!(!response.is_error());
-        let result: ListToolsResult =
-            serde_json::from_value(response.result.unwrap()).unwrap();
+        let result: ListToolsResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert_eq!(result.tools.len(), 1);
     }
 

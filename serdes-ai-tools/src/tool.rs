@@ -11,10 +11,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
-    definition::ToolDefinition,
-    return_types::ToolResult,
-    schema::SchemaBuilder,
-    RunContext,
+    definition::ToolDefinition, return_types::ToolResult, schema::SchemaBuilder, RunContext,
 };
 
 /// Core trait for all tools.
@@ -255,8 +252,7 @@ where
     Deps: Send + Sync,
 {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(&self.name, &self.description)
-            .with_parameters(self.parameters.clone())
+        ToolDefinition::new(&self.name, &self.description).with_parameters(self.parameters.clone())
     }
 
     async fn call(&self, ctx: &RunContext<Deps>, args: JsonValue) -> ToolResult {
@@ -372,7 +368,10 @@ mod tests {
         );
 
         let ctx = RunContext::minimal("test");
-        let result = tool.call(&ctx, serde_json::json!({"a": 1.5, "b": 2.5})).await.unwrap();
+        let result = tool
+            .call(&ctx, serde_json::json!({"a": 1.5, "b": 2.5}))
+            .await
+            .unwrap();
         assert_eq!(result.as_text(), Some("4"));
     }
 
@@ -388,14 +387,10 @@ mod tests {
 
     #[test]
     fn test_sync_tool_helper() {
-        let tool = sync_tool::<_, ()>(
-            "echo",
-            "Echo",
-            |_ctx, args| {
-                let msg = args["message"].as_str().unwrap_or("default");
-                Ok(ToolReturn::text(msg))
-            },
-        );
+        let tool = sync_tool::<_, ()>("echo", "Echo", |_ctx, args| {
+            let msg = args["message"].as_str().unwrap_or("default");
+            Ok(ToolReturn::text(msg))
+        });
         assert_eq!(tool.name, "echo");
     }
 }

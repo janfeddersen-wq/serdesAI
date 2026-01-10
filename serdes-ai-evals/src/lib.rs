@@ -92,8 +92,8 @@ pub use suite::EvalSuite;
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::{
-        quick_eval, Case, ContainsScorer, Dataset, EvalCase, EvalOptions, EvalRunner,
-        EvalSuite, EvaluationReport, EvaluationResult, Evaluator, ExactMatchScorer,
+        quick_eval, Case, ContainsScorer, Dataset, EvalCase, EvalOptions, EvalRunner, EvalSuite,
+        EvaluationReport, EvaluationResult, Evaluator, ExactMatchScorer,
     };
 }
 
@@ -111,8 +111,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_basic_evaluation() {
-        let runner = EvalRunner::new()
-            .evaluator(ExactMatchScorer::new());
+        let runner = EvalRunner::new().evaluator(ExactMatchScorer::new());
 
         let cases = vec![
             ("a".to_string(), Some("a".to_string())),

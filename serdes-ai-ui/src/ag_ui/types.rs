@@ -933,8 +933,8 @@ mod tests {
 
     #[test]
     fn test_tool_call_start_event() {
-        let event = ToolCallStartEvent::new("call-1", "get_weather")
-            .with_parent_message_id("msg-1");
+        let event =
+            ToolCallStartEvent::new("call-1", "get_weather").with_parent_message_id("msg-1");
         let json = serde_json::to_string(&event).unwrap();
         assert!(json.contains(r#""type":"TOOL_CALL_START"#));
         assert!(json.contains(r#""toolCallId":"call-1"#));

@@ -17,11 +17,7 @@ pub struct Edge<S> {
 
 impl<S> Edge<S> {
     /// Create a new conditional edge.
-    pub fn new<F>(
-        from: impl Into<String>,
-        to: impl Into<String>,
-        condition: F,
-    ) -> Self
+    pub fn new<F>(from: impl Into<String>, to: impl Into<String>, condition: F) -> Self
     where
         F: Fn(&S) -> bool + Send + Sync + 'static,
     {

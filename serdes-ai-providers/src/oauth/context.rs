@@ -24,7 +24,7 @@ impl OAuthContext {
         let state = Self::generate_random_string(32);
         let code_verifier = Self::generate_random_string(64);
         let code_challenge = Self::compute_code_challenge(&code_verifier);
-        
+
         Self {
             state,
             code_verifier,

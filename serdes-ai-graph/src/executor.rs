@@ -51,10 +51,7 @@ where
     P: StatePersistence<State, End> + 'static,
 {
     /// Create an executor with persistence.
-    pub fn with_persistence(
-        graph: Graph<State, Deps, End>,
-        persistence: P,
-    ) -> Self {
+    pub fn with_persistence(graph: Graph<State, Deps, End>, persistence: P) -> Self {
         Self {
             _persistence_type: std::marker::PhantomData,
             graph: Arc::new(graph),
@@ -89,11 +86,7 @@ where
     }
 
     /// Run the graph.
-    pub async fn run(
-        &self,
-        state: State,
-        deps: Deps,
-    ) -> GraphResult<GraphRunResult<State, End>> {
+    pub async fn run(&self, state: State, deps: Deps) -> GraphResult<GraphRunResult<State, End>> {
         let options = ExecutionOptions::new()
             .max_steps(self.max_steps)
             .tracing(self.instrumentation);

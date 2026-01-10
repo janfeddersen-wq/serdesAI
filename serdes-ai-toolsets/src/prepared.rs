@@ -86,10 +86,7 @@ where
         let inner_tools = self.inner.get_tools(ctx).await?;
 
         // Extract definitions for the prepare function
-        let defs: Vec<ToolDefinition> = inner_tools
-            .values()
-            .map(|t| t.tool_def.clone())
-            .collect();
+        let defs: Vec<ToolDefinition> = inner_tools.values().map(|t| t.tool_def.clone()).collect();
 
         // Apply the prepare function
         let prepared_defs = match (self.prepare_fn)(ctx, defs) {

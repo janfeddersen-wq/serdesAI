@@ -69,9 +69,7 @@ impl RetryableError {
     /// Check if this error is retryable.
     pub fn is_retryable(&self) -> bool {
         match self {
-            Self::Http { status, .. } => {
-                *status == 429 || (500..=599).contains(status)
-            }
+            Self::Http { status, .. } => *status == 429 || (500..=599).contains(status),
             Self::RateLimited { .. } => true,
             Self::Timeout => true,
             Self::Connection(_) => true,

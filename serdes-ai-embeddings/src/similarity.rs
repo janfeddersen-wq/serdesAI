@@ -148,27 +148,15 @@ pub fn angular_distance(cosine_sim: f32) -> f32 {
 ///
 /// Returns an NxM matrix where N is the number of query vectors
 /// and M is the number of document vectors.
-pub fn pairwise_cosine(
-    queries: &[Vec<f32>],
-    documents: &[Vec<f32>],
-) -> Vec<Vec<f32>> {
+pub fn pairwise_cosine(queries: &[Vec<f32>], documents: &[Vec<f32>]) -> Vec<Vec<f32>> {
     queries
         .iter()
-        .map(|q| {
-            documents
-                .iter()
-                .map(|d| cosine_similarity(q, d))
-                .collect()
-        })
+        .map(|q| documents.iter().map(|d| cosine_similarity(q, d)).collect())
         .collect()
 }
 
 /// Find top K most similar vectors.
-pub fn top_k_similar(
-    query: &[f32],
-    candidates: &[Vec<f32>],
-    k: usize,
-) -> Vec<(usize, f32)> {
+pub fn top_k_similar(query: &[f32], candidates: &[Vec<f32>], k: usize) -> Vec<(usize, f32)> {
     let mut scored: Vec<_> = candidates
         .iter()
         .enumerate()
@@ -278,11 +266,7 @@ mod tests {
     #[test]
     fn test_top_k_similar() {
         let query = vec![1.0, 0.0];
-        let candidates = vec![
-            vec![1.0, 0.0],
-            vec![0.9, 0.1],
-            vec![0.0, 1.0],
-        ];
+        let candidates = vec![vec![1.0, 0.0], vec![0.9, 0.1], vec![0.0, 1.0]];
 
         let top = top_k_similar(&query, &candidates, 2);
         assert_eq!(top.len(), 2);

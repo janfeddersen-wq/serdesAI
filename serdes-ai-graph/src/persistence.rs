@@ -46,23 +46,13 @@ pub trait StatePersistence<State, End>: Send + Sync {
     ) -> Result<(), PersistenceError>;
 
     /// Load state for a run.
-    async fn load_state(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<(State, u32)>, PersistenceError>;
+    async fn load_state(&self, run_id: &str) -> Result<Option<(State, u32)>, PersistenceError>;
 
     /// Save the final result.
-    async fn save_result(
-        &self,
-        run_id: &str,
-        result: &End,
-    ) -> Result<(), PersistenceError>;
+    async fn save_result(&self, run_id: &str, result: &End) -> Result<(), PersistenceError>;
 
     /// Load the final result.
-    async fn load_result(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<End>, PersistenceError>;
+    async fn load_result(&self, run_id: &str) -> Result<Option<End>, PersistenceError>;
 
     /// Delete state for a run.
     async fn delete(&self, run_id: &str) -> Result<(), PersistenceError>;
@@ -128,26 +118,18 @@ where
         Ok(())
     }
 
-    async fn load_state(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<(State, u32)>, PersistenceError> {
+    async fn load_state(&self, run_id: &str) -> Result<Option<(State, u32)>, PersistenceError> {
         Ok(self.states.read().get(run_id).cloned())
     }
 
-    async fn save_result(
-        &self,
-        run_id: &str,
-        result: &End,
-    ) -> Result<(), PersistenceError> {
-        self.results.write().insert(run_id.to_string(), result.clone());
+    async fn save_result(&self, run_id: &str, result: &End) -> Result<(), PersistenceError> {
+        self.results
+            .write()
+            .insert(run_id.to_string(), result.clone());
         Ok(())
     }
 
-    async fn load_result(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<End>, PersistenceError> {
+    async fn load_result(&self, run_id: &str) -> Result<Option<End>, PersistenceError> {
         Ok(self.results.read().get(run_id).cloned())
     }
 
@@ -158,9 +140,8 @@ where
     }
 
     async fn list_runs(&self) -> Result<Vec<String>, PersistenceError> {
-        let state_keys: std::collections::HashSet<_> = 
-            self.states.read().keys().cloned().collect();
-        let result_keys: std::collections::HashSet<_> = 
+        let state_keys: std::collections::HashSet<_> = self.states.read().keys().cloned().collect();
+        let result_keys: std::collections::HashSet<_> =
             self.results.read().keys().cloned().collect();
         Ok(state_keys.union(&result_keys).cloned().collect())
     }
@@ -217,10 +198,7 @@ where
         Ok(())
     }
 
-    async fn load_state(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<(State, u32)>, PersistenceError> {
+    async fn load_state(&self, run_id: &str) -> Result<Option<(State, u32)>, PersistenceError> {
         let path = self.state_path(run_id);
         if !path.exists() {
             return Ok(None);
@@ -233,11 +211,7 @@ where
         Ok(Some((state, step)))
     }
 
-    async fn save_result(
-        &self,
-        run_id: &str,
-        result: &End,
-    ) -> Result<(), PersistenceError> {
+    async fn save_result(&self, run_id: &str, result: &End) -> Result<(), PersistenceError> {
         self.ensure_dir().await?;
         let path = self.result_path(run_id);
         let content = serde_json::to_string_pretty(result)?;
@@ -245,10 +219,7 @@ where
         Ok(())
     }
 
-    async fn load_result(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<End>, PersistenceError> {
+    async fn load_result(&self, run_id: &str) -> Result<Option<End>, PersistenceError> {
         let path = self.result_path(run_id);
         if !path.exists() {
             return Ok(None);
@@ -361,9 +332,14 @@ mod tests {
         let persistence = FilePersistence::new(&temp_dir);
 
         let state = TestState { value: 42 };
-        StatePersistence::<TestState, String>::save_state(&persistence, "test_run", &state, 5).await.unwrap();
+        StatePersistence::<TestState, String>::save_state(&persistence, "test_run", &state, 5)
+            .await
+            .unwrap();
 
-        let loaded: Option<(TestState, u32)> = StatePersistence::<TestState, String>::load_state(&persistence, "test_run").await.unwrap();
+        let loaded: Option<(TestState, u32)> =
+            StatePersistence::<TestState, String>::load_state(&persistence, "test_run")
+                .await
+                .unwrap();
         assert!(loaded.is_some());
         let (loaded_state, step) = loaded.unwrap();
         assert_eq!(loaded_state.value, 42);

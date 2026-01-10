@@ -689,7 +689,10 @@ mod tests {
         let response: ChatCompletionResponse = serde_json::from_str(json).unwrap();
         assert_eq!(response.id, "chatcmpl-123");
         assert_eq!(response.choices.len(), 1);
-        assert_eq!(response.choices[0].message.content, Some("Hello!".to_string()));
+        assert_eq!(
+            response.choices[0].message.content,
+            Some("Hello!".to_string())
+        );
     }
 
     #[test]

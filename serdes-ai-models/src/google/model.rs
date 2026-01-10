@@ -76,10 +76,7 @@ impl GoogleModel {
         let profile = Self::profile_for_model(&model_name);
 
         Self {
-            base_url: format!(
-                "https://{}-aiplatform.googleapis.com",
-                location
-            ),
+            base_url: format!("https://{}-aiplatform.googleapis.com", location),
             model_name,
             client: Client::new(),
             api_key: None,
@@ -207,10 +204,7 @@ impl GoogleModel {
     }
 
     /// Convert our messages to Google format.
-    fn convert_messages(
-        &self,
-        requests: &[ModelRequest],
-    ) -> (Option<Content>, Vec<Content>) {
+    fn convert_messages(&self, requests: &[ModelRequest]) -> (Option<Content>, Vec<Content>) {
         let mut system_parts: Vec<String> = Vec::new();
         let mut contents: Vec<Content> = Vec::new();
 
@@ -287,7 +281,9 @@ impl GoogleModel {
                         for resp_part in &response.parts {
                             match resp_part {
                                 ModelResponsePart::Text(text) => {
-                                    parts.push(Part::Text { text: text.content.clone() });
+                                    parts.push(Part::Text {
+                                        text: text.content.clone(),
+                                    });
                                 }
                                 ModelResponsePart::ToolCall(tc) => {
                                     parts.push(Part::FunctionCall {
@@ -357,9 +353,10 @@ impl GoogleModel {
     fn convert_user_content(&self, content: &UserContent) -> Vec<Part> {
         match content {
             UserContent::Text(text) => vec![Part::text(text)],
-            UserContent::Parts(parts) => {
-                parts.iter().filter_map(|p| self.convert_content_part(p)).collect()
-            }
+            UserContent::Parts(parts) => parts
+                .iter()
+                .filter_map(|p| self.convert_content_part(p))
+                .collect(),
         }
     }
 
@@ -431,8 +428,8 @@ impl GoogleModel {
             let declarations: Vec<_> = tools
                 .iter()
                 .map(|t| {
-                    let params =
-                        serde_json::to_value(&t.parameters_json_schema).unwrap_or(serde_json::json!({}));
+                    let params = serde_json::to_value(&t.parameters_json_schema)
+                        .unwrap_or(serde_json::json!({}));
                     FunctionDeclaration::new(&t.name, &t.description, params)
                 })
                 .collect();
@@ -476,7 +473,10 @@ impl GoogleModel {
         let tools = self.convert_tools(&params.tools);
         let tools = if tools.is_empty() { None } else { Some(tools) };
 
-        let tool_config = params.tool_choice.as_ref().and_then(|c| self.convert_tool_config(c));
+        let tool_config = params
+            .tool_choice
+            .as_ref()
+            .and_then(|c| self.convert_tool_config(c));
 
         // Build generation config
         let mut gen_config = GenerationConfig::new();
@@ -552,9 +552,10 @@ impl GoogleModel {
                     }
                 }
                 Part::FunctionCall { function_call } => {
-                    parts.push(ModelResponsePart::ToolCall(
-                        ToolCallPart::new(function_call.name, ToolCallArgs::Json(function_call.args)),
-                    ));
+                    parts.push(ModelResponsePart::ToolCall(ToolCallPart::new(
+                        function_call.name,
+                        ToolCallArgs::Json(function_call.args),
+                    )));
                 }
                 Part::Thought { thought } => {
                     parts.push(ModelResponsePart::Thinking(ThinkingPart::new(thought)));
@@ -771,9 +772,8 @@ mod tests {
         use serdes_ai_tools::ObjectJsonSchema;
 
         let model = GoogleModel::new("gemini-2.0-flash", "key").with_code_execution();
-        let tools = vec![
-            ToolDefinition::new("search", "Search the web").with_parameters(ObjectJsonSchema::new()),
-        ];
+        let tools = vec![ToolDefinition::new("search", "Search the web")
+            .with_parameters(ObjectJsonSchema::new())];
 
         let converted = model.convert_tools(&tools);
         assert_eq!(converted.len(), 2); // function + code_execution

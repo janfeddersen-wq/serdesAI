@@ -21,16 +21,27 @@ pub struct ProviderPreferences {
 
 impl ProviderPreferences {
     /// Create new empty preferences.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     /// Set provider order.
     #[must_use]
-    pub fn with_order(mut self, order: Vec<String>) -> Self { self.order = Some(order); self }
+    pub fn with_order(mut self, order: Vec<String>) -> Self {
+        self.order = Some(order);
+        self
+    }
     /// Set quantization preference.
     #[must_use]
-    pub fn with_quantizations(mut self, q: Vec<Quantization>) -> Self { self.quantizations = Some(q); self }
+    pub fn with_quantizations(mut self, q: Vec<Quantization>) -> Self {
+        self.quantizations = Some(q);
+        self
+    }
     /// Set fallback behavior.
     #[must_use]
-    pub fn with_allow_fallbacks(mut self, allow: bool) -> Self { self.allow_fallbacks = Some(allow); self }
+    pub fn with_allow_fallbacks(mut self, allow: bool) -> Self {
+        self.allow_fallbacks = Some(allow);
+        self
+    }
 }
 
 /// Quantization preference levels.
@@ -38,13 +49,17 @@ impl ProviderPreferences {
 #[serde(rename_all = "lowercase")]
 pub enum Quantization {
     /// Full precision (bf16/fp16).
-    #[serde(rename = "bf16")] Bf16,
+    #[serde(rename = "bf16")]
+    Bf16,
     /// FP8 quantization.
-    #[serde(rename = "fp8")] Fp8,
+    #[serde(rename = "fp8")]
+    Fp8,
     /// INT8 quantization.
-    #[serde(rename = "int8")] Int8,
+    #[serde(rename = "int8")]
+    Int8,
     /// INT4 quantization.
-    #[serde(rename = "int4")] Int4,
+    #[serde(rename = "int4")]
+    Int4,
 }
 
 /// Data collection preference.
@@ -73,13 +88,21 @@ pub struct OpenRouterExtras {
 
 impl OpenRouterExtras {
     /// Create new empty extras.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
     /// Set provider preferences.
     #[must_use]
-    pub fn with_provider(mut self, p: ProviderPreferences) -> Self { self.provider = Some(p); self }
+    pub fn with_provider(mut self, p: ProviderPreferences) -> Self {
+        self.provider = Some(p);
+        self
+    }
     /// Set message transforms.
     #[must_use]
-    pub fn with_transforms(mut self, t: Vec<String>) -> Self { self.transforms = Some(t); self }
+    pub fn with_transforms(mut self, t: Vec<String>) -> Self {
+        self.transforms = Some(t);
+        self
+    }
 }
 
 /// Common OpenRouter model identifiers.
@@ -97,6 +120,10 @@ mod tests {
     use super::*;
     #[test]
     fn test_provider_preferences() {
-        assert!(serde_json::to_string(&ProviderPreferences::new().with_order(vec!["anthropic".into()])).unwrap().contains("anthropic"));
+        assert!(serde_json::to_string(
+            &ProviderPreferences::new().with_order(vec!["anthropic".into()])
+        )
+        .unwrap()
+        .contains("anthropic"));
     }
 }

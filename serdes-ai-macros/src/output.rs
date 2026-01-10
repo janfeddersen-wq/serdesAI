@@ -158,11 +158,7 @@ fn generate_json_schema(input: &DeriveInput) -> TokenStream2 {
             }
         },
         syn::Data::Enum(data) => {
-            let variants: Vec<String> = data
-                .variants
-                .iter()
-                .map(|v| v.ident.to_string())
-                .collect();
+            let variants: Vec<String> = data.variants.iter().map(|v| v.ident.to_string()).collect();
 
             quote! {
                 ::serde_json::json!({

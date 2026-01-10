@@ -340,15 +340,13 @@ impl Model for HuggingFaceModel {
                                 if let Ok(resp) = serde_json::from_str::<StreamResponse>(data) {
                                     if let Some(token) = resp.token {
                                         if !token.special {
-                                            return Some(Ok(
-                                                ModelResponseStreamEvent::text_delta(0, token.text),
-                                            ));
+                                            return Some(Ok(ModelResponseStreamEvent::text_delta(
+                                                0, token.text,
+                                            )));
                                         }
                                     }
                                     if resp.generated_text.is_some() {
-                                        return Some(Ok(
-                                            ModelResponseStreamEvent::part_end(0),
-                                        ));
+                                        return Some(Ok(ModelResponseStreamEvent::part_end(0)));
                                     }
                                 }
                             }

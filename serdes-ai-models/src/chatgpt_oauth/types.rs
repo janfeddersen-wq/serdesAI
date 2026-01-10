@@ -61,7 +61,7 @@ pub struct ReasoningConfig {
 #[derive(Debug, Serialize, Clone)]
 pub struct FunctionCallItem {
     #[serde(rename = "type")]
-    pub call_type: String,  // Always "function_call"
+    pub call_type: String, // Always "function_call"
     pub name: String,
     pub arguments: String,
     pub call_id: String,
@@ -71,7 +71,7 @@ pub struct FunctionCallItem {
 #[derive(Debug, Serialize, Clone)]
 pub struct FunctionCallOutput {
     #[serde(rename = "type")]
-    pub output_type: String,  // Always "function_call_output"
+    pub output_type: String, // Always "function_call_output"
     pub call_id: String,
     pub output: String,
 }

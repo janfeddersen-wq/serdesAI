@@ -95,8 +95,8 @@ pub use text::{TextOutputSchema, TextOutputSchemaBuilder};
 pub use toolset::{OutputCaptured, OutputToolset};
 pub use types::{NativeOutput, PromptedOutput, StructuredDict, TextOutput, ToolOutput};
 pub use validator::{
-    async_validator, sync_validator, BoxedValidator, NoOpValidator,
-    OutputValidator, RejectValidator, RetryValidator, SyncValidator, ValidatorChain,
+    async_validator, sync_validator, BoxedValidator, NoOpValidator, OutputValidator,
+    RejectValidator, RetryValidator, SyncValidator, ValidatorChain,
 };
 
 /// Prelude for common imports.

@@ -60,12 +60,7 @@ impl RetryConfig {
     }
 
     /// Use exponential backoff with jitter.
-    pub fn exponential_jitter(
-        mut self,
-        initial: Duration,
-        max: Duration,
-        jitter: f64,
-    ) -> Self {
+    pub fn exponential_jitter(mut self, initial: Duration, max: Duration, jitter: f64) -> Self {
         self.wait = WaitStrategy::ExponentialJitter {
             initial,
             max,
@@ -107,16 +102,8 @@ impl RetryConfig {
     pub fn for_api() -> Self {
         Self::new()
             .max_retries(3)
-            .exponential_jitter(
-                Duration::from_millis(500),
-                Duration::from_secs(60),
-                0.1,
-            )
-            .retry_on(
-                RetryCondition::new()
-                    .on_rate_limit()
-                    .on_server_errors(),
-            )
+            .exponential_jitter(Duration::from_millis(500), Duration::from_secs(60), 0.1)
+            .retry_on(RetryCondition::new().on_rate_limit().on_server_errors())
     }
 
     /// Create config that never retries.
@@ -355,9 +342,7 @@ mod tests {
 
     #[test]
     fn test_retry_condition() {
-        let condition = RetryCondition::new()
-            .on_rate_limit()
-            .on_server_errors();
+        let condition = RetryCondition::new().on_rate_limit().on_server_errors();
 
         assert!(condition.should_retry(&RetryableError::http(429, "")));
         assert!(condition.should_retry(&RetryableError::http(500, "")));

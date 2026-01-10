@@ -65,6 +65,4 @@ pub mod ag_ui;
 
 // Re-export commonly used types when features are enabled
 #[cfg(feature = "vercel")]
-pub use vercel_ai::{
-    Chunk, FinishReason, VercelAIEventStream, VERCEL_AI_DSP_HEADERS,
-};
+pub use vercel_ai::{Chunk, FinishReason, VercelAIEventStream, VERCEL_AI_DSP_HEADERS};

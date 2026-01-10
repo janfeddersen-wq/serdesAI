@@ -56,11 +56,7 @@ impl EvalMetrics {
     }
 
     /// Add a custom metric.
-    pub fn with_custom(
-        mut self,
-        key: impl Into<String>,
-        value: impl Serialize,
-    ) -> Self {
+    pub fn with_custom(mut self, key: impl Into<String>, value: impl Serialize) -> Self {
         self.custom.insert(
             key.into(),
             serde_json::to_value(value).unwrap_or(serde_json::Value::Null),
@@ -135,19 +131,29 @@ impl AggregateMetrics {
         } else {
             Some(scores.iter().sum::<f64>() / scores.len() as f64)
         };
-        let min_score = scores.iter().cloned().fold(None, |min, s| {
-            Some(min.map_or(s, |m: f64| m.min(s)))
-        });
-        let max_score = scores.iter().cloned().fold(None, |max, s| {
-            Some(max.map_or(s, |m: f64| m.max(s)))
-        });
+        let min_score = scores
+            .iter()
+            .cloned()
+            .fold(None, |min, s| Some(min.map_or(s, |m: f64| m.min(s))));
+        let max_score = scores
+            .iter()
+            .cloned()
+            .fold(None, |max, s| Some(max.map_or(s, |m: f64| m.max(s))));
 
         let total_duration: Duration = metrics.iter().map(|m| m.duration).sum();
         let average_duration = total_duration / count as u32;
 
         let total_tokens = {
-            let input: u64 = metrics.iter().filter_map(|m| m.tokens.as_ref()).map(|t| t.input_tokens).sum();
-            let output: u64 = metrics.iter().filter_map(|m| m.tokens.as_ref()).map(|t| t.output_tokens).sum();
+            let input: u64 = metrics
+                .iter()
+                .filter_map(|m| m.tokens.as_ref())
+                .map(|t| t.input_tokens)
+                .sum();
+            let output: u64 = metrics
+                .iter()
+                .filter_map(|m| m.tokens.as_ref())
+                .map(|t| t.output_tokens)
+                .sum();
             if input > 0 || output > 0 {
                 Some(TokenUsage::new(input, output))
             } else {
@@ -156,7 +162,11 @@ impl AggregateMetrics {
         };
 
         let total_cost: f64 = metrics.iter().filter_map(|m| m.cost).sum();
-        let total_cost = if total_cost > 0.0 { Some(total_cost) } else { None };
+        let total_cost = if total_cost > 0.0 {
+            Some(total_cost)
+        } else {
+            None
+        };
 
         Self {
             count,
@@ -217,9 +227,15 @@ mod tests {
     #[test]
     fn test_aggregate_metrics() {
         let metrics = vec![
-            EvalMetrics::new(true).with_score(0.8).with_duration(Duration::from_millis(100)),
-            EvalMetrics::new(true).with_score(0.9).with_duration(Duration::from_millis(200)),
-            EvalMetrics::new(false).with_score(0.5).with_duration(Duration::from_millis(150)),
+            EvalMetrics::new(true)
+                .with_score(0.8)
+                .with_duration(Duration::from_millis(100)),
+            EvalMetrics::new(true)
+                .with_score(0.9)
+                .with_duration(Duration::from_millis(200)),
+            EvalMetrics::new(false)
+                .with_score(0.5)
+                .with_duration(Duration::from_millis(150)),
         ];
 
         let agg = AggregateMetrics::from_metrics(&metrics);

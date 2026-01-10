@@ -78,7 +78,6 @@ impl FromStr for ImageMediaType {
     }
 }
 
-
 /// Audio media types.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -167,7 +166,6 @@ impl FromStr for AudioMediaType {
         }
     }
 }
-
 
 /// Video media types.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -269,7 +267,6 @@ impl FromStr for VideoMediaType {
         }
     }
 }
-
 
 /// Document media types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -415,14 +412,23 @@ mod tests {
     #[test]
     fn test_image_media_type() {
         assert_eq!(ImageMediaType::Jpeg.mime_type(), "image/jpeg");
-        assert_eq!(ImageMediaType::from_extension("png"), Some(ImageMediaType::Png));
-        assert_eq!("image/webp".parse::<ImageMediaType>().unwrap(), ImageMediaType::Webp);
+        assert_eq!(
+            ImageMediaType::from_extension("png"),
+            Some(ImageMediaType::Png)
+        );
+        assert_eq!(
+            "image/webp".parse::<ImageMediaType>().unwrap(),
+            ImageMediaType::Webp
+        );
     }
 
     #[test]
     fn test_audio_media_type() {
         assert_eq!(AudioMediaType::Mpeg.extension(), "mp3");
-        assert_eq!(AudioMediaType::from_extension("flac"), Some(AudioMediaType::Flac));
+        assert_eq!(
+            AudioMediaType::from_extension("flac"),
+            Some(AudioMediaType::Flac)
+        );
     }
 
     #[test]

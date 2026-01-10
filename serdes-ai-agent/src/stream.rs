@@ -24,13 +24,21 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 #[cfg(not(feature = "tracing-integration"))]
-macro_rules! debug { ($($arg:tt)*) => {} }
+macro_rules! debug {
+    ($($arg:tt)*) => {};
+}
 #[cfg(not(feature = "tracing-integration"))]
-macro_rules! info { ($($arg:tt)*) => {} }
+macro_rules! info {
+    ($($arg:tt)*) => {};
+}
 #[cfg(not(feature = "tracing-integration"))]
-macro_rules! error { ($($arg:tt)*) => {} }
+macro_rules! error {
+    ($($arg:tt)*) => {};
+}
 #[cfg(not(feature = "tracing-integration"))]
-macro_rules! warn { ($($arg:tt)*) => {} }
+macro_rules! warn {
+    ($($arg:tt)*) => {};
+}
 
 /// Events emitted during streaming.
 #[derive(Debug, Clone)]
@@ -74,8 +82,6 @@ pub enum AgentStreamEvent {
     /// Error occurred.
     Error { message: String },
 }
-
-
 
 /// Streaming agent execution.
 ///
@@ -134,11 +140,11 @@ impl AgentStream {
         let run_id_clone = run_id.clone();
 
         debug!(run_id = %run_id, "AgentStream: spawning streaming task");
-        
+
         // Spawn the streaming task
         tokio::spawn(async move {
             info!(run_id = %run_id_clone, "AgentStream: task started");
-            
+
             // Emit RunStart
             debug!("AgentStream: emitting RunStart");
             if tx
@@ -154,7 +160,10 @@ impl AgentStream {
 
             // Build initial messages
             let mut messages = initial_history.unwrap_or_default();
-            debug!(initial_messages = messages.len(), "AgentStream: building messages");
+            debug!(
+                initial_messages = messages.len(),
+                "AgentStream: building messages"
+            );
 
             // Add system prompt if non-empty
             if !static_system_prompt.is_empty() {
@@ -208,7 +217,11 @@ impl AgentStream {
                     .with_allow_text(true);
 
                 // Make streaming request
-                info!(step = step, message_count = messages.len(), "AgentStream: calling model.request_stream");
+                info!(
+                    step = step,
+                    message_count = messages.len(),
+                    "AgentStream: calling model.request_stream"
+                );
                 let stream_result = model
                     .request_stream(&messages, &model_settings, &params)
                     .await;
@@ -238,7 +251,10 @@ impl AgentStream {
                 // Process stream events
                 debug!("AgentStream: starting to process model stream events");
                 while let Some(event_result) = model_stream.next().await {
-                    { stream_event_count += 1; let _ = stream_event_count; }
+                    {
+                        stream_event_count += 1;
+                        let _ = stream_event_count;
+                    }
                     match event_result {
                         Ok(event) => {
                             match event {
@@ -304,8 +320,8 @@ impl AgentStream {
                                         }
                                         ModelResponsePartDelta::ToolCall(tc) => {
                                             // Get tool_call_id from the existing response part
-                                            let tool_call_id = response_parts.get(delta.index)
-                                                .and_then(|p| {
+                                            let tool_call_id =
+                                                response_parts.get(delta.index).and_then(|p| {
                                                     if let ModelResponsePart::ToolCall(tc) = p {
                                                         tc.tool_call_id.clone()
                                                     } else {
@@ -319,8 +335,9 @@ impl AgentStream {
                                                 }))
                                                 .await;
                                             // Update args - accumulate the delta into the tool call
-                                            if let Some(ModelResponsePart::ToolCall(ref mut tool_call)) =
-                                                response_parts.get_mut(delta.index)
+                                            if let Some(ModelResponsePart::ToolCall(
+                                                ref mut tool_call,
+                                            )) = response_parts.get_mut(delta.index)
                                             {
                                                 tc.apply(tool_call);
                                             }
@@ -331,10 +348,11 @@ impl AgentStream {
                                                     text: t.content_delta.clone(),
                                                 }))
                                                 .await;
-                                            if let Some(ModelResponsePart::Thinking(ref mut think)) =
-                                                response_parts.get_mut(delta.index)
+                                            if let Some(ModelResponsePart::Thinking(
+                                                ref mut think,
+                                            )) = response_parts.get_mut(delta.index)
                                             {
-                                                think.content.push_str(&t.content_delta);
+                                                t.apply(think);
                                             }
                                         }
                                         _ => {}
@@ -356,8 +374,12 @@ impl AgentStream {
                         }
                     }
                 }
-                
-                info!(stream_events = stream_event_count, parts = response_parts.len(), "AgentStream: finished processing model stream");
+
+                info!(
+                    stream_events = stream_event_count,
+                    parts = response_parts.len(),
+                    "AgentStream: finished processing model stream"
+                );
 
                 // Build the complete response
                 let response = ModelResponse {
@@ -380,13 +402,17 @@ impl AgentStream {
                     .await;
 
                 // Check for tool calls that need execution
-                let tool_calls: Vec<_> = response.parts.iter().filter_map(|p| {
-                    if let ModelResponsePart::ToolCall(tc) = p {
-                        Some(tc.clone())
-                    } else {
-                        None
-                    }
-                }).collect();
+                let tool_calls: Vec<_> = response
+                    .parts
+                    .iter()
+                    .filter_map(|p| {
+                        if let ModelResponsePart::ToolCall(tc) = p {
+                            Some(tc.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
                 if !tool_calls.is_empty() {
                     // Add response to messages for proper alternation
@@ -414,13 +440,13 @@ impl AgentStream {
                         match tool {
                             Some(tool) => {
                                 // Create a RunContext for tool execution
-                                let tool_ctx = RunContext::with_shared_deps(
-                                    deps.clone(),
-                                    model_name.clone(),
-                                ).for_tool(&tc.tool_name, tc.tool_call_id.clone());
+                                let tool_ctx =
+                                    RunContext::with_shared_deps(deps.clone(), model_name.clone())
+                                        .for_tool(&tc.tool_name, tc.tool_call_id.clone());
 
                                 // Execute the tool
-                                let result = tool.executor.execute(tc.args.to_json(), &tool_ctx).await;
+                                let result =
+                                    tool.executor.execute(tc.args.to_json(), &tool_ctx).await;
 
                                 match result {
                                     Ok(ret) => {
@@ -434,7 +460,8 @@ impl AgentStream {
                                             .await;
 
                                         // Use ToolReturnPart for successful execution
-                                        let mut part = ToolReturnPart::new(&tc.tool_name, ret.content);
+                                        let mut part =
+                                            ToolReturnPart::new(&tc.tool_name, ret.content);
                                         if let Some(id) = tc.tool_call_id.clone() {
                                             part = part.with_tool_call_id(id);
                                         }

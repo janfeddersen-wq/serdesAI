@@ -15,10 +15,10 @@ use crate::output::{
     ToolOutputSchema,
 };
 use serde::de::DeserializeOwned;
+use serde_json::Value as JsonValue;
 use serdes_ai_core::ModelSettings;
 use serdes_ai_models::Model;
 use serdes_ai_tools::{ToolDefinition, ToolError, ToolReturn};
-use serde_json::Value as JsonValue;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -202,9 +202,8 @@ where
 
         let executor = SyncFnExecutor {
             func: Arc::new(move |ctx, args: JsonValue| {
-                let parsed: Args = serde_json::from_value(args).map_err(|e| {
-                    ToolError::invalid_arguments(tool_name.clone(), e.to_string())
-                })?;
+                let parsed: Args = serde_json::from_value(args)
+                    .map_err(|e| ToolError::invalid_arguments(tool_name.clone(), e.to_string()))?;
                 f(ctx, parsed)
             }),
             _phantom: PhantomData,
@@ -274,8 +273,7 @@ where
             + Sync
             + 'static,
     {
-        self.output_validators
-            .push(Box::new(SyncValidator::new(f)));
+        self.output_validators.push(Box::new(SyncValidator::new(f)));
         self
     }
 
@@ -382,7 +380,7 @@ where
             self.tools
                 .iter()
                 .map(|t| t.definition.clone())
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
         );
 
         Agent {
@@ -414,9 +412,7 @@ where
 impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
     /// Change output type to a JSON-parsed type.
     #[must_use]
-    pub fn output_type<T: DeserializeOwned + Send + Sync + 'static>(
-        self,
-    ) -> AgentBuilder<Deps, T> {
+    pub fn output_type<T: DeserializeOwned + Send + Sync + 'static>(self) -> AgentBuilder<Deps, T> {
         AgentBuilder {
             model: self.model,
             name: self.name,
@@ -508,8 +504,7 @@ impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
 
 /// Sync function executor.
 struct SyncFnExecutor<Deps> {
-    func:
-        Arc<dyn Fn(&RunContext<Deps>, JsonValue) -> Result<ToolReturn, ToolError> + Send + Sync>,
+    func: Arc<dyn Fn(&RunContext<Deps>, JsonValue) -> Result<ToolReturn, ToolError> + Send + Sync>,
     _phantom: PhantomData<Deps>,
 }
 
@@ -549,9 +544,8 @@ where
         args: JsonValue,
         ctx: &RunContext<Deps>,
     ) -> Result<ToolReturn, ToolError> {
-        let parsed: Args = serde_json::from_value(args).map_err(|e| {
-            ToolError::invalid_arguments(self.tool_name.clone(), e.to_string())
-        })?;
+        let parsed: Args = serde_json::from_value(args)
+            .map_err(|e| ToolError::invalid_arguments(self.tool_name.clone(), e.to_string()))?;
         (self.func)(ctx, parsed).await
     }
 }
@@ -645,9 +639,7 @@ mod tests {
     #[test]
     fn test_agent_convenience() {
         let model = create_mock_model();
-        let agent = agent(model)
-            .name("quick-agent")
-            .build();
+        let agent = agent(model).name("quick-agent").build();
 
         assert_eq!(agent.name(), Some("quick-agent"));
     }

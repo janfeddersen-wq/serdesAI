@@ -212,8 +212,14 @@ mod tests {
 
     #[test]
     fn test_model_dimensions() {
-        assert_eq!(OpenAIEmbeddingModel::model_dimensions("text-embedding-3-small"), 1536);
-        assert_eq!(OpenAIEmbeddingModel::model_dimensions("text-embedding-3-large"), 3072);
+        assert_eq!(
+            OpenAIEmbeddingModel::model_dimensions("text-embedding-3-small"),
+            1536
+        );
+        assert_eq!(
+            OpenAIEmbeddingModel::model_dimensions("text-embedding-3-large"),
+            3072
+        );
     }
 
     #[test]
@@ -225,8 +231,8 @@ mod tests {
 
     #[test]
     fn test_with_base_url() {
-        let model = OpenAIEmbeddingModel::new("test", "key")
-            .with_base_url("https://custom.api.com");
+        let model =
+            OpenAIEmbeddingModel::new("test", "key").with_base_url("https://custom.api.com");
         assert_eq!(model.base_url, "https://custom.api.com");
     }
 

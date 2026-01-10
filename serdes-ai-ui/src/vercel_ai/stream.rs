@@ -4,8 +4,8 @@
 //! serdesAI agent stream events to the Vercel AI Data Stream Protocol format.
 
 use super::types::{self, *};
-use serdes_ai_streaming::AgentStreamEvent;
 use serde_json::Value;
+use serdes_ai_streaming::AgentStreamEvent;
 use std::collections::HashMap;
 
 /// HTTP headers for Vercel AI Data Stream Protocol responses.
@@ -154,14 +154,14 @@ impl VercelAIEventStream {
     /// - `StartStepChunk` to begin the first step
     pub fn before_stream(&mut self) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
-        
+
         let message_id = self.current_message_id();
         chunks.push(Box::new(StartChunk::new(&message_id)));
         chunks.push(Box::new(StartStepChunk::new(&message_id).with_step(0)));
-        
+
         self.step_started = true;
         self.current_step = 0;
-        
+
         chunks
     }
 
@@ -176,21 +176,21 @@ impl VercelAIEventStream {
     pub fn after_stream(&mut self) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
         let message_id = self.current_message_id();
-        
+
         // Close any open text stream
         if self.text_state.started {
             chunks.push(Box::new(TextEndChunk::new()));
             self.text_state.started = false;
         }
-        
+
         // Close any open reasoning stream
         if self.reasoning_state.started {
             chunks.push(Box::new(ReasoningEndChunk::new()));
             self.reasoning_state.started = false;
         }
-        
+
         let finish_reason = self.finish_reason.unwrap_or(FinishReason::Stop);
-        
+
         // Finish the current step
         if self.step_started {
             let mut finish_step = FinishStepChunk::new(&message_id, finish_reason);
@@ -203,17 +203,17 @@ impl VercelAIEventStream {
             chunks.push(Box::new(finish_step));
             self.step_started = false;
         }
-        
+
         // Finish the message
         let mut finish = FinishChunk::new(&message_id, finish_reason);
         if let Some(ref usage) = self.usage {
             finish = finish.with_usage(usage.clone());
         }
         chunks.push(Box::new(finish));
-        
+
         // Done!
         chunks.push(Box::new(DoneChunk::new()));
-        
+
         chunks
     }
 
@@ -227,58 +227,58 @@ impl VercelAIEventStream {
                 // RunStart is handled by before_stream()
                 vec![]
             }
-            
-            AgentStreamEvent::RequestStart { step } => {
-                self.handle_request_start(step)
-            }
-            
-            AgentStreamEvent::TextDelta { content, part_index } => {
-                self.handle_text_delta(content, part_index)
-            }
-            
+
+            AgentStreamEvent::RequestStart { step } => self.handle_request_start(step),
+
+            AgentStreamEvent::TextDelta {
+                content,
+                part_index,
+            } => self.handle_text_delta(content, part_index),
+
             AgentStreamEvent::ThinkingDelta { content, index } => {
                 self.handle_thinking_delta(content, index)
             }
-            
-            AgentStreamEvent::ToolCallStart { name, tool_call_id, index } => {
-                self.handle_tool_call_start(name, tool_call_id, index)
-            }
-            
+
+            AgentStreamEvent::ToolCallStart {
+                name,
+                tool_call_id,
+                index,
+            } => self.handle_tool_call_start(name, tool_call_id, index),
+
             AgentStreamEvent::ToolCallDelta { args_delta, index } => {
                 self.handle_tool_call_delta(args_delta, index)
             }
-            
+
             AgentStreamEvent::ToolCallComplete { name, args, index } => {
                 self.handle_tool_call_complete(name, args, index)
             }
-            
-            AgentStreamEvent::ToolResult { name: _, result, success, index } => {
-                self.handle_tool_result(result, success, index)
-            }
-            
-            AgentStreamEvent::UsageUpdate { usage } => {
-                self.handle_usage_update(usage)
-            }
-            
+
+            AgentStreamEvent::ToolResult {
+                name: _,
+                result,
+                success,
+                index,
+            } => self.handle_tool_result(result, success, index),
+
+            AgentStreamEvent::UsageUpdate { usage } => self.handle_usage_update(usage),
+
             AgentStreamEvent::ResponseComplete { .. } => {
                 // Response complete is informational, actual finish in RunComplete
                 vec![]
             }
-            
+
             AgentStreamEvent::PartialOutput { .. } | AgentStreamEvent::FinalOutput { .. } => {
                 // Output events are for typed output, not UI streaming
                 vec![]
             }
-            
+
             AgentStreamEvent::RunComplete { .. } => {
                 self.finish_reason = Some(FinishReason::Stop);
                 // RunComplete is handled by after_stream()
                 vec![]
             }
-            
-            AgentStreamEvent::Error { message, .. } => {
-                self.handle_error(message)
-            }
+
+            AgentStreamEvent::Error { message, .. } => self.handle_error(message),
         }
     }
 
@@ -286,7 +286,7 @@ impl VercelAIEventStream {
     fn handle_request_start(&mut self, step: u32) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
         let message_id = self.current_message_id();
-        
+
         // If we already started a step, finish it first
         if self.step_started && step > self.current_step {
             // Close text/reasoning if open
@@ -298,45 +298,44 @@ impl VercelAIEventStream {
                 chunks.push(Box::new(ReasoningEndChunk::new()));
                 self.reasoning_state.started = false;
             }
-            
+
             // Finish the previous step
-            let finish_step = FinishStepChunk::new(&message_id, FinishReason::ToolCalls)
-                .with_continued(true);
+            let finish_step =
+                FinishStepChunk::new(&message_id, FinishReason::ToolCalls).with_continued(true);
             chunks.push(Box::new(finish_step));
-            
+
             // Start the new step
             chunks.push(Box::new(StartStepChunk::new(&message_id).with_step(step)));
             self.current_step = step;
         }
-        
+
         chunks
     }
 
     /// Handle a text delta event.
     fn handle_text_delta(&mut self, content: String, part_index: usize) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
-        
+
         // Close reasoning if we were in reasoning mode
         if self.reasoning_state.started {
             chunks.push(Box::new(ReasoningEndChunk::new()));
             self.reasoning_state.started = false;
         }
-        
+
         // Check if we need to start text or if part index changed
-        let need_start = !self.text_state.started 
-            || self.text_state.part_index != Some(part_index);
-        
+        let need_start = !self.text_state.started || self.text_state.part_index != Some(part_index);
+
         if need_start {
             // Close previous text part if needed
             if self.text_state.started {
                 chunks.push(Box::new(TextEndChunk::new()));
             }
-            
+
             chunks.push(Box::new(TextStartChunk::new()));
             self.text_state.started = true;
             self.text_state.part_index = Some(part_index);
         }
-        
+
         chunks.push(Box::new(TextDeltaChunk::new(content)));
         chunks
     }
@@ -344,28 +343,27 @@ impl VercelAIEventStream {
     /// Handle a thinking/reasoning delta event.
     fn handle_thinking_delta(&mut self, content: String, index: usize) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
-        
+
         // Close text if we were in text mode
         if self.text_state.started {
             chunks.push(Box::new(TextEndChunk::new()));
             self.text_state.started = false;
         }
-        
+
         // Check if we need to start reasoning or if index changed
-        let need_start = !self.reasoning_state.started
-            || self.reasoning_state.index != Some(index);
-        
+        let need_start = !self.reasoning_state.started || self.reasoning_state.index != Some(index);
+
         if need_start {
             // Close previous reasoning if needed
             if self.reasoning_state.started {
                 chunks.push(Box::new(ReasoningEndChunk::new()));
             }
-            
+
             chunks.push(Box::new(ReasoningStartChunk::new()));
             self.reasoning_state.started = true;
             self.reasoning_state.index = Some(index);
         }
-        
+
         chunks.push(Box::new(ReasoningDeltaChunk::new(content)));
         chunks
     }
@@ -378,7 +376,7 @@ impl VercelAIEventStream {
         index: usize,
     ) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
-        
+
         // Close text/reasoning if open
         if self.text_state.started {
             chunks.push(Box::new(TextEndChunk::new()));
@@ -388,20 +386,23 @@ impl VercelAIEventStream {
             chunks.push(Box::new(ReasoningEndChunk::new()));
             self.reasoning_state.started = false;
         }
-        
+
         // Generate tool call ID if not provided
         let call_id = tool_call_id.unwrap_or_else(|| format!("call-{}", index));
-        
+
         // Store state
-        self.tool_calls.insert(index, ToolCallState {
-            tool_call_id: call_id.clone(),
-            tool_name: name.clone(),
-            args_buffer: String::new(),
-            started: true,
-        });
-        
+        self.tool_calls.insert(
+            index,
+            ToolCallState {
+                tool_call_id: call_id.clone(),
+                tool_name: name.clone(),
+                args_buffer: String::new(),
+                started: true,
+            },
+        );
+
         self.has_pending_tool_calls = true;
-        
+
         chunks.push(Box::new(ToolInputStartChunk::new(&call_id, &name)));
         chunks
     }
@@ -409,18 +410,18 @@ impl VercelAIEventStream {
     /// Handle tool call arguments delta.
     fn handle_tool_call_delta(&mut self, args_delta: String, index: usize) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
-        
+
         if let Some(state) = self.tool_calls.get_mut(&index) {
             // Accumulate args
             state.args_buffer.push_str(&args_delta);
-            
+
             // Emit delta chunk
             chunks.push(Box::new(ToolInputDeltaChunk::new(
                 &state.tool_call_id,
                 args_delta,
             )));
         }
-        
+
         chunks
     }
 
@@ -432,31 +433,34 @@ impl VercelAIEventStream {
         index: usize,
     ) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
-        
+
         // Get or create tool call state
         let tool_call_id = if let Some(state) = self.tool_calls.get(&index) {
             state.tool_call_id.clone()
         } else {
             // Tool call started without ToolCallStart event
             let call_id = format!("call-{}", index);
-            self.tool_calls.insert(index, ToolCallState {
-                tool_call_id: call_id.clone(),
-                tool_name: name.clone(),
-                args_buffer: String::new(),
-                started: false,
-            });
+            self.tool_calls.insert(
+                index,
+                ToolCallState {
+                    tool_call_id: call_id.clone(),
+                    tool_name: name.clone(),
+                    args_buffer: String::new(),
+                    started: false,
+                },
+            );
             call_id
         };
-        
+
         self.finish_reason = Some(FinishReason::ToolCalls);
         self.has_pending_tool_calls = true;
-        
+
         chunks.push(Box::new(ToolInputAvailableChunk::new(
             &tool_call_id,
             &name,
             args,
         )));
-        
+
         chunks
     }
 
@@ -468,37 +472,47 @@ impl VercelAIEventStream {
         index: usize,
     ) -> Vec<Box<dyn Chunk>> {
         let mut chunks: Vec<Box<dyn Chunk>> = Vec::new();
-        
+
         // Get tool call ID
-        let tool_call_id = self.tool_calls
+        let tool_call_id = self
+            .tool_calls
             .get(&index)
             .map(|s| s.tool_call_id.clone())
             .unwrap_or_else(|| format!("call-{}", index));
-        
+
         if success {
-            chunks.push(Box::new(ToolOutputAvailableChunk::new(&tool_call_id, result)));
+            chunks.push(Box::new(ToolOutputAvailableChunk::new(
+                &tool_call_id,
+                result,
+            )));
         } else {
-            let error_msg = result.as_str()
+            let error_msg = result
+                .as_str()
                 .unwrap_or("Tool execution failed")
                 .to_string();
-            chunks.push(Box::new(ToolOutputErrorChunk::new(&tool_call_id, error_msg)));
+            chunks.push(Box::new(ToolOutputErrorChunk::new(
+                &tool_call_id,
+                error_msg,
+            )));
         }
-        
+
         // Tool call is resolved
         self.tool_calls.remove(&index);
         if self.tool_calls.is_empty() {
             self.has_pending_tool_calls = false;
         }
-        
+
         chunks
     }
 
     /// Handle usage update.
     fn handle_usage_update(&mut self, usage: serdes_ai_core::RequestUsage) -> Vec<Box<dyn Chunk>> {
-        self.usage = Some(UsageInfo::new()
-            .with_prompt_tokens(usage.request_tokens.unwrap_or(0) as u32)
-            .with_completion_tokens(usage.response_tokens.unwrap_or(0) as u32)
-            .with_total_tokens(usage.total_tokens.unwrap_or(0) as u32));
+        self.usage = Some(
+            UsageInfo::new()
+                .with_prompt_tokens(usage.request_tokens.unwrap_or(0) as u32)
+                .with_completion_tokens(usage.response_tokens.unwrap_or(0) as u32)
+                .with_total_tokens(usage.total_tokens.unwrap_or(0) as u32),
+        );
         vec![]
     }
 
@@ -543,7 +557,7 @@ mod tests {
     fn test_before_stream() {
         let mut stream = VercelAIEventStream::new();
         let chunks = stream.before_stream();
-        
+
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].chunk_type(), "start");
         assert_eq!(chunks[1].chunk_type(), "start-step");
@@ -554,9 +568,9 @@ mod tests {
     fn test_after_stream() {
         let mut stream = VercelAIEventStream::new();
         stream.before_stream();
-        
+
         let chunks = stream.after_stream();
-        
+
         // Should have finish-step, finish, done
         assert!(chunks.iter().any(|c| c.chunk_type() == "finish-step"));
         assert!(chunks.iter().any(|c| c.chunk_type() == "finish"));
@@ -567,25 +581,25 @@ mod tests {
     fn test_text_delta_transformation() {
         let mut stream = VercelAIEventStream::new();
         stream.before_stream();
-        
+
         // First text delta should emit text-start + text-delta
         let event: AgentStreamEvent<()> = AgentStreamEvent::TextDelta {
             content: "Hello".to_string(),
             part_index: 0,
         };
         let chunks = stream.transform_event(event);
-        
+
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].chunk_type(), "text-start");
         assert_eq!(chunks[1].chunk_type(), "text-delta");
-        
+
         // Second text delta should only emit text-delta
         let event2: AgentStreamEvent<()> = AgentStreamEvent::TextDelta {
             content: " World".to_string(),
             part_index: 0,
         };
         let chunks2 = stream.transform_event(event2);
-        
+
         assert_eq!(chunks2.len(), 1);
         assert_eq!(chunks2[0].chunk_type(), "text-delta");
     }
@@ -594,13 +608,13 @@ mod tests {
     fn test_thinking_delta_transformation() {
         let mut stream = VercelAIEventStream::new();
         stream.before_stream();
-        
+
         let event: AgentStreamEvent<()> = AgentStreamEvent::ThinkingDelta {
             content: "Let me think...".to_string(),
             index: 0,
         };
         let chunks = stream.transform_event(event);
-        
+
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].chunk_type(), "reasoning-start");
         assert_eq!(chunks[1].chunk_type(), "reasoning-delta");
@@ -610,7 +624,7 @@ mod tests {
     fn test_tool_call_transformation() {
         let mut stream = VercelAIEventStream::new();
         stream.before_stream();
-        
+
         // Tool call start
         let event: AgentStreamEvent<()> = AgentStreamEvent::ToolCallStart {
             name: "get_weather".to_string(),
@@ -618,20 +632,20 @@ mod tests {
             index: 0,
         };
         let chunks = stream.transform_event(event);
-        
+
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].chunk_type(), "tool-input-start");
-        
+
         // Tool call delta
         let delta_event: AgentStreamEvent<()> = AgentStreamEvent::ToolCallDelta {
             args_delta: "{\"city\":".to_string(),
             index: 0,
         };
         let delta_chunks = stream.transform_event(delta_event);
-        
+
         assert_eq!(delta_chunks.len(), 1);
         assert_eq!(delta_chunks[0].chunk_type(), "tool-input-delta");
-        
+
         // Tool call complete
         let complete_event: AgentStreamEvent<()> = AgentStreamEvent::ToolCallComplete {
             name: "get_weather".to_string(),
@@ -639,7 +653,7 @@ mod tests {
             index: 0,
         };
         let complete_chunks = stream.transform_event(complete_event);
-        
+
         assert_eq!(complete_chunks.len(), 1);
         assert_eq!(complete_chunks[0].chunk_type(), "tool-input-available");
     }
@@ -648,7 +662,7 @@ mod tests {
     fn test_tool_result_success() {
         let mut stream = VercelAIEventStream::new();
         stream.before_stream();
-        
+
         // First start a tool call
         let start_event: AgentStreamEvent<()> = AgentStreamEvent::ToolCallStart {
             name: "get_weather".to_string(),
@@ -656,7 +670,7 @@ mod tests {
             index: 0,
         };
         stream.transform_event(start_event);
-        
+
         // Then send result
         let event: AgentStreamEvent<()> = AgentStreamEvent::ToolResult {
             name: "get_weather".to_string(),
@@ -665,7 +679,7 @@ mod tests {
             index: 0,
         };
         let chunks = stream.transform_event(event);
-        
+
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].chunk_type(), "tool-output-available");
     }
@@ -674,7 +688,7 @@ mod tests {
     fn test_tool_result_error() {
         let mut stream = VercelAIEventStream::new();
         stream.before_stream();
-        
+
         // First start a tool call
         let start_event: AgentStreamEvent<()> = AgentStreamEvent::ToolCallStart {
             name: "get_weather".to_string(),
@@ -682,7 +696,7 @@ mod tests {
             index: 0,
         };
         stream.transform_event(start_event);
-        
+
         // Then send error result
         let event: AgentStreamEvent<()> = AgentStreamEvent::ToolResult {
             name: "get_weather".to_string(),
@@ -691,7 +705,7 @@ mod tests {
             index: 0,
         };
         let chunks = stream.transform_event(event);
-        
+
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].chunk_type(), "tool-output-error");
     }
@@ -700,13 +714,13 @@ mod tests {
     fn test_error_transformation() {
         let mut stream = VercelAIEventStream::new();
         stream.before_stream();
-        
+
         let event: AgentStreamEvent<()> = AgentStreamEvent::Error {
             message: "Something went wrong".to_string(),
             recoverable: false,
         };
         let chunks = stream.transform_event(event);
-        
+
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].chunk_type(), "error");
         assert_eq!(stream.finish_reason, Some(FinishReason::Error));
@@ -716,7 +730,7 @@ mod tests {
     fn test_encode_event() {
         let chunk = TextDeltaChunk::new("Hello");
         let encoded = VercelAIEventStream::encode_event(&chunk);
-        
+
         assert!(encoded.starts_with("data: "));
         assert!(encoded.ends_with("\n\n"));
         assert!(encoded.contains("text-delta"));
@@ -728,7 +742,7 @@ mod tests {
             Box::new(TextStartChunk::new()),
             Box::new(TextDeltaChunk::new("Hi")),
         ];
-        
+
         let sse = chunks_to_sse(&chunks);
         assert!(sse.contains("text-start"));
         assert!(sse.contains("text-delta"));
@@ -738,16 +752,16 @@ mod tests {
     #[test]
     fn test_full_stream_lifecycle() {
         let mut stream = VercelAIEventStream::new();
-        
+
         // Before
         let before = stream.before_stream();
         assert!(!before.is_empty());
-        
+
         // Some events
         let text: AgentStreamEvent<()> = AgentStreamEvent::text_delta("Hello", 0);
         let text_chunks = stream.transform_event(text);
         assert!(!text_chunks.is_empty());
-        
+
         // After
         let after = stream.after_stream();
         assert!(after.iter().any(|c| c.chunk_type() == "done"));

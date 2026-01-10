@@ -123,7 +123,10 @@ mod tests {
     fn test_from_str() {
         assert_eq!("text".parse::<OutputMode>().unwrap(), OutputMode::Text);
         assert_eq!("native".parse::<OutputMode>().unwrap(), OutputMode::Native);
-        assert_eq!("prompted".parse::<OutputMode>().unwrap(), OutputMode::Prompted);
+        assert_eq!(
+            "prompted".parse::<OutputMode>().unwrap(),
+            OutputMode::Prompted
+        );
         assert_eq!("json".parse::<OutputMode>().unwrap(), OutputMode::Prompted);
         assert_eq!("tool".parse::<OutputMode>().unwrap(), OutputMode::Tool);
         assert_eq!("function".parse::<OutputMode>().unwrap(), OutputMode::Tool);

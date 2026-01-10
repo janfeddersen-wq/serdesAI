@@ -135,11 +135,7 @@ mod tests {
 
     #[test]
     fn test_run_context() {
-        let mut ctx = GraphRunContext::new(
-            TestState { value: 0 },
-            (),
-            "test-run",
-        );
+        let mut ctx = GraphRunContext::new(TestState { value: 0 }, (), "test-run");
 
         assert_eq!(ctx.step, 0);
         ctx.increment_step();
@@ -148,11 +144,7 @@ mod tests {
 
     #[test]
     fn test_max_steps() {
-        let ctx = GraphRunContext::new(
-            TestState::default(),
-            (),
-            "test",
-        ).with_max_steps(5);
+        let ctx = GraphRunContext::new(TestState::default(), (), "test").with_max_steps(5);
 
         assert_eq!(ctx.max_steps, 5);
     }

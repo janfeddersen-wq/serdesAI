@@ -3,9 +3,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::parse::Parser;
-use syn::{
-    parse_macro_input, punctuated::Punctuated, Error, ItemStruct, Meta, Token,
-};
+use syn::{parse_macro_input, punctuated::Punctuated, Error, ItemStruct, Meta, Token};
 
 /// Implementation for `#[agent]` attribute macro
 pub fn agent_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -29,12 +27,10 @@ pub fn agent_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream
 
     for meta in args {
         match meta {
-            Meta::NameValue(nv) if nv.path.is_ident("model") => {
-                match parse_lit_str(&nv.value) {
-                    Ok(value) => model = value,
-                    Err(err) => return err.to_compile_error().into(),
-                }
-            }
+            Meta::NameValue(nv) if nv.path.is_ident("model") => match parse_lit_str(&nv.value) {
+                Ok(value) => model = value,
+                Err(err) => return err.to_compile_error().into(),
+            },
             Meta::NameValue(nv) if nv.path.is_ident("system_prompt") => {
                 match parse_lit_str(&nv.value) {
                     Ok(value) => system_prompt = value,

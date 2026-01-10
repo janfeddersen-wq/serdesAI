@@ -4,7 +4,7 @@ pub mod model;
 pub mod types;
 
 pub use model::OpenRouterModel;
-pub use types::{DataCollection, OpenRouterExtras, ProviderPreferences, Quantization, models};
+pub use types::{models, DataCollection, OpenRouterExtras, ProviderPreferences, Quantization};
 
 /// Create a new OpenRouter model.
 pub fn chat(model_name: impl Into<String>, api_key: impl Into<String>) -> OpenRouterModel {

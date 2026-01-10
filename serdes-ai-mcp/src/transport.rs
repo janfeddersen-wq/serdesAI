@@ -58,9 +58,7 @@ impl StdioTransport {
             .take()
             .ok_or_else(|| McpError::Transport("No stdout".to_string()))?;
 
-        let stderr = child
-            .stderr
-            .take();
+        let stderr = child.stderr.take();
 
         let pending = Arc::new(Mutex::new(HashMap::new()));
 
@@ -135,7 +133,7 @@ impl StdioTransport {
             line.clear();
             match reader.read_line(&mut line).await {
                 Ok(0) => break, // EOF
-                Ok(_) => {} // Discard stderr output
+                Ok(_) => {}     // Discard stderr output
                 Err(_) => break,
             }
         }
@@ -147,14 +145,10 @@ impl StdioTransport {
             .write_all(data.as_bytes())
             .await
             .map_err(|e| McpError::Io(e))?;
-        stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|e| McpError::Io(e))?;
+        stdin.write_all(b"\n").await.map_err(|e| McpError::Io(e))?;
         stdin.flush().await.map_err(|e| McpError::Io(e))?;
         Ok(())
     }
-
 }
 
 #[async_trait]
@@ -255,7 +249,10 @@ impl McpTransport for HttpTransport {
         }
         drop(session_id);
 
-        let response = req.send().await.map_err(|e| McpError::Transport(e.to_string()))?;
+        let response = req
+            .send()
+            .await
+            .map_err(|e| McpError::Transport(e.to_string()))?;
 
         // Store session ID from response
         if let Some(id) = response.headers().get("X-Session-Id") {
@@ -286,7 +283,10 @@ impl McpTransport for HttpTransport {
         }
         drop(session_id);
 
-        let response = req.send().await.map_err(|e| McpError::Transport(e.to_string()))?;
+        let response = req
+            .send()
+            .await
+            .map_err(|e| McpError::Transport(e.to_string()))?;
 
         if !response.status().is_success() {
             return Err(McpError::Http(response.status().as_u16()));

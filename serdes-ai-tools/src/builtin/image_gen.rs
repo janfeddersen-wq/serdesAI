@@ -312,7 +312,11 @@ impl ImageGenerationTool {
     /// Get the tool schema.
     fn schema() -> JsonValue {
         SchemaBuilder::new()
-            .string("prompt", "The text prompt describing the image to generate", true)
+            .string(
+                "prompt",
+                "The text prompt describing the image to generate",
+                true,
+            )
             .enum_values(
                 "background",
                 "Background style (transparent, opaque, or auto)",
@@ -334,13 +338,23 @@ impl ImageGenerationTool {
             .enum_values(
                 "aspect_ratio",
                 "Aspect ratio for the image",
-                &["21_9", "16_9", "3_2", "4_3", "1_1", "3_4", "2_3", "9_16", "9_21"],
+                &[
+                    "21_9", "16_9", "3_2", "4_3", "1_1", "3_4", "2_3", "9_16", "9_21",
+                ],
                 false,
             )
             .enum_values(
                 "size",
                 "Predefined size for the image",
-                &["auto", "256x256", "512x512", "1024x1024", "1024x1792", "1792x1024", "2048x2048"],
+                &[
+                    "auto",
+                    "256x256",
+                    "512x512",
+                    "1024x1024",
+                    "1024x1792",
+                    "1792x1024",
+                    "2048x2048",
+                ],
                 false,
             )
             .integer_constrained(
@@ -407,21 +421,21 @@ pub struct ImageGenerationResult {
 #[async_trait]
 impl<Deps: Send + Sync> Tool<Deps> for ImageGenerationTool {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new("image_generation", "Generate images from text prompts using AI")
-            .with_parameters(Self::schema())
+        ToolDefinition::new(
+            "image_generation",
+            "Generate images from text prompts using AI",
+        )
+        .with_parameters(Self::schema())
     }
 
     async fn call(&self, _ctx: &RunContext<Deps>, args: JsonValue) -> ToolResult {
-        let prompt = args
-            .get("prompt")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::validation_error(
-                    "image_generation",
-                    Some("prompt".to_string()),
-                    "Missing 'prompt' field",
-                )
-            })?;
+        let prompt = args.get("prompt").and_then(|v| v.as_str()).ok_or_else(|| {
+            ToolError::validation_error(
+                "image_generation",
+                Some("prompt".to_string()),
+                "Missing 'prompt' field",
+            )
+        })?;
 
         if prompt.trim().is_empty() {
             return Err(ToolError::validation_error(
@@ -643,7 +657,9 @@ mod tests {
             .get("required")
             .and_then(|value| value.as_array())
             .unwrap();
-        assert!(required.iter().any(|value| value.as_str() == Some("prompt")));
+        assert!(required
+            .iter()
+            .any(|value| value.as_str() == Some("prompt")));
     }
 
     #[tokio::test]

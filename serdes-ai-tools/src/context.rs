@@ -191,11 +191,7 @@ impl<Deps> RunContext<Deps> {
 
     /// Create a child context for a tool call.
     #[must_use]
-    pub fn for_tool(
-        &self,
-        tool_name: impl Into<String>,
-        tool_call_id: Option<String>,
-    ) -> Self {
+    pub fn for_tool(&self, tool_name: impl Into<String>, tool_call_id: Option<String>) -> Self {
         Self {
             deps: Arc::clone(&self.deps),
             run_id: self.run_id.clone(),
@@ -279,8 +275,8 @@ mod tests {
 
     #[test]
     fn test_run_context_with_tool_context() {
-        let ctx = RunContext::minimal("gpt-4")
-            .with_tool_context("my_tool", Some("call_123".to_string()));
+        let ctx =
+            RunContext::minimal("gpt-4").with_tool_context("my_tool", Some("call_123".to_string()));
         assert_eq!(ctx.tool_name, Some("my_tool".to_string()));
         assert_eq!(ctx.tool_call_id, Some("call_123".to_string()));
         assert!(ctx.in_tool_call());
@@ -300,7 +296,7 @@ mod tests {
     fn test_for_tool() {
         let ctx = RunContext::new(TestDeps { value: 10 }, "gpt-4");
         let tool_ctx = ctx.for_tool("test_tool", Some("id1".to_string()));
-        
+
         // Same deps
         assert_eq!(tool_ctx.deps.value, 10);
         // Same run ID

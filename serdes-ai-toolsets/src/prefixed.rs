@@ -211,7 +211,10 @@ mod tests {
         let toolset = FunctionToolset::new().tool(SearchTool);
         let prefixed = PrefixedToolset::new(toolset, "web");
 
-        assert_eq!(prefixed.strip_prefix("web_search"), Some("search".to_string()));
+        assert_eq!(
+            prefixed.strip_prefix("web_search"),
+            Some("search".to_string())
+        );
         assert_eq!(prefixed.strip_prefix("local_search"), None);
     }
 

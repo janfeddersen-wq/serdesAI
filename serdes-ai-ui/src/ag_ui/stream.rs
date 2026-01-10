@@ -248,9 +248,10 @@ impl AgUiEventStream {
                 self.handle_request_start()
             }
 
-            AgentStreamEvent::TextDelta { content, part_index } => {
-                self.handle_text_delta(content, part_index)
-            }
+            AgentStreamEvent::TextDelta {
+                content,
+                part_index,
+            } => self.handle_text_delta(content, part_index),
 
             AgentStreamEvent::ThinkingDelta { content, index } => {
                 self.handle_thinking_delta(content, index)
@@ -337,8 +338,8 @@ impl AgUiEventStream {
         }
 
         // Check if we need to start a new message or part changed
-        let need_new_message = !self.text_state.started
-            || self.text_state.part_index != Some(part_index);
+        let need_new_message =
+            !self.text_state.started || self.text_state.part_index != Some(part_index);
 
         if need_new_message {
             // Close previous message if exists
@@ -381,8 +382,8 @@ impl AgUiEventStream {
         }
 
         // Check if thinking index changed
-        let need_new_thinking = !self.thinking_state.started
-            || self.thinking_state.index != Some(index);
+        let need_new_thinking =
+            !self.thinking_state.started || self.thinking_state.index != Some(index);
 
         if need_new_thinking {
             // Close previous thinking if exists
@@ -470,11 +471,7 @@ impl AgUiEventStream {
     }
 
     /// Handle tool call arguments delta.
-    fn handle_tool_call_delta(
-        &mut self,
-        args_delta: String,
-        index: usize,
-    ) -> Vec<Box<dyn Event>> {
+    fn handle_tool_call_delta(&mut self, args_delta: String, index: usize) -> Vec<Box<dyn Event>> {
         let mut events: Vec<Box<dyn Event>> = Vec::new();
 
         if let Some(state) = self.tool_calls.get_mut(&index) {
@@ -572,7 +569,9 @@ mod tests {
         stream.before_stream();
         let events = stream.after_stream();
 
-        assert!(events.iter().any(|e| e.event_type() == EventType::RunFinished));
+        assert!(events
+            .iter()
+            .any(|e| e.event_type() == EventType::RunFinished));
     }
 
     #[test]
@@ -617,7 +616,10 @@ mod tests {
         assert_eq!(events.len(), 3);
         assert_eq!(events[0].event_type(), EventType::ThinkingStart);
         assert_eq!(events[1].event_type(), EventType::ThinkingTextMessageStart);
-        assert_eq!(events[2].event_type(), EventType::ThinkingTextMessageContent);
+        assert_eq!(
+            events[2].event_type(),
+            EventType::ThinkingTextMessageContent
+        );
     }
 
     #[test]
@@ -682,7 +684,9 @@ mod tests {
 
         // after_stream should not emit RunFinished
         let after_events = stream.after_stream();
-        assert!(!after_events.iter().any(|e| e.event_type() == EventType::RunFinished));
+        assert!(!after_events
+            .iter()
+            .any(|e| e.event_type() == EventType::RunFinished));
     }
 
     #[test]
@@ -740,9 +744,15 @@ mod tests {
         let events = stream.transform_event(text);
 
         // Should close thinking first
-        assert!(events.iter().any(|e| e.event_type() == EventType::ThinkingTextMessageEnd));
-        assert!(events.iter().any(|e| e.event_type() == EventType::ThinkingEnd));
-        assert!(events.iter().any(|e| e.event_type() == EventType::TextMessageStart));
+        assert!(events
+            .iter()
+            .any(|e| e.event_type() == EventType::ThinkingTextMessageEnd));
+        assert!(events
+            .iter()
+            .any(|e| e.event_type() == EventType::ThinkingEnd));
+        assert!(events
+            .iter()
+            .any(|e| e.event_type() == EventType::TextMessageStart));
     }
 
     #[test]
@@ -760,7 +770,11 @@ mod tests {
 
         // After
         let after = stream.after_stream();
-        assert!(after.iter().any(|e| e.event_type() == EventType::TextMessageEnd));
-        assert!(after.iter().any(|e| e.event_type() == EventType::RunFinished));
+        assert!(after
+            .iter()
+            .any(|e| e.event_type() == EventType::TextMessageEnd));
+        assert!(after
+            .iter()
+            .any(|e| e.event_type() == EventType::RunFinished));
     }
 }

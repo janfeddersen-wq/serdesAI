@@ -140,8 +140,8 @@ impl<T: std::fmt::Debug, Deps> std::fmt::Debug for ApprovalRequiredToolset<T, De
 
 /// Common approval checkers.
 pub mod checkers {
-    use serdes_ai_tools::{RunContext, ToolDefinition};
     use serde_json::Value as JsonValue;
+    use serdes_ai_tools::{RunContext, ToolDefinition};
 
     /// Always require approval.
     pub fn always<Deps>(

@@ -52,20 +52,20 @@ mod provider;
 mod registry;
 
 // Provider implementations
-#[cfg(feature = "openai")]
-mod openai;
 #[cfg(feature = "anthropic")]
 mod anthropic;
-#[cfg(feature = "google")]
-mod google;
 #[cfg(feature = "azure")]
 mod azure;
+#[cfg(feature = "google")]
+mod google;
 #[cfg(feature = "groq")]
 mod groq;
 #[cfg(feature = "mistral")]
 mod mistral;
 #[cfg(feature = "ollama")]
 mod ollama;
+#[cfg(feature = "openai")]
+mod openai;
 
 // OpenAI-compatible providers
 mod compatible;
@@ -75,27 +75,29 @@ mod gateway;
 
 // OAuth utilities
 pub mod oauth;
-pub use oauth::{OAuthConfig, OAuthContext, OAuthError, TokenResponse, run_pkce_flow, refresh_token};
 pub use oauth::config::{chatgpt_oauth_config, claude_code_oauth_config};
+pub use oauth::{
+    refresh_token, run_pkce_flow, OAuthConfig, OAuthContext, OAuthError, TokenResponse,
+};
 
 // Re-exports
 pub use provider::*;
 pub use registry::*;
 
-#[cfg(feature = "openai")]
-pub use openai::OpenAIProvider;
 #[cfg(feature = "anthropic")]
 pub use anthropic::AnthropicProvider;
-#[cfg(feature = "google")]
-pub use google::{GoogleProvider, VertexAIProvider};
 #[cfg(feature = "azure")]
 pub use azure::AzureProvider;
+#[cfg(feature = "google")]
+pub use google::{GoogleProvider, VertexAIProvider};
 #[cfg(feature = "groq")]
 pub use groq::GroqProvider;
 #[cfg(feature = "mistral")]
 pub use mistral::MistralProvider;
 #[cfg(feature = "ollama")]
 pub use ollama::OllamaProvider;
+#[cfg(feature = "openai")]
+pub use openai::OpenAIProvider;
 
 // Compatible providers
 pub use compatible::{
@@ -196,9 +198,7 @@ pub fn from_env() -> ProviderRegistry {
 /// - `gpt-4o` (inferred from model name)
 ///
 /// Returns a tuple of (provider, model_name).
-pub fn infer(
-    model_string: &str,
-) -> Result<(BoxedProvider, String), ProviderError> {
+pub fn infer(model_string: &str) -> Result<(BoxedProvider, String), ProviderError> {
     let registry = from_env();
     registry.infer_provider(model_string)
 }
@@ -206,20 +206,20 @@ pub fn infer(
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::{
-        BoxedProvider, Provider, ProviderConfig, ProviderError, ProviderRegistry,
-        GatewayProvider, from_env, global_registry, infer,
+        from_env, global_registry, infer, BoxedProvider, GatewayProvider, Provider, ProviderConfig,
+        ProviderError, ProviderRegistry,
     };
 
-    #[cfg(feature = "openai")]
-    pub use crate::OpenAIProvider;
     #[cfg(feature = "anthropic")]
     pub use crate::AnthropicProvider;
-    #[cfg(feature = "google")]
-    pub use crate::{GoogleProvider, VertexAIProvider};
     #[cfg(feature = "groq")]
     pub use crate::GroqProvider;
     #[cfg(feature = "ollama")]
     pub use crate::OllamaProvider;
+    #[cfg(feature = "openai")]
+    pub use crate::OpenAIProvider;
+    #[cfg(feature = "google")]
+    pub use crate::{GoogleProvider, VertexAIProvider};
 }
 
 #[cfg(test)]
@@ -232,12 +232,14 @@ mod tests {
         // Should have at least the ollama provider (no API key needed)
         let providers = registry.list();
         // The exact providers depend on env vars, but registry should exist
-        assert!(providers.len() >= 0);
+        // Just verify we can list providers (count depends on env)
+        let _ = providers;
     }
 
     #[test]
     fn test_global_registry() {
         let registry = global_registry();
-        assert!(registry.list().is_empty() || registry.list().len() > 0);
+        // Just verify global registry is accessible
+        let _ = registry.list();
     }
 }

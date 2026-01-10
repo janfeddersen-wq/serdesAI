@@ -906,7 +906,8 @@ mod tests {
         assert!(matches!(event, StreamEvent::MessageStart { .. }));
 
         // Content block start
-        let json = r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
+        let json =
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#;
         let event: StreamEvent = serde_json::from_str(json).unwrap();
         assert!(matches!(event, StreamEvent::ContentBlockStart { .. }));
 

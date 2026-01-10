@@ -9,8 +9,8 @@ use bytes::Bytes;
 use futures::Stream;
 use pin_project_lite::pin_project;
 use serdes_ai_core::messages::{
-    ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent, PartStartEvent, TextPart,
-    ThinkingPart, ToolCallPart,
+    ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent, PartStartEvent, TextPart, ThinkingPart,
+    ToolCallPart,
 };
 use serdes_ai_core::ModelResponsePart;
 use std::collections::HashMap;
@@ -35,14 +35,18 @@ pin_project! {
 /// State for an in-progress part.
 #[derive(Debug, Clone)]
 enum PartState {
-    Text { content: String },
+    Text {
+        content: String,
+    },
     FunctionCall {
         #[allow(dead_code)]
         name: String,
         #[allow(dead_code)]
         args: String,
     },
-    Thinking { content: String },
+    Thinking {
+        content: String,
+    },
 }
 
 impl<S> GoogleStreamParser<S>
@@ -97,12 +101,9 @@ where
                 // Parse the JSON response
                 match serde_json::from_str::<GenerateContentResponse>(json_str) {
                     Ok(response) => {
-                        if let Some(event) = process_response(
-                            &response,
-                            this.parts,
-                            this.next_part_index,
-                            this.done,
-                        ) {
+                        if let Some(event) =
+                            process_response(&response, this.parts, this.next_part_index, this.done)
+                        {
                             return Poll::Ready(Some(event));
                         }
                     }
@@ -210,8 +211,7 @@ fn process_response(
                 let idx = *next_part_index;
                 *next_part_index += 1;
 
-                let tool_part =
-                    ToolCallPart::new(&function_call.name, function_call.args.clone());
+                let tool_part = ToolCallPart::new(&function_call.name, function_call.args.clone());
 
                 parts.insert(
                     idx,

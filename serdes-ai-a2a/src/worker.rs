@@ -143,7 +143,10 @@ where
         }
 
         // Get cancellation token for this task
-        let cancellation_token = self.broker.get_cancellation_token(&task.id).await
+        let cancellation_token = self
+            .broker
+            .get_cancellation_token(&task.id)
+            .await
             .unwrap_or_else(CancellationToken::new);
 
         // Mark task as running
@@ -188,7 +191,10 @@ where
                 if cancellation_token.is_cancelled() {
                     task.force_status(TaskStatus::Cancelled);
                     if let Err(e) = self.storage.update_task(&task).await {
-                        return TaskResult::failure(&task.id, format!("Failed to save cancellation: {}", e));
+                        return TaskResult::failure(
+                            &task.id,
+                            format!("Failed to save cancellation: {}", e),
+                        );
                     }
                     return TaskResult {
                         task_id: task.id,
@@ -206,7 +212,10 @@ where
 
                 task.add_message(response_message.clone());
                 if let Err(e) = task.complete() {
-                    return TaskResult::failure(&task.id, format!("Failed to complete task: {}", e));
+                    return TaskResult::failure(
+                        &task.id,
+                        format!("Failed to complete task: {}", e),
+                    );
                 }
 
                 if let Err(e) = self.storage.update_task(&task).await {
@@ -227,10 +236,7 @@ where
                 if let Err(storage_err) = self.storage.update_task(&task).await {
                     return TaskResult::failure(
                         &task.id,
-                        format!(
-                            "Agent failed: {}. Also failed to save: {}",
-                            e, storage_err
-                        ),
+                        format!("Agent failed: {}. Also failed to save: {}", e, storage_err),
                     );
                 }
 
@@ -282,8 +288,8 @@ mod tests {
         assert!(result.is_success());
         assert!(result.duration_ms.is_none());
 
-        let with_duration = TaskResult::success("task-2", vec![Message::agent("Done!")])
-            .with_duration(100);
+        let with_duration =
+            TaskResult::success("task-2", vec![Message::agent("Done!")]).with_duration(100);
         assert_eq!(with_duration.duration_ms, Some(100));
     }
 }

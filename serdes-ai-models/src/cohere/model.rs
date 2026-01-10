@@ -12,12 +12,19 @@ use bytes::Bytes;
 use futures::Stream;
 use reqwest::Client;
 use serdes_ai_core::{
-    messages::{ModelResponseStreamEvent, TextPart, ToolCallArgs, ToolCallPart, UserContent, UserContentPart},
-    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
-    ModelSettings, RequestUsage,
+    messages::{
+        ModelResponseStreamEvent, TextPart, ToolCallArgs, ToolCallPart, UserContent,
+        UserContentPart,
+    },
+    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
+    RequestUsage,
 };
 use serdes_ai_tools::ToolDefinition;
-use std::{pin::Pin, task::{Context, Poll}, time::Duration};
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 const COHERE_BASE_URL: &str = "https://api.cohere.ai/v2";
 
@@ -75,7 +82,7 @@ impl CohereModel {
             .with_tools(true)
             .with_parallel_tools(true)
             .with_native_structured_output(false);
-        
+
         // Command-R models have good context windows
         if model.contains("command-r-plus") {
             profile.context_window = Some(128_000);
@@ -84,12 +91,15 @@ impl CohereModel {
             profile.context_window = Some(128_000);
             profile.max_tokens = Some(4096);
         }
-        
+
         profile
     }
 
     /// Convert internal messages to Cohere format.
-    fn convert_messages(&self, requests: &[ModelRequest]) -> (String, Option<Vec<ChatMessage>>, Option<String>) {
+    fn convert_messages(
+        &self,
+        requests: &[ModelRequest],
+    ) -> (String, Option<Vec<ChatMessage>>, Option<String>) {
         let mut history = Vec::new();
         let mut system_prompt = None;
         let mut current_message = String::new();
@@ -160,19 +170,26 @@ impl CohereModel {
             }
         }
 
-        let history = if history.is_empty() { None } else { Some(history) };
+        let history = if history.is_empty() {
+            None
+        } else {
+            Some(history)
+        };
         (current_message, history, system_prompt)
     }
 
     /// Convert tool definitions to Cohere format.
     fn convert_tools(&self, tools: &[ToolDefinition]) -> Vec<Tool> {
-        tools.iter().map(|t| Tool {
-            name: t.name.clone(),
-            description: t.description.clone(),
-            parameter_definitions: Some(
-                serde_json::to_value(&t.parameters_json_schema).unwrap_or_default()
-            ),
-        }).collect()
+        tools
+            .iter()
+            .map(|t| Tool {
+                name: t.name.clone(),
+                description: t.description.clone(),
+                parameter_definitions: Some(
+                    serde_json::to_value(&t.parameters_json_schema).unwrap_or_default(),
+                ),
+            })
+            .collect()
     }
 
     /// Build the chat request.
@@ -184,7 +201,7 @@ impl CohereModel {
         stream: bool,
     ) -> ChatRequest {
         let (message, chat_history, preamble) = self.convert_messages(messages);
-        
+
         let tools = if params.tools.is_empty() {
             None
         } else {
@@ -221,7 +238,7 @@ impl CohereModel {
             for tc in tool_calls {
                 parts.push(ModelResponsePart::ToolCall(
                     ToolCallPart::new(&tc.name, ToolCallArgs::Json(tc.parameters))
-                        .with_tool_call_id(tc.id)
+                        .with_tool_call_id(tc.id),
                 ));
             }
         }
@@ -236,7 +253,10 @@ impl CohereModel {
         let usage = resp.meta.and_then(|m| m.tokens).map(|t| RequestUsage {
             request_tokens: t.input_tokens.map(u64::from),
             response_tokens: t.output_tokens.map(u64::from),
-            total_tokens: t.input_tokens.zip(t.output_tokens).map(|(a, b)| u64::from(a) + u64::from(b)),
+            total_tokens: t
+                .input_tokens
+                .zip(t.output_tokens)
+                .map(|(a, b)| u64::from(a) + u64::from(b)),
             cache_creation_tokens: None,
             cache_read_tokens: None,
             details: None,
@@ -260,13 +280,21 @@ impl CohereModel {
                 401 => ModelError::auth(e.message),
                 429 => ModelError::rate_limited(None),
                 404 => ModelError::NotFound(e.message),
-                _ => ModelError::Api { message: e.message, code: None },
+                _ => ModelError::Api {
+                    message: e.message,
+                    code: None,
+                },
             })
             .unwrap_or_else(|_| ModelError::http(status, body))
     }
 
-    async fn send_request(&self, body: &ChatRequest, timeout: Duration) -> Result<reqwest::Response, ModelError> {
-        let response = self.client
+    async fn send_request(
+        &self,
+        body: &ChatRequest,
+        timeout: Duration,
+    ) -> Result<reqwest::Response, ModelError> {
+        let response = self
+            .client
             .post(format!("{}/chat", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -286,9 +314,15 @@ impl CohereModel {
 
 #[async_trait]
 impl Model for CohereModel {
-    fn name(&self) -> &str { &self.model_name }
-    fn system(&self) -> &str { "cohere" }
-    fn profile(&self) -> &ModelProfile { &self.profile }
+    fn name(&self) -> &str {
+        &self.model_name
+    }
+    fn system(&self) -> &str {
+        "cohere"
+    }
+    fn profile(&self) -> &ModelProfile {
+        &self.profile
+    }
 
     async fn request(
         &self,
@@ -297,8 +331,12 @@ impl Model for CohereModel {
         params: &ModelRequestParameters,
     ) -> Result<ModelResponse, ModelError> {
         let body = self.build_request(messages, settings, params, false);
-        let response = self.send_request(&body, settings.timeout.unwrap_or(self.default_timeout)).await?;
-        let resp: ChatResponse = response.json().await
+        let response = self
+            .send_request(&body, settings.timeout.unwrap_or(self.default_timeout))
+            .await?;
+        let resp: ChatResponse = response
+            .json()
+            .await
             .map_err(|e| ModelError::invalid_response(e.to_string()))?;
         self.parse_response(resp)
     }
@@ -310,7 +348,9 @@ impl Model for CohereModel {
         params: &ModelRequestParameters,
     ) -> Result<StreamedResponse, ModelError> {
         let body = self.build_request(messages, settings, params, true);
-        let response = self.send_request(&body, settings.timeout.unwrap_or(self.default_timeout)).await?;
+        let response = self
+            .send_request(&body, settings.timeout.unwrap_or(self.default_timeout))
+            .await?;
         Ok(Box::pin(CohereStreamParser::new(response.bytes_stream())))
     }
 }
@@ -325,7 +365,11 @@ pub struct CohereStreamParser<S> {
 impl<S> CohereStreamParser<S> {
     /// Create a new Cohere stream parser.
     pub fn new(stream: S) -> Self {
-        Self { inner: stream, buffer: String::new(), started: false }
+        Self {
+            inner: stream,
+            buffer: String::new(),
+            started: false,
+        }
     }
 }
 
@@ -364,7 +408,9 @@ impl<S> CohereStreamParser<S> {
             let line = self.buffer[..pos].trim().to_string();
             self.buffer = self.buffer[pos + 1..].to_string();
 
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
 
             if let Ok(event) = serde_json::from_str::<StreamEvent>(&line) {
                 match event.event_type.as_str() {
@@ -375,7 +421,7 @@ impl<S> CohereStreamParser<S> {
                                 self.started = true;
                                 return Some(ModelResponseStreamEvent::part_start(
                                     0,
-                                    ModelResponsePart::Text(TextPart::new(""))
+                                    ModelResponsePart::Text(TextPart::new("")),
                                 ));
                             }
                             return Some(ModelResponseStreamEvent::text_delta(0, &text));

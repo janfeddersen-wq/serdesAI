@@ -221,9 +221,9 @@ impl ManagedPart {
             Self::Text(p) => Some(ModelResponsePart::Text(p.clone())),
             Self::Thinking(p) => Some(ModelResponsePart::Thinking(p.clone())),
             Self::ToolCall(p) => Some(ModelResponsePart::ToolCall(p.clone())),
-            Self::ToolCallAccumulating(acc) => acc
-                .to_tool_call_part()
-                .map(ModelResponsePart::ToolCall),
+            Self::ToolCallAccumulating(acc) => {
+                acc.to_tool_call_part().map(ModelResponsePart::ToolCall)
+            }
             Self::File(p) => Some(ModelResponsePart::File(p.clone())),
             Self::BuiltinToolCall(p) => Some(ModelResponsePart::BuiltinToolCall(p.clone())),
             Self::BuiltinToolCallAccumulating(acc) => acc
@@ -305,7 +305,10 @@ impl ModelResponsePartsManager {
     /// are still accumulating will be included if they have a tool name.
     #[must_use]
     pub fn get_parts(&self) -> Vec<ModelResponsePart> {
-        self.parts.iter().filter_map(ManagedPart::to_response_part).collect()
+        self.parts
+            .iter()
+            .filter_map(ManagedPart::to_response_part)
+            .collect()
     }
 
     /// Get a reference to the internal parts.
@@ -406,10 +409,8 @@ impl ModelResponsePartsManager {
 
         let mut events = vec![];
 
-        let (idx, is_new) = self.get_or_create_part_index(
-            vendor_part_id,
-            ManagedPart::is_text,
-            || {
+        let (idx, is_new) =
+            self.get_or_create_part_index(vendor_part_id, ManagedPart::is_text, || {
                 let mut part = TextPart::new("");
                 if let Some(ref id) = id {
                     part = part.with_id(id.clone());
@@ -418,8 +419,7 @@ impl ModelResponsePartsManager {
                     part = part.with_provider_details(details.clone());
                 }
                 ManagedPart::Text(part)
-            },
-        );
+            });
 
         // Update the part
         if let ManagedPart::Text(ref mut text_part) = self.parts[idx] {
@@ -607,10 +607,8 @@ impl ModelResponsePartsManager {
     ) -> Vec<ModelResponseStreamEvent> {
         let mut events = vec![];
 
-        let (idx, is_new) = self.get_or_create_part_index(
-            vendor_part_id,
-            ManagedPart::is_thinking,
-            || {
+        let (idx, is_new) =
+            self.get_or_create_part_index(vendor_part_id, ManagedPart::is_thinking, || {
                 let mut part = ThinkingPart::new("");
                 if let Some(ref id) = id {
                     part = part.with_id(id.clone());
@@ -625,8 +623,7 @@ impl ModelResponsePartsManager {
                     part = part.with_provider_details(details.clone());
                 }
                 ManagedPart::Thinking(part)
-            },
-        );
+            });
 
         // Update the part
         if let ManagedPart::Thinking(ref mut thinking_part) = self.parts[idx] {
@@ -688,16 +685,13 @@ impl ModelResponsePartsManager {
         provider_details: Option<Map<String, Value>>,
     ) -> Option<ModelResponseStreamEvent> {
         // Find or create the part
-        let (idx, _) = self.get_or_create_part_index(
-            vendor_part_id,
-            ManagedPart::is_tool_call,
-            || {
+        let (idx, _) =
+            self.get_or_create_part_index(vendor_part_id, ManagedPart::is_tool_call, || {
                 let mut acc = ToolCallAccumulator::new();
                 acc.tool_call_id = tool_call_id.clone();
                 acc.provider_details = provider_details.clone();
                 ManagedPart::ToolCallAccumulating(acc)
-            },
-        );
+            });
 
         // First, update the accumulator and check if we should convert
         let maybe_new_tool_call = match &mut self.parts[idx] {
@@ -1209,7 +1203,9 @@ mod tests {
         }
 
         // Should have a thinking part
-        let has_thinking = parts.iter().any(|p| matches!(p, ModelResponsePart::Thinking(_)));
+        let has_thinking = parts
+            .iter()
+            .any(|p| matches!(p, ModelResponsePart::Thinking(_)));
         assert!(has_thinking);
     }
 

@@ -254,7 +254,7 @@ where
     }
 
     /// Build the system prompt for a run.
-    /// 
+    ///
     /// Static prompts are pre-joined at build time for efficiency.
     /// Only dynamic prompts need to be evaluated per-run.
     pub(crate) async fn build_system_prompt(&self, ctx: &RunContext<Deps>) -> String {
@@ -296,7 +296,7 @@ where
     }
 
     /// Get the cached tool definitions.
-    /// 
+    ///
     /// These are pre-computed at build time to avoid cloning on every step.
     pub(crate) fn tool_definitions(&self) -> Arc<Vec<ToolDefinition>> {
         Arc::clone(&self.cached_tool_defs)

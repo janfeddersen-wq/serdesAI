@@ -37,11 +37,11 @@ use std::time::Duration;
 use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::ModelProfile;
-use serdes_ai_core::{
-    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
-    ModelSettings, RequestUsage, TextPart, ToolCallPart, UserContent, UserContentPart,
-};
 use serdes_ai_core::messages::ImageContent;
+use serdes_ai_core::{
+    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
+    RequestUsage, TextPart, ToolCallPart, UserContent, UserContentPart,
+};
 
 /// Ollama model client.
 #[derive(Debug, Clone)]
@@ -78,8 +78,8 @@ impl OllamaModel {
 
     /// Create from environment variable `OLLAMA_HOST`.
     pub fn from_env(model_name: impl Into<String>) -> Result<Self, ModelError> {
-        let base_url = std::env::var("OLLAMA_HOST")
-            .unwrap_or_else(|_| Self::DEFAULT_BASE_URL.to_string());
+        let base_url =
+            std::env::var("OLLAMA_HOST").unwrap_or_else(|_| Self::DEFAULT_BASE_URL.to_string());
         Ok(Self::new(model_name).with_base_url(base_url))
     }
 
@@ -276,7 +276,11 @@ impl OllamaModel {
                     }
                 }
 
-                let images = if images.is_empty() { None } else { Some(images) };
+                let images = if images.is_empty() {
+                    None
+                } else {
+                    Some(images)
+                };
                 Ok((text, images))
             }
         }
@@ -292,8 +296,7 @@ impl OllamaModel {
                 function: types::FunctionDef {
                     name: t.name.clone(),
                     description: t.description.clone(),
-                    parameters: serde_json::to_value(&t.parameters_json_schema)
-                        .unwrap_or_default(),
+                    parameters: serde_json::to_value(&t.parameters_json_schema).unwrap_or_default(),
                 },
             })
             .collect()
@@ -315,7 +318,9 @@ impl OllamaModel {
 
         // Text content
         if !response.message.content.is_empty() {
-            parts.push(ModelResponsePart::Text(TextPart::new(response.message.content)));
+            parts.push(ModelResponsePart::Text(TextPart::new(
+                response.message.content,
+            )));
         }
 
         // Tool calls
@@ -435,15 +440,13 @@ mod tests {
 
     #[test]
     fn test_ollama_custom_url() {
-        let model = OllamaModel::new("mistral")
-            .with_base_url("http://192.168.1.100:11434");
+        let model = OllamaModel::new("mistral").with_base_url("http://192.168.1.100:11434");
         assert_eq!(model.base_url, "http://192.168.1.100:11434");
     }
 
     #[test]
     fn test_ollama_with_keep_alive() {
-        let model = OllamaModel::new("phi3")
-            .with_keep_alive("10m");
+        let model = OllamaModel::new("phi3").with_keep_alive("10m");
 
         assert_eq!(model.keep_alive, Some("10m".to_string()));
     }

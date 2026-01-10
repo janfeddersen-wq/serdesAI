@@ -114,10 +114,7 @@ where
         let arrow = if options.curved_edges { "-..->" } else { "-->" };
 
         if let Some(label) = &edge.label {
-            output.push_str(&format!(
-                "    {} {}|{}| {}\n",
-                from_id, arrow, label, to_id
-            ));
+            output.push_str(&format!("    {} {}|{}| {}\n", from_id, arrow, label, to_id));
         } else {
             output.push_str(&format!("    {} {} {}\n", from_id, arrow, to_id));
         }
@@ -163,10 +160,7 @@ pub fn generate_flowchart(
 }
 
 /// Generate a state diagram.
-pub fn generate_state_diagram(
-    _states: &[&str],
-    transitions: &[(&str, &str, &str)],
-) -> String {
+pub fn generate_state_diagram(_states: &[&str], transitions: &[(&str, &str, &str)]) -> String {
     let mut output = String::new();
 
     output.push_str("stateDiagram-v2\n");
@@ -192,7 +186,13 @@ pub fn generate_state_diagram(
 /// Sanitize a string for use as a Mermaid ID.
 fn sanitize_id(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -405,10 +405,7 @@ mod tests {
     fn test_flowchart() {
         let diagram = generate_flowchart(
             &["start", "process", "end"],
-            &[
-                ("start", "process", None),
-                ("process", "end", Some("done")),
-            ],
+            &[("start", "process", None), ("process", "end", Some("done"))],
             &MermaidOptions::new(),
         );
 

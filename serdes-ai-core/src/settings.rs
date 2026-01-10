@@ -42,7 +42,10 @@ pub struct ModelSettings {
     pub seed: Option<u64>,
 
     /// Request timeout.
-    #[serde(skip_serializing_if = "Option::is_none", with = "option_duration_serde")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "option_duration_serde"
+    )]
     pub timeout: Option<Duration>,
 
     /// Whether to allow parallel tool calls.
@@ -265,9 +268,7 @@ mod tests {
 
     #[test]
     fn test_model_settings_stop() {
-        let settings = ModelSettings::new()
-            .add_stop("\n\n")
-            .add_stop("END");
+        let settings = ModelSettings::new().add_stop("\n\n").add_stop("END");
 
         assert_eq!(
             settings.stop,
@@ -277,13 +278,9 @@ mod tests {
 
     #[test]
     fn test_model_settings_merge() {
-        let base = ModelSettings::new()
-            .max_tokens(1000)
-            .temperature(0.5);
+        let base = ModelSettings::new().max_tokens(1000).temperature(0.5);
 
-        let override_settings = ModelSettings::new()
-            .temperature(0.8)
-            .top_p(0.9);
+        let override_settings = ModelSettings::new().temperature(0.8).top_p(0.9);
 
         let merged = base.merge(&override_settings);
 

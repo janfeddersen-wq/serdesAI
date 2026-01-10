@@ -47,8 +47,7 @@ impl GroqModel {
 
     /// Create a new Groq model with an API key.
     pub fn new(model_name: impl Into<String>, api_key: impl Into<String>) -> Self {
-        let inner = OpenAIChatModel::new(model_name, api_key)
-            .with_base_url(Self::BASE_URL);
+        let inner = OpenAIChatModel::new(model_name, api_key).with_base_url(Self::BASE_URL);
         Self { inner }
     }
 

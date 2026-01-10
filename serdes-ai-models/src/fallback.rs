@@ -46,9 +46,7 @@ impl RetryOn {
             RetryOn::AnyError => true,
             RetryOn::RateLimits => matches!(error, ModelError::RateLimited { .. }),
             RetryOn::Transient => match error {
-                ModelError::Timeout(_)
-                | ModelError::Connection(_)
-                | ModelError::Network(_) => true,
+                ModelError::Timeout(_) | ModelError::Connection(_) | ModelError::Network(_) => true,
                 ModelError::Http { status, .. } => *status >= 500,
                 _ => false,
             },
@@ -234,9 +232,7 @@ impl Model for FallbackModel {
 
         // This shouldn't be reached due to the is_last check above,
         // but handle it gracefully just in case
-        Err(last_error.unwrap_or_else(|| {
-            ModelError::configuration("No models in fallback chain")
-        }))
+        Err(last_error.unwrap_or_else(|| ModelError::configuration("No models in fallback chain")))
     }
 
     async fn request_stream(
@@ -297,9 +293,7 @@ impl Model for FallbackModel {
             }
         }
 
-        Err(last_error.unwrap_or_else(|| {
-            ModelError::configuration("No models in fallback chain")
-        }))
+        Err(last_error.unwrap_or_else(|| ModelError::configuration("No models in fallback chain")))
     }
 }
 
@@ -360,19 +354,21 @@ mod tests {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             // Return a new instance of the error type
             match &self.error {
-                ModelError::RateLimited { retry_after } => {
-                    Err(ModelError::RateLimited { retry_after: *retry_after })
-                }
+                ModelError::RateLimited { retry_after } => Err(ModelError::RateLimited {
+                    retry_after: *retry_after,
+                }),
                 ModelError::Timeout(d) => Err(ModelError::Timeout(*d)),
                 ModelError::Connection(msg) => Err(ModelError::Connection(msg.clone())),
                 ModelError::Authentication(msg) => Err(ModelError::Authentication(msg.clone())),
-                ModelError::Http { status, body, headers } => {
-                    Err(ModelError::Http {
-                        status: *status,
-                        body: body.clone(),
-                        headers: headers.clone(),
-                    })
-                }
+                ModelError::Http {
+                    status,
+                    body,
+                    headers,
+                } => Err(ModelError::Http {
+                    status: *status,
+                    body: body.clone(),
+                    headers: headers.clone(),
+                }),
                 _ => Err(ModelError::api("Generic error")),
             }
         }
@@ -532,7 +528,10 @@ mod tests {
         let settings = ModelSettings::default();
         let params = ModelRequestParameters::new();
 
-        let response = fallback.request(&messages, &settings, &params).await.unwrap();
+        let response = fallback
+            .request(&messages, &settings, &params)
+            .await
+            .unwrap();
 
         // First model should succeed, second should not be called
         assert_eq!(call_count1.load(Ordering::SeqCst), 1);
@@ -560,7 +559,10 @@ mod tests {
         let settings = ModelSettings::default();
         let params = ModelRequestParameters::new();
 
-        let response = fallback.request(&messages, &settings, &params).await.unwrap();
+        let response = fallback
+            .request(&messages, &settings, &params)
+            .await
+            .unwrap();
 
         // Both models should be called
         assert_eq!(call_count1.load(Ordering::SeqCst), 1);
@@ -596,7 +598,10 @@ mod tests {
 
         // Should return error
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ModelError::RateLimited { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            ModelError::RateLimited { .. }
+        ));
     }
 
     #[tokio::test]
@@ -658,7 +663,10 @@ mod tests {
         let settings = ModelSettings::default();
         let params = ModelRequestParameters::new();
 
-        let response = fallback.request(&messages, &settings, &params).await.unwrap();
+        let response = fallback
+            .request(&messages, &settings, &params)
+            .await
+            .unwrap();
 
         // Both models should be called
         assert_eq!(call_count1.load(Ordering::SeqCst), 1);
@@ -687,7 +695,10 @@ mod tests {
         let settings = ModelSettings::default();
         let params = ModelRequestParameters::new();
 
-        let response = fallback.request(&messages, &settings, &params).await.unwrap();
+        let response = fallback
+            .request(&messages, &settings, &params)
+            .await
+            .unwrap();
 
         assert_eq!(call_count1.load(Ordering::SeqCst), 1);
         assert_eq!(call_count2.load(Ordering::SeqCst), 1);
@@ -722,7 +733,10 @@ mod tests {
         assert_eq!(call_count2.load(Ordering::SeqCst), 0);
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ModelError::RateLimited { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            ModelError::RateLimited { .. }
+        ));
     }
 
     #[tokio::test]
@@ -735,17 +749,17 @@ mod tests {
         let call_count2 = model2.call_count.clone();
         let call_count3 = model3.call_count.clone();
 
-        let fallback = FallbackModel::new(vec![
-            Box::new(model1),
-            Box::new(model2),
-            Box::new(model3),
-        ]);
+        let fallback =
+            FallbackModel::new(vec![Box::new(model1), Box::new(model2), Box::new(model3)]);
 
         let messages = vec![ModelRequest::new()];
         let settings = ModelSettings::default();
         let params = ModelRequestParameters::new();
 
-        let response = fallback.request(&messages, &settings, &params).await.unwrap();
+        let response = fallback
+            .request(&messages, &settings, &params)
+            .await
+            .unwrap();
 
         // All three models should be called
         assert_eq!(call_count1.load(Ordering::SeqCst), 1);

@@ -306,14 +306,8 @@ mod tests {
         let delay = FixedDelay::new(Duration::from_secs(1), 3);
 
         let error = RetryableError::http(500, "error");
-        assert_eq!(
-            delay.should_retry(&error, 1),
-            Some(Duration::from_secs(1))
-        );
-        assert_eq!(
-            delay.should_retry(&error, 3),
-            Some(Duration::from_secs(1))
-        );
+        assert_eq!(delay.should_retry(&error, 1), Some(Duration::from_secs(1)));
+        assert_eq!(delay.should_retry(&error, 3), Some(Duration::from_secs(1)));
         assert_eq!(delay.should_retry(&error, 4), None);
     }
 

@@ -2,9 +2,9 @@
 //!
 //! This module provides utilities for parsing SSE streams from HTTP responses.
 
-use bytes::Bytes;
 use crate::error::{StreamError, StreamResult};
 use crate::partial_response::ResponseDelta;
+use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
@@ -98,7 +98,9 @@ impl SseParser {
         let mut events = self.parse_buffer()?;
 
         if !self.buffer.trim().is_empty() {
-            if let Some(event) = self.parse_event(self.buffer.trim_end_matches(|c| c == '\n' || c == '\r')) {
+            if let Some(event) =
+                self.parse_event(self.buffer.trim_end_matches(|c| c == '\n' || c == '\r'))
+            {
                 if let Some(id) = &event.id {
                     self.last_event_id = Some(id.clone());
                 }
@@ -319,7 +321,8 @@ impl SseEventExt for SseEvent {
             if json.get("type").and_then(|t| t.as_str()) == Some("content_block_delta") {
                 if let Some(delta) = json.get("delta") {
                     if let Some(text) = delta.get("text").and_then(|t| t.as_str()) {
-                        let index = json.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                        let index =
+                            json.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
                         return Some(ResponseDelta::Text {
                             index,
                             content: text.to_string(),
@@ -401,7 +404,9 @@ mod tests {
     #[test]
     fn test_sse_parser_ignores_comments() {
         let mut parser = SseParser::new();
-        parser.feed_str(": this is a comment\ndata: hello\n\n").unwrap();
+        parser
+            .feed_str(": this is a comment\ndata: hello\n\n")
+            .unwrap();
 
         let event = parser.next_event().unwrap();
         assert_eq!(event.data, "hello");
@@ -447,9 +452,7 @@ mod tests {
         assert!(matches!(delta, ResponseDelta::Finish { .. }));
 
         // Test OpenAI format
-        let openai_event = SseEvent::data(
-            r#"{"choices":[{"delta":{"content":"Hello"}}]}"#,
-        );
+        let openai_event = SseEvent::data(r#"{"choices":[{"delta":{"content":"Hello"}}]}"#);
         let delta = openai_event.to_response_delta().unwrap();
         if let ResponseDelta::Text { content, .. } = delta {
             assert_eq!(content, "Hello");

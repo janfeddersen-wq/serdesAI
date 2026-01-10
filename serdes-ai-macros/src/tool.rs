@@ -97,12 +97,10 @@ pub fn tool_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream 
 
     for meta in args {
         match meta {
-            Meta::NameValue(nv) if nv.path.is_ident("name") => {
-                match parse_lit_str(&nv.value) {
-                    Ok(value) => tool_name = value,
-                    Err(err) => return err.to_compile_error().into(),
-                }
-            }
+            Meta::NameValue(nv) if nv.path.is_ident("name") => match parse_lit_str(&nv.value) {
+                Ok(value) => tool_name = value,
+                Err(err) => return err.to_compile_error().into(),
+            },
             Meta::NameValue(nv) if nv.path.is_ident("description") => {
                 match parse_lit_str(&nv.value) {
                     Ok(value) => description = value,
@@ -112,12 +110,10 @@ pub fn tool_attribute_impl(attr: TokenStream, item: TokenStream) -> TokenStream 
             Meta::Path(path) if path.is_ident("strict") => {
                 strict = true;
             }
-            Meta::NameValue(nv) if nv.path.is_ident("strict") => {
-                match parse_lit_bool(&nv.value) {
-                    Ok(value) => strict = value,
-                    Err(err) => return err.to_compile_error().into(),
-                }
-            }
+            Meta::NameValue(nv) if nv.path.is_ident("strict") => match parse_lit_bool(&nv.value) {
+                Ok(value) => strict = value,
+                Err(err) => return err.to_compile_error().into(),
+            },
             _ => {
                 return Error::new_spanned(meta, "unknown `tool` attribute")
                     .to_compile_error()
@@ -340,7 +336,10 @@ fn is_option_type(ty: &Type) -> bool {
 fn extract_pat_ident(pat: &Pat) -> Result<syn::Ident, Error> {
     match pat {
         Pat::Ident(ident) => Ok(ident.ident.clone()),
-        _ => Err(Error::new_spanned(pat, "tool parameters must be identifiers")),
+        _ => Err(Error::new_spanned(
+            pat,
+            "tool parameters must be identifiers",
+        )),
     }
 }
 

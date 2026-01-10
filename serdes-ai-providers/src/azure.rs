@@ -22,10 +22,7 @@ impl AzureProvider {
     pub const DEFAULT_API_VERSION: &'static str = "2024-08-01-preview";
 
     /// Create a new Azure OpenAI provider.
-    pub fn new(
-        api_key: impl Into<String>,
-        resource_name: impl Into<String>,
-    ) -> Self {
+    pub fn new(api_key: impl Into<String>, resource_name: impl Into<String>) -> Self {
         let config = ProviderConfig::new().with_api_key(api_key);
         Self {
             client: config.build_client(),
@@ -38,16 +35,20 @@ impl AzureProvider {
     /// Create from environment variables.
     pub fn from_env() -> Result<Self, ProviderError> {
         let config = ProviderConfig::from_env("AZURE_OPENAI");
-        let api_key = config.api_key.clone()
+        let api_key = config
+            .api_key
+            .clone()
             .ok_or(ProviderError::MissingApiKey("AZURE_OPENAI_API_KEY"))?;
 
         let resource_name = std::env::var("AZURE_OPENAI_RESOURCE")
-            .or_else(|_| std::env::var("AZURE_OPENAI_ENDPOINT").map(|e| {
-                // Extract resource name from endpoint URL
-                e.replace("https://", "")
-                    .replace(".openai.azure.com", "")
-                    .replace(".openai.azure.com/", "")
-            }))
+            .or_else(|_| {
+                std::env::var("AZURE_OPENAI_ENDPOINT").map(|e| {
+                    // Extract resource name from endpoint URL
+                    e.replace("https://", "")
+                        .replace(".openai.azure.com", "")
+                        .replace(".openai.azure.com/", "")
+                })
+            })
             .map_err(|_| ProviderError::MissingConfig("AZURE_OPENAI_RESOURCE".to_string()))?;
 
         Ok(Self::new(api_key, resource_name))
@@ -92,10 +93,7 @@ impl Provider for AzureProvider {
             }
         }
 
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
 
         headers
     }

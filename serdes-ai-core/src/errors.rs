@@ -272,7 +272,11 @@ impl fmt::Display for ModelHttpError {
             HttpErrorKind::Request => write!(f, "HTTP request error: {}", self.message),
             HttpErrorKind::Response { status } => {
                 if let Some(status) = status {
-                    write!(f, "HTTP response error (status {}): {}", status, self.message)
+                    write!(
+                        f,
+                        "HTTP response error (status {}): {}",
+                        status, self.message
+                    )
                 } else {
                     write!(f, "HTTP response error: {}", self.message)
                 }

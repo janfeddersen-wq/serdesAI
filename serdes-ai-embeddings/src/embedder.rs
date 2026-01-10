@@ -92,20 +92,14 @@ impl Embedder {
     }
 
     /// Embed multiple documents.
-    pub async fn embed_documents(
-        &self,
-        docs: Vec<String>,
-    ) -> EmbeddingResult<EmbeddingOutput> {
+    pub async fn embed_documents(&self, docs: Vec<String>) -> EmbeddingResult<EmbeddingOutput> {
         self.model
             .embed(EmbedInput::Documents(docs), &self.settings)
             .await
     }
 
     /// Embed with custom input.
-    pub async fn embed(
-        &self,
-        input: impl Into<EmbedInput>,
-    ) -> EmbeddingResult<EmbeddingOutput> {
+    pub async fn embed(&self, input: impl Into<EmbedInput>) -> EmbeddingResult<EmbeddingOutput> {
         self.model.embed(input.into(), &self.settings).await
     }
 
@@ -280,9 +274,7 @@ mod tests {
 
     #[test]
     fn test_embedder_builder() {
-        let builder = EmbedderBuilder::new()
-            .model("openai:test")
-            .dimensions(256);
+        let builder = EmbedderBuilder::new().model("openai:test").dimensions(256);
 
         assert_eq!(builder.model_name, Some("openai:test".to_string()));
         assert_eq!(builder.dimensions, Some(256));

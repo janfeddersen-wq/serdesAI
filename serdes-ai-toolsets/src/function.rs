@@ -130,10 +130,7 @@ impl<Deps: Send + Sync + 'static> AbstractToolset<Deps> for FunctionToolset<Deps
             .into_iter()
             .map(|def| {
                 let name = def.name.clone();
-                let max_retries = self
-                    .registry
-                    .max_retries(&name)
-                    .unwrap_or(self.max_retries);
+                let max_retries = self.registry.max_retries(&name).unwrap_or(self.max_retries);
                 (
                     name,
                     ToolsetTool {
@@ -214,15 +211,10 @@ where
     Deps: Send + Sync,
 {
     fn definition(&self) -> ToolDefinition {
-        ToolDefinition::new(&self.name, &self.description)
-            .with_parameters(self.parameters.clone())
+        ToolDefinition::new(&self.name, &self.description).with_parameters(self.parameters.clone())
     }
 
-    async fn call(
-        &self,
-        ctx: &RunContext<Deps>,
-        args: JsonValue,
-    ) -> Result<ToolReturn, ToolError> {
+    async fn call(&self, ctx: &RunContext<Deps>, args: JsonValue) -> Result<ToolReturn, ToolError> {
         (self.function)(ctx, args).await
     }
 
@@ -250,11 +242,13 @@ mod tests {
     #[async_trait]
     impl Tool<()> for EchoTool {
         fn definition(&self) -> ToolDefinition {
-            ToolDefinition::new("echo", "Echo the message")
-                .with_parameters(
-                    ObjectJsonSchema::new()
-                        .with_property("msg", PropertySchema::string("Message").build(), true),
-                )
+            ToolDefinition::new("echo", "Echo the message").with_parameters(
+                ObjectJsonSchema::new().with_property(
+                    "msg",
+                    PropertySchema::string("Message").build(),
+                    true,
+                ),
+            )
         }
 
         async fn call(
@@ -288,9 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_function_toolset_get_tools() {
-        let toolset: FunctionToolset<()> = FunctionToolset::new()
-            .with_id("test")
-            .tool(EchoTool);
+        let toolset: FunctionToolset<()> = FunctionToolset::new().with_id("test").tool(EchoTool);
 
         let ctx = RunContext::minimal("test");
         let tools = toolset.get_tools(&ctx).await.unwrap();

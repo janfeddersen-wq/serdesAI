@@ -8,11 +8,11 @@ use crate::error::{McpError, McpResult};
 use crate::types::{McpTool, ToolResultContent};
 use async_trait::async_trait;
 use parking_lot::RwLock;
+use serde_json::Value as JsonValue;
 use serdes_ai_tools::definition::ToolDefinition;
 use serdes_ai_tools::return_types::ToolReturn;
 use serdes_ai_tools::ToolError;
 use serdes_ai_toolsets::abstract_toolset::{AbstractToolset, ToolsetTool};
-use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -91,23 +91,16 @@ impl<Deps> McpToolset<Deps> {
         self.tools_cache.read().clone()
     }
 
-    fn convert_to_toolset_tool(
-        &self,
-        mcp_tool: &McpTool,
-    ) -> ToolsetTool {
+    fn convert_to_toolset_tool(&self, mcp_tool: &McpTool) -> ToolsetTool {
         let definition = ToolDefinition::new(
             mcp_tool.name.clone(),
             mcp_tool.description.clone().unwrap_or_default(),
         );
 
-        ToolsetTool::new(definition)
-            .with_max_retries(2)
+        ToolsetTool::new(definition).with_max_retries(2)
     }
 
-    fn convert_tools_to_map(
-        &self,
-        tools: &[McpTool],
-    ) -> HashMap<String, ToolsetTool> {
+    fn convert_tools_to_map(&self, tools: &[McpTool]) -> HashMap<String, ToolsetTool> {
         tools
             .iter()
             .map(|t| (t.name.clone(), self.convert_to_toolset_tool(t)))
@@ -135,10 +128,13 @@ impl<Deps: Send + Sync + 'static> AbstractToolset<Deps> for McpToolset<Deps> {
 
         // Fetch from server
         let client = self.client.lock().await;
-        let tools = client.list_tools().await.map_err(|e| ToolError::ExecutionFailed {
-            message: e.to_string(),
-            retryable: false,
-        })?;
+        let tools = client
+            .list_tools()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: e.to_string(),
+                retryable: false,
+            })?;
 
         // Update cache
         *self.tools_cache.write() = Some(tools.clone());
@@ -154,13 +150,14 @@ impl<Deps: Send + Sync + 'static> AbstractToolset<Deps> for McpToolset<Deps> {
         _tool: &ToolsetTool,
     ) -> Result<ToolReturn, ToolError> {
         let client = self.client.lock().await;
-        let result = client
-            .call_tool(name, args)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed {
-                message: e.to_string(),
-                retryable: matches!(e, McpError::Timeout | McpError::Transport(_)),
-            })?;
+        let result =
+            client
+                .call_tool(name, args)
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: e.to_string(),
+                    retryable: matches!(e, McpError::Timeout | McpError::Transport(_)),
+                })?;
 
         if result.is_error {
             return Err(ToolError::ExecutionFailed {
@@ -204,20 +201,26 @@ impl<Deps: Send + Sync + 'static> AbstractToolset<Deps> for McpToolset<Deps> {
         // Ensure client is initialized
         let client = self.client.lock().await;
         if !client.is_initialized().await {
-            client.initialize().await.map_err(|e| ToolError::ExecutionFailed {
-                message: e.to_string(),
-                retryable: false,
-            })?;
+            client
+                .initialize()
+                .await
+                .map_err(|e| ToolError::ExecutionFailed {
+                    message: e.to_string(),
+                    retryable: false,
+                })?;
         }
         Ok(())
     }
 
     async fn exit(&self) -> Result<(), ToolError> {
         let client = self.client.lock().await;
-        client.close().await.map_err(|e| ToolError::ExecutionFailed {
-            message: e.to_string(),
-            retryable: false,
-        })
+        client
+            .close()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                message: e.to_string(),
+                retryable: false,
+            })
     }
 }
 
@@ -232,11 +235,7 @@ pub struct McpServerConfig {
 
 impl McpServerConfig {
     /// Create a stdio server config.
-    pub fn stdio(
-        name: impl Into<String>,
-        command: impl Into<String>,
-        args: Vec<String>,
-    ) -> Self {
+    pub fn stdio(name: impl Into<String>, command: impl Into<String>, args: Vec<String>) -> Self {
         Self {
             name: name.into(),
             transport: McpTransportConfig::Stdio {
@@ -278,9 +277,7 @@ pub enum McpTransportConfig {
 }
 
 /// Load MCP servers from configuration.
-pub async fn load_mcp_servers(
-    configs: Vec<McpServerConfig>,
-) -> McpResult<Vec<McpToolset<()>>> {
+pub async fn load_mcp_servers(configs: Vec<McpServerConfig>) -> McpResult<Vec<McpToolset<()>>> {
     let mut toolsets = Vec::new();
 
     for config in configs {
@@ -352,11 +349,8 @@ mod tests {
 
     #[test]
     fn test_convert_tool() {
-        let mcp_tool = McpTool::new(
-            "search",
-            serde_json::json!({"type": "object"}),
-        )
-        .with_description("Search for things");
+        let mcp_tool = McpTool::new("search", serde_json::json!({"type": "object"}))
+            .with_description("Search for things");
 
         // We can't easily test the full conversion without a client,
         // but we can check the tool is well-formed

@@ -58,7 +58,10 @@ impl Provider for OpenAICompatibleProvider {
     }
 
     fn base_url(&self) -> &str {
-        self.config.base_url.as_deref().unwrap_or(&self.default_base_url)
+        self.config
+            .base_url
+            .as_deref()
+            .unwrap_or(&self.default_base_url)
     }
 
     fn client(&self) -> &Client {
@@ -75,10 +78,7 @@ impl Provider for OpenAICompatibleProvider {
             }
         }
 
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
 
         headers
     }
@@ -114,13 +114,10 @@ pub struct TogetherProvider {
 impl TogetherProvider {
     /// Create a new Together AI provider.
     pub fn new(api_key: impl Into<String>) -> Self {
-        let inner = OpenAICompatibleProvider::new(
-            "together",
-            api_key,
-            "https://api.together.xyz/v1",
-        )
-        .with_env_prefix("TOGETHER")
-        .with_aliases(vec!["together-ai"]);
+        let inner =
+            OpenAICompatibleProvider::new("together", api_key, "https://api.together.xyz/v1")
+                .with_env_prefix("TOGETHER")
+                .with_aliases(vec!["together-ai"]);
 
         Self { inner }
     }
@@ -128,19 +125,32 @@ impl TogetherProvider {
     /// Create from environment variables.
     pub fn from_env() -> Result<Self, ProviderError> {
         let config = ProviderConfig::from_env("TOGETHER");
-        let api_key = config.api_key
+        let api_key = config
+            .api_key
             .ok_or(ProviderError::MissingApiKey("TOGETHER_API_KEY"))?;
         Ok(Self::new(api_key))
     }
 }
 
 impl Provider for TogetherProvider {
-    fn name(&self) -> &str { self.inner.name() }
-    fn base_url(&self) -> &str { self.inner.base_url() }
-    fn client(&self) -> &Client { self.inner.client() }
-    fn default_headers(&self) -> HeaderMap { self.inner.default_headers() }
-    fn is_configured(&self) -> bool { self.inner.is_configured() }
-    fn aliases(&self) -> &[&str] { self.inner.aliases() }
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn base_url(&self) -> &str {
+        self.inner.base_url()
+    }
+    fn client(&self) -> &Client {
+        self.inner.client()
+    }
+    fn default_headers(&self) -> HeaderMap {
+        self.inner.default_headers()
+    }
+    fn is_configured(&self) -> bool {
+        self.inner.is_configured()
+    }
+    fn aliases(&self) -> &[&str] {
+        self.inner.aliases()
+    }
 
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
         let mut profile = ModelProfile::default();
@@ -194,20 +204,35 @@ impl FireworksProvider {
     /// Create from environment variables.
     pub fn from_env() -> Result<Self, ProviderError> {
         let config = ProviderConfig::from_env("FIREWORKS");
-        let api_key = config.api_key
+        let api_key = config
+            .api_key
             .ok_or(ProviderError::MissingApiKey("FIREWORKS_API_KEY"))?;
         Ok(Self::new(api_key))
     }
 }
 
 impl Provider for FireworksProvider {
-    fn name(&self) -> &str { "fireworks" }
-    fn base_url(&self) -> &str { self.inner.base_url() }
-    fn client(&self) -> &Client { self.inner.client() }
-    fn default_headers(&self) -> HeaderMap { self.inner.default_headers() }
-    fn model_profile(&self, model_name: &str) -> Option<ModelProfile> { self.inner.model_profile(model_name) }
-    fn is_configured(&self) -> bool { self.inner.is_configured() }
-    fn aliases(&self) -> &[&str] { &[] }
+    fn name(&self) -> &str {
+        "fireworks"
+    }
+    fn base_url(&self) -> &str {
+        self.inner.base_url()
+    }
+    fn client(&self) -> &Client {
+        self.inner.client()
+    }
+    fn default_headers(&self) -> HeaderMap {
+        self.inner.default_headers()
+    }
+    fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
+        self.inner.model_profile(model_name)
+    }
+    fn is_configured(&self) -> bool {
+        self.inner.is_configured()
+    }
+    fn aliases(&self) -> &[&str] {
+        &[]
+    }
 }
 
 // ============================================================================
@@ -223,12 +248,9 @@ pub struct DeepSeekProvider {
 impl DeepSeekProvider {
     /// Create a new DeepSeek provider.
     pub fn new(api_key: impl Into<String>) -> Self {
-        let inner = OpenAICompatibleProvider::new(
-            "deepseek",
-            api_key,
-            "https://api.deepseek.com/v1",
-        )
-        .with_env_prefix("DEEPSEEK");
+        let inner =
+            OpenAICompatibleProvider::new("deepseek", api_key, "https://api.deepseek.com/v1")
+                .with_env_prefix("DEEPSEEK");
 
         Self { inner }
     }
@@ -236,19 +258,32 @@ impl DeepSeekProvider {
     /// Create from environment variables.
     pub fn from_env() -> Result<Self, ProviderError> {
         let config = ProviderConfig::from_env("DEEPSEEK");
-        let api_key = config.api_key
+        let api_key = config
+            .api_key
             .ok_or(ProviderError::MissingApiKey("DEEPSEEK_API_KEY"))?;
         Ok(Self::new(api_key))
     }
 }
 
 impl Provider for DeepSeekProvider {
-    fn name(&self) -> &str { "deepseek" }
-    fn base_url(&self) -> &str { self.inner.base_url() }
-    fn client(&self) -> &Client { self.inner.client() }
-    fn default_headers(&self) -> HeaderMap { self.inner.default_headers() }
-    fn is_configured(&self) -> bool { self.inner.is_configured() }
-    fn aliases(&self) -> &[&str] { &[] }
+    fn name(&self) -> &str {
+        "deepseek"
+    }
+    fn base_url(&self) -> &str {
+        self.inner.base_url()
+    }
+    fn client(&self) -> &Client {
+        self.inner.client()
+    }
+    fn default_headers(&self) -> HeaderMap {
+        self.inner.default_headers()
+    }
+    fn is_configured(&self) -> bool {
+        self.inner.is_configured()
+    }
+    fn aliases(&self) -> &[&str] {
+        &[]
+    }
 
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
         let mut profile = ModelProfile::default();
@@ -292,12 +327,9 @@ pub struct OpenRouterProvider {
 impl OpenRouterProvider {
     /// Create a new OpenRouter provider.
     pub fn new(api_key: impl Into<String>) -> Self {
-        let inner = OpenAICompatibleProvider::new(
-            "openrouter",
-            api_key,
-            "https://openrouter.ai/api/v1",
-        )
-        .with_env_prefix("OPENROUTER");
+        let inner =
+            OpenAICompatibleProvider::new("openrouter", api_key, "https://openrouter.ai/api/v1")
+                .with_env_prefix("OPENROUTER");
 
         Self { inner }
     }
@@ -305,18 +337,29 @@ impl OpenRouterProvider {
     /// Create from environment variables.
     pub fn from_env() -> Result<Self, ProviderError> {
         let config = ProviderConfig::from_env("OPENROUTER");
-        let api_key = config.api_key
+        let api_key = config
+            .api_key
             .ok_or(ProviderError::MissingApiKey("OPENROUTER_API_KEY"))?;
         Ok(Self::new(api_key))
     }
 }
 
 impl Provider for OpenRouterProvider {
-    fn name(&self) -> &str { "openrouter" }
-    fn base_url(&self) -> &str { self.inner.base_url() }
-    fn client(&self) -> &Client { self.inner.client() }
-    fn is_configured(&self) -> bool { self.inner.is_configured() }
-    fn aliases(&self) -> &[&str] { &[] }
+    fn name(&self) -> &str {
+        "openrouter"
+    }
+    fn base_url(&self) -> &str {
+        self.inner.base_url()
+    }
+    fn client(&self) -> &Client {
+        self.inner.client()
+    }
+    fn is_configured(&self) -> bool {
+        self.inner.is_configured()
+    }
+    fn aliases(&self) -> &[&str] {
+        &[]
+    }
 
     fn default_headers(&self) -> HeaderMap {
         let mut headers = self.inner.default_headers();
@@ -325,10 +368,7 @@ impl Provider for OpenRouterProvider {
             "HTTP-Referer",
             HeaderValue::from_static("https://github.com/serdes-ai"),
         );
-        headers.insert(
-            "X-Title",
-            HeaderValue::from_static("serdes-ai"),
-        );
+        headers.insert("X-Title", HeaderValue::from_static("serdes-ai"));
         headers
     }
 
@@ -380,20 +420,28 @@ impl CohereProvider {
     /// Create from environment variables.
     pub fn from_env() -> Result<Self, ProviderError> {
         let config = ProviderConfig::from_env("COHERE");
-        let api_key = config.api_key
+        let api_key = config
+            .api_key
             .ok_or(ProviderError::MissingApiKey("COHERE_API_KEY"))?;
         Ok(Self::new(api_key))
     }
 }
 
 impl Provider for CohereProvider {
-    fn name(&self) -> &str { "cohere" }
-
-    fn base_url(&self) -> &str {
-        self.config.base_url.as_deref().unwrap_or("https://api.cohere.ai/v2")
+    fn name(&self) -> &str {
+        "cohere"
     }
 
-    fn client(&self) -> &Client { &self.client }
+    fn base_url(&self) -> &str {
+        self.config
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.cohere.ai/v2")
+    }
+
+    fn client(&self) -> &Client {
+        &self.client
+    }
 
     fn default_headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
@@ -405,10 +453,7 @@ impl Provider for CohereProvider {
             }
         }
 
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
 
         headers
     }
@@ -441,8 +486,12 @@ impl Provider for CohereProvider {
         Some(profile)
     }
 
-    fn is_configured(&self) -> bool { self.config.api_key.is_some() }
-    fn aliases(&self) -> &[&str] { &[] }
+    fn is_configured(&self) -> bool {
+        self.config.api_key.is_some()
+    }
+    fn aliases(&self) -> &[&str] {
+        &[]
+    }
 }
 
 #[cfg(test)]

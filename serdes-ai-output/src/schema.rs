@@ -69,10 +69,8 @@ pub trait OutputSchema<T: Send>: Send + Sync {
                 self.parse_text(text)
             }
             OutputMode::Tool => {
-                let name =
-                    tool_name.ok_or_else(|| OutputParseError::custom("No tool call"))?;
-                let args =
-                    args.ok_or_else(|| OutputParseError::custom("No tool arguments"))?;
+                let name = tool_name.ok_or_else(|| OutputParseError::custom("No tool call"))?;
+                let args = args.ok_or_else(|| OutputParseError::custom("No tool arguments"))?;
                 self.parse_tool_call(name, args)
             }
             OutputMode::Native | OutputMode::Prompted => {
@@ -90,7 +88,6 @@ pub trait OutputSchema<T: Send>: Send + Sync {
             }
         }
     }
-
 }
 
 /// Boxed output schema for dynamic dispatch.
@@ -134,7 +131,11 @@ mod tests {
             Ok(text.to_string())
         }
 
-        fn parse_tool_call(&self, _name: &str, args: &JsonValue) -> Result<String, OutputParseError> {
+        fn parse_tool_call(
+            &self,
+            _name: &str,
+            args: &JsonValue,
+        ) -> Result<String, OutputParseError> {
             args.as_str()
                 .map(String::from)
                 .ok_or(OutputParseError::NotJson)
@@ -168,7 +169,9 @@ mod tests {
         let schema = MockSchema;
 
         // Text mode
-        let result = schema.parse(OutputMode::Text, Some("hello"), None, None).unwrap();
+        let result = schema
+            .parse(OutputMode::Text, Some("hello"), None, None)
+            .unwrap();
         assert_eq!(result, "hello");
 
         // Missing text

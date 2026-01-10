@@ -4,10 +4,10 @@
 //! complete responses.
 
 use chrono::{DateTime, Utc};
-use serdes_ai_core::messages::{TextPart, ThinkingPart, ToolCallArgs, ToolCallPart};
-use serdes_ai_core::{FinishReason, ModelResponse, ModelResponsePart, RequestUsage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use serdes_ai_core::messages::{TextPart, ThinkingPart, ToolCallArgs, ToolCallPart};
+use serdes_ai_core::{FinishReason, ModelResponse, ModelResponsePart, RequestUsage};
 
 /// Partial part being accumulated.
 #[derive(Debug, Clone)]
@@ -324,12 +324,7 @@ impl PartialResponse {
                 args,
                 id,
             } => {
-                self.apply_tool_delta(
-                    *index,
-                    name.as_deref(),
-                    args.as_deref(),
-                    id.as_deref(),
-                );
+                self.apply_tool_delta(*index, name.as_deref(), args.as_deref(), id.as_deref());
             }
             ResponseDelta::Thinking {
                 index,

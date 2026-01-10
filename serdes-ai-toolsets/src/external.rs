@@ -172,8 +172,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_external_toolset_get_tools() {
-        let toolset = ExternalToolset::<()>::new()
-            .definition(ToolDefinition::new("test", "Test tool"));
+        let toolset =
+            ExternalToolset::<()>::new().definition(ToolDefinition::new("test", "Test tool"));
 
         let ctx = RunContext::minimal("test");
         let tools = toolset.get_tools(&ctx).await.unwrap();
@@ -184,15 +184,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_external_toolset_call_deferred() {
-        let toolset = ExternalToolset::<()>::new()
-            .definition(ToolDefinition::new("api_call", "Call API"));
+        let toolset =
+            ExternalToolset::<()>::new().definition(ToolDefinition::new("api_call", "Call API"));
 
         let ctx = RunContext::minimal("test");
         let tools = toolset.get_tools(&ctx).await.unwrap();
         let tool = tools.get("api_call").unwrap();
 
         let result = toolset
-            .call_tool("api_call", serde_json::json!({"endpoint": "/test"}), &ctx, tool)
+            .call_tool(
+                "api_call",
+                serde_json::json!({"endpoint": "/test"}),
+                &ctx,
+                tool,
+            )
             .await;
 
         assert!(matches!(result, Err(ToolError::CallDeferred { .. })));

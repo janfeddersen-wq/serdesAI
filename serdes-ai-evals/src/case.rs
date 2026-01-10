@@ -230,11 +230,9 @@ impl EvalCase {
                 let passed = match exp {
                     Expected::Exact { value } => output == value,
                     Expected::Contains { pattern } => output.contains(pattern),
-                    Expected::Regex { pattern } => {
-                        regex::Regex::new(pattern)
-                            .map(|re| re.is_match(output))
-                            .unwrap_or(false)
-                    }
+                    Expected::Regex { pattern } => regex::Regex::new(pattern)
+                        .map(|re| re.is_match(output))
+                        .unwrap_or(false),
                     Expected::Semantic { .. } => false, // Requires embedding model
                     Expected::Custom { .. } => false,   // Requires external handler
                 };
@@ -309,9 +307,7 @@ mod tests {
 
     #[test]
     fn test_eval_case_serialize() {
-        let case = EvalCase::new()
-            .input("hello")
-            .expected_contains("world");
+        let case = EvalCase::new().input("hello").expected_contains("world");
 
         let json = serde_json::to_string(&case).unwrap();
         assert!(json.contains("hello"));

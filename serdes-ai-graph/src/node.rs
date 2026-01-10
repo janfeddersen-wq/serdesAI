@@ -217,12 +217,7 @@ where
     Else: BaseNode<State> + 'static,
 {
     /// Create a new conditional node.
-    pub fn new(
-        name: impl Into<String>,
-        condition: Cond,
-        then_node: Then,
-        else_node: Else,
-    ) -> Self {
+    pub fn new(name: impl Into<String>, condition: Cond, then_node: Then, else_node: Else) -> Self {
         Self {
             name: name.into(),
             condition,
@@ -243,10 +238,7 @@ pub struct NodeDef<State, Deps = (), End = ()> {
 
 impl<State, Deps, End> NodeDef<State, Deps, End> {
     /// Create a new node definition.
-    pub fn new<N: BaseNode<State, Deps, End> + 'static>(
-        name: impl Into<String>,
-        node: N,
-    ) -> Self {
+    pub fn new<N: BaseNode<State, Deps, End> + 'static>(name: impl Into<String>, node: N) -> Self {
         Self {
             name: name.into(),
             node: Box::new(node),

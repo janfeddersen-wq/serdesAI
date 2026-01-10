@@ -68,10 +68,7 @@ impl Provider for GroqProvider {
             }
         }
 
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
 
         headers
     }

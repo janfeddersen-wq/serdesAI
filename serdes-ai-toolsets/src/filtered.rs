@@ -196,9 +196,7 @@ pub mod filters {
     }
 
     /// Negate a filter.
-    pub fn not<F, Deps>(
-        f: F,
-    ) -> impl Fn(&RunContext<Deps>, &ToolDefinition) -> bool + Send + Sync
+    pub fn not<F, Deps>(f: F) -> impl Fn(&RunContext<Deps>, &ToolDefinition) -> bool + Send + Sync
     where
         F: Fn(&RunContext<Deps>, &ToolDefinition) -> bool + Send + Sync,
     {
@@ -305,7 +303,8 @@ mod tests {
     async fn test_filter_predicates_allow_names() {
         let toolset = FunctionToolset::new().tool(ToolA).tool(ToolB);
 
-        let filtered = FilteredToolset::new(toolset, filters::allow_names(vec!["tool_a".to_string()]));
+        let filtered =
+            FilteredToolset::new(toolset, filters::allow_names(vec!["tool_a".to_string()]));
 
         let ctx = RunContext::minimal("test");
         let tools = filtered.get_tools(&ctx).await.unwrap();
@@ -318,7 +317,8 @@ mod tests {
     async fn test_filter_predicates_deny_names() {
         let toolset = FunctionToolset::new().tool(ToolA).tool(ToolB);
 
-        let filtered = FilteredToolset::new(toolset, filters::deny_names(vec!["tool_b".to_string()]));
+        let filtered =
+            FilteredToolset::new(toolset, filters::deny_names(vec!["tool_b".to_string()]));
 
         let ctx = RunContext::minimal("test");
         let tools = filtered.get_tools(&ctx).await.unwrap();

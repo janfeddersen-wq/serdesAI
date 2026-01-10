@@ -740,10 +740,7 @@ fn extract_domain(url: &str) -> String {
     let domain = domain.split(':').next().unwrap_or(domain);
 
     // Remove www. prefix for normalization
-    domain
-        .strip_prefix("www.")
-        .unwrap_or(domain)
-        .to_lowercase()
+    domain.strip_prefix("www.").unwrap_or(domain).to_lowercase()
 }
 
 impl Default for WebSearchTool {
@@ -893,16 +890,13 @@ impl<Deps: Send + Sync> Tool<Deps> for WebSearchTool {
     }
 
     async fn call(&self, _ctx: &RunContext<Deps>, args: JsonValue) -> ToolResult {
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::validation_error(
-                    "web_search",
-                    Some("query".to_string()),
-                    "Missing 'query' field",
-                )
-            })?;
+        let query = args.get("query").and_then(|v| v.as_str()).ok_or_else(|| {
+            ToolError::validation_error(
+                "web_search",
+                Some("query".to_string()),
+                "Missing 'query' field",
+            )
+        })?;
 
         if query.trim().is_empty() {
             return Err(ToolError::validation_error(
@@ -1223,9 +1217,7 @@ mod tests {
 
     #[test]
     fn test_web_search_tool_to_anthropic_format_blocked() {
-        let tool = WebSearchTool::builder()
-            .block_domain("evil.com")
-            .build();
+        let tool = WebSearchTool::builder().block_domain("evil.com").build();
 
         let format = tool.to_anthropic_format();
 

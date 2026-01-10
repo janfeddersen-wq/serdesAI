@@ -341,8 +341,7 @@ mod tests {
 
     #[test]
     fn test_serde_roundtrip() {
-        let ret = ToolReturn::json(serde_json::json!({"result": 42}))
-            .with_tool_call_id("id1");
+        let ret = ToolReturn::json(serde_json::json!({"result": 42})).with_tool_call_id("id1");
         let json = serde_json::to_string(&ret).unwrap();
         let parsed: ToolReturn = serde_json::from_str(&json).unwrap();
         assert_eq!(ret, parsed);

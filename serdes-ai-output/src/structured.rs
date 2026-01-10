@@ -17,8 +17,7 @@ use crate::schema::OutputSchema;
 pub const DEFAULT_OUTPUT_TOOL_NAME: &str = "final_result";
 
 /// Default tool description for structured output.
-pub const DEFAULT_OUTPUT_TOOL_DESCRIPTION: &str =
-    "The final response which ends this conversation";
+pub const DEFAULT_OUTPUT_TOOL_DESCRIPTION: &str = "The final response which ends this conversation";
 
 /// Schema for structured output using serde.
 ///
@@ -240,7 +239,11 @@ impl OutputSchema<JsonValue> for AnyJsonSchema {
         serde_json::from_str(&json_str).map_err(OutputParseError::JsonParse)
     }
 
-    fn parse_tool_call(&self, _name: &str, args: &JsonValue) -> Result<JsonValue, OutputParseError> {
+    fn parse_tool_call(
+        &self,
+        _name: &str,
+        args: &JsonValue,
+    ) -> Result<JsonValue, OutputParseError> {
         Ok(args.clone())
     }
 
@@ -276,8 +279,8 @@ mod tests {
 
     #[test]
     fn test_structured_schema_with_tool_name() {
-        let schema: StructuredOutputSchema<Person> = StructuredOutputSchema::new(person_schema())
-            .with_tool_name("submit_person");
+        let schema: StructuredOutputSchema<Person> =
+            StructuredOutputSchema::new(person_schema()).with_tool_name("submit_person");
         assert_eq!(schema.tool_name, "submit_person");
     }
 

@@ -70,12 +70,7 @@ where
     }
 
     /// Add an edge with a condition.
-    pub fn edge<F>(
-        mut self,
-        from: impl Into<String>,
-        to: impl Into<String>,
-        condition: F,
-    ) -> Self
+    pub fn edge<F>(mut self, from: impl Into<String>, to: impl Into<String>, condition: F) -> Self
     where
         F: Fn(&State) -> bool + Send + Sync + 'static,
     {
@@ -84,11 +79,7 @@ where
     }
 
     /// Add an unconditional edge.
-    pub fn edge_always(
-        mut self,
-        from: impl Into<String>,
-        to: impl Into<String>,
-    ) -> Self {
+    pub fn edge_always(mut self, from: impl Into<String>, to: impl Into<String>) -> Self {
         self.edges.push(Edge::unconditional(from, to));
         self
     }
@@ -238,9 +229,10 @@ where
         options: ExecutionOptions,
     ) -> GraphResult<GraphRunResult<State, End>> {
         let entry = self.entry_node.as_ref().ok_or(GraphError::NoEntryNode)?;
-        let start_node = self.nodes.get(entry).ok_or_else(|| {
-            GraphError::node_not_found(entry)
-        })?;
+        let start_node = self
+            .nodes
+            .get(entry)
+            .ok_or_else(|| GraphError::node_not_found(entry))?;
 
         self.run_from_with_options(&*start_node.node, state, deps, options)
             .await
@@ -259,7 +251,8 @@ where
         let options = ExecutionOptions::new()
             .max_steps(self.max_steps)
             .tracing(self.auto_instrument);
-        self.run_from_with_options(start, state, deps, options).await
+        self.run_from_with_options(start, state, deps, options)
+            .await
     }
 
     /// Run the graph from a specific node with options.
@@ -275,8 +268,7 @@ where
     {
         let run_id = options.run_id.take().unwrap_or_else(generate_run_id);
         let max_steps = options.max_steps;
-        let mut ctx = GraphRunContext::new(state, deps, &run_id)
-            .with_max_steps(max_steps);
+        let mut ctx = GraphRunContext::new(state, deps, &run_id).with_max_steps(max_steps);
         let mut history = Vec::new();
         let mut steps = 0;
 
@@ -303,9 +295,10 @@ where
                     result = next.run(&mut ctx).await?;
                 }
                 NodeResult::NextNamed(name) => {
-                    let node = self.nodes.get(&name).ok_or_else(|| {
-                        GraphError::node_not_found(&name)
-                    })?;
+                    let node = self
+                        .nodes
+                        .get(&name)
+                        .ok_or_else(|| GraphError::node_not_found(&name))?;
                     steps += 1;
                     if steps > max_steps {
                         return Err(GraphError::MaxStepsExceeded(max_steps));
@@ -315,8 +308,9 @@ where
                     result = node.node.run(&mut ctx).await?;
                 }
                 NodeResult::End(end) => {
-                    return Ok(GraphRunResult::new(end, ctx.state, ctx.step, run_id)
-                        .with_history(history));
+                    return Ok(
+                        GraphRunResult::new(end, ctx.state, ctx.step, run_id).with_history(history)
+                    );
                 }
             }
         }
@@ -403,14 +397,18 @@ impl<State: GraphState + 'static> SimpleGraph<State> {
                 break;
             }
 
-            let node = self.nodes.get(&current).ok_or_else(|| {
-                GraphError::node_not_found(&current)
-            })?;
+            let node = self
+                .nodes
+                .get(&current)
+                .ok_or_else(|| GraphError::node_not_found(&current))?;
 
             state = node.execute(state).await?;
 
             // Find next node
-            let next = self.edges.iter().find(|e| e.from == current && e.matches(&state));
+            let next = self
+                .edges
+                .iter()
+                .find(|e| e.from == current && e.matches(&state));
             match next {
                 Some(edge) => current = edge.to.clone(),
                 None => break,
@@ -483,8 +481,7 @@ mod tests {
 
     #[test]
     fn test_graph_no_entry() {
-        let graph = Graph::<TestState, (), i32>::new()
-            .node("a", IncrementNode);
+        let graph = Graph::<TestState, (), i32>::new().node("a", IncrementNode);
 
         assert!(graph.build().is_err());
     }

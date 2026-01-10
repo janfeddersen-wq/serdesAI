@@ -61,10 +61,7 @@ impl Provider for MistralProvider {
             }
         }
 
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
 
         headers
     }
@@ -97,7 +94,10 @@ impl Provider for MistralProvider {
                 profile.context_window = Some(131072);
                 profile.max_tokens = Some(8192);
             }
-            _ if model_name.starts_with("mistral") || model_name.starts_with("codestral") || model_name.starts_with("pixtral") => {
+            _ if model_name.starts_with("mistral")
+                || model_name.starts_with("codestral")
+                || model_name.starts_with("pixtral") =>
+            {
                 profile.context_window = Some(32768);
             }
             _ => return None,

@@ -42,7 +42,10 @@ impl TextPart {
 
     /// Set provider-specific details.
     #[must_use]
-    pub fn with_provider_details(mut self, details: serde_json::Map<String, serde_json::Value>) -> Self {
+    pub fn with_provider_details(
+        mut self,
+        details: serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
         self.provider_details = Some(details);
         self
     }
@@ -250,12 +253,14 @@ impl ToolCallArgs {
     pub fn as_object(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
         match self {
             Self::Json(serde_json::Value::Object(obj)) => Some(obj.clone()),
-            Self::String(s) => serde_json::from_str::<serde_json::Value>(s)
-                .ok()
-                .and_then(|value| match value {
-                    serde_json::Value::Object(map) => Some(map),
-                    _ => None,
-                }),
+            Self::String(s) => {
+                serde_json::from_str::<serde_json::Value>(s)
+                    .ok()
+                    .and_then(|value| match value {
+                        serde_json::Value::Object(map) => Some(map),
+                        _ => None,
+                    })
+            }
             _ => None,
         }
     }
@@ -435,7 +440,10 @@ impl ToolCallPart {
 
     /// Set provider-specific details.
     #[must_use]
-    pub fn with_provider_details(mut self, details: serde_json::Map<String, serde_json::Value>) -> Self {
+    pub fn with_provider_details(
+        mut self,
+        details: serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
         self.provider_details = Some(details);
         self
     }
@@ -576,7 +584,10 @@ impl ThinkingPart {
 
     /// Set provider-specific details.
     #[must_use]
-    pub fn with_provider_details(mut self, details: serde_json::Map<String, serde_json::Value>) -> Self {
+    pub fn with_provider_details(
+        mut self,
+        details: serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
         self.provider_details = Some(details);
         self
     }
@@ -731,7 +742,10 @@ impl FilePart {
 
     /// Set provider-specific details.
     #[must_use]
-    pub fn with_provider_details(mut self, details: serde_json::Map<String, serde_json::Value>) -> Self {
+    pub fn with_provider_details(
+        mut self,
+        details: serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
         self.provider_details = Some(details);
         self
     }
@@ -1249,11 +1263,11 @@ mod tests {
     fn test_text_part_with_builders() {
         let mut details = serde_json::Map::new();
         details.insert("model".to_string(), serde_json::json!("gpt-4"));
-        
+
         let part = TextPart::new("Hello!")
             .with_id("part-123")
             .with_provider_details(details.clone());
-        
+
         assert_eq!(part.id, Some("part-123".to_string()));
         assert_eq!(part.provider_details, Some(details));
     }
@@ -1406,7 +1420,10 @@ mod tests {
     #[test]
     fn test_quote_unquoted_keys_helper() {
         assert_eq!(quote_unquoted_keys("{foo: 1}"), "{\"foo\": 1}");
-        assert_eq!(quote_unquoted_keys("{foo: 1, bar: 2}"), "{\"foo\": 1, \"bar\": 2}");
+        assert_eq!(
+            quote_unquoted_keys("{foo: 1, bar: 2}"),
+            "{\"foo\": 1, \"bar\": 2}"
+        );
     }
 
     // ==================== End JSON Repair Tests ====================
@@ -1426,12 +1443,12 @@ mod tests {
     fn test_tool_call_part_with_all_fields() {
         let mut details = serde_json::Map::new();
         details.insert("temperature".to_string(), serde_json::json!(0.7));
-        
+
         let part = ToolCallPart::new("search", serde_json::json!({"query": "rust"}))
             .with_tool_call_id("call_456")
             .with_part_id("part-789")
             .with_provider_details(details.clone());
-        
+
         assert_eq!(part.tool_call_id, Some("call_456".to_string()));
         assert_eq!(part.id, Some("part-789".to_string()));
         assert_eq!(part.provider_details, Some(details));
@@ -1441,8 +1458,7 @@ mod tests {
     #[allow(deprecated)]
     fn test_tool_call_part_deprecated_with_id() {
         // Test backward compatibility with deprecated with_id()
-        let part = ToolCallPart::new("test", serde_json::json!({}))
-            .with_id("call_compat");
+        let part = ToolCallPart::new("test", serde_json::json!({})).with_id("call_compat");
         assert_eq!(part.tool_call_id, Some("call_compat".to_string()));
     }
 
@@ -1460,8 +1476,7 @@ mod tests {
 
     #[test]
     fn test_thinking_part() {
-        let part = ThinkingPart::new("Let me think about this...")
-            .with_signature("sig123");
+        let part = ThinkingPart::new("Let me think about this...").with_signature("sig123");
         assert_eq!(part.content, "Let me think about this...");
         assert_eq!(part.signature, Some("sig123".to_string()));
         assert!(part.id.is_none());
@@ -1473,13 +1488,13 @@ mod tests {
     fn test_thinking_part_with_all_fields() {
         let mut details = serde_json::Map::new();
         details.insert("thinking_tokens".to_string(), serde_json::json!(1500));
-        
+
         let part = ThinkingPart::new("Deep thoughts...")
             .with_id("think-001")
             .with_signature("sig456")
             .with_provider_name("anthropic")
             .with_provider_details(details.clone());
-        
+
         assert_eq!(part.id, Some("think-001".to_string()));
         assert_eq!(part.signature, Some("sig456".to_string()));
         assert_eq!(part.provider_name, Some("anthropic".to_string()));
@@ -1489,7 +1504,7 @@ mod tests {
     #[test]
     fn test_thinking_part_redacted_anthropic() {
         let part = ThinkingPart::redacted("encrypted_signature_data", "anthropic");
-        
+
         assert!(part.is_redacted());
         assert!(part.content.is_empty());
         assert_eq!(part.id, Some("redacted_thinking".to_string()));
@@ -1501,7 +1516,7 @@ mod tests {
     #[test]
     fn test_thinking_part_redacted_bedrock() {
         let part = ThinkingPart::redacted("base64_encoded_content", "aws-bedrock");
-        
+
         assert!(part.is_redacted());
         assert!(part.content.is_empty());
         assert_eq!(part.id, Some("redacted_content".to_string()));
@@ -1514,9 +1529,9 @@ mod tests {
         let part = ThinkingPart::redacted_with_id(
             "redacted_custom_type",
             "my_signature",
-            "custom-provider"
+            "custom-provider",
         );
-        
+
         assert!(part.is_redacted());
         assert_eq!(part.id, Some("redacted_custom_type".to_string()));
         assert_eq!(part.signature, Some("my_signature".to_string()));
@@ -1524,9 +1539,8 @@ mod tests {
 
     #[test]
     fn test_thinking_part_not_redacted() {
-        let part = ThinkingPart::new("Regular thinking content")
-            .with_id("think-123");
-        
+        let part = ThinkingPart::new("Regular thinking content").with_id("think-123");
+
         assert!(!part.is_redacted());
         assert_eq!(part.redacted_signature(), None);
     }
@@ -1540,10 +1554,10 @@ mod tests {
     #[test]
     fn test_serde_roundtrip_redacted_thinking() {
         let part = ThinkingPart::redacted("encrypted_data_here", "anthropic");
-        
+
         let json = serde_json::to_string(&part).unwrap();
         let parsed: ThinkingPart = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(part, parsed);
         assert!(parsed.is_redacted());
         assert_eq!(parsed.redacted_signature(), Some("encrypted_data_here"));
@@ -1553,12 +1567,12 @@ mod tests {
     fn test_serde_roundtrip_tool_call() {
         let mut details = serde_json::Map::new();
         details.insert("key".to_string(), serde_json::json!("value"));
-        
+
         let part = ToolCallPart::new("test", serde_json::json!({"a": 1}))
             .with_tool_call_id("call_1")
             .with_part_id("part_1")
             .with_provider_details(details);
-        
+
         let json = serde_json::to_string(&part).unwrap();
         let parsed: ToolCallPart = serde_json::from_str(&json).unwrap();
         assert_eq!(part, parsed);
@@ -1568,11 +1582,11 @@ mod tests {
     fn test_serde_roundtrip_text() {
         let mut details = serde_json::Map::new();
         details.insert("tokens".to_string(), serde_json::json!(42));
-        
+
         let part = TextPart::new("Hello")
             .with_id("text-1")
             .with_provider_details(details);
-        
+
         let json = serde_json::to_string(&part).unwrap();
         let parsed: TextPart = serde_json::from_str(&json).unwrap();
         assert_eq!(part, parsed);
@@ -1582,13 +1596,13 @@ mod tests {
     fn test_serde_roundtrip_thinking() {
         let mut details = serde_json::Map::new();
         details.insert("budget".to_string(), serde_json::json!(10000));
-        
+
         let part = ThinkingPart::new("Thinking...")
             .with_id("think-1")
             .with_signature("sig")
             .with_provider_name("anthropic")
             .with_provider_details(details);
-        
+
         let json = serde_json::to_string(&part).unwrap();
         let parsed: ThinkingPart = serde_json::from_str(&json).unwrap();
         assert_eq!(part, parsed);
@@ -1599,7 +1613,7 @@ mod tests {
         // Verify that None fields are not serialized
         let part = TextPart::new("Hello");
         let json = serde_json::to_string(&part).unwrap();
-        
+
         // Should only have "content" field, not id or provider_details
         assert!(json.contains("content"));
         assert!(!json.contains("id"));
@@ -1620,7 +1634,7 @@ mod tests {
     fn test_binary_content() {
         let data = vec![0x89, 0x50, 0x4E, 0x47]; // PNG magic bytes
         let content = BinaryContent::new(data.clone(), "image/png");
-        
+
         assert_eq!(content.data, data);
         assert_eq!(content.media_type, "image/png");
         assert!(!content.is_empty());
@@ -1639,7 +1653,7 @@ mod tests {
     fn test_file_part() {
         let data = vec![0xFF, 0xD8, 0xFF]; // JPEG magic bytes
         let part = FilePart::from_bytes(data.clone(), "image/jpeg");
-        
+
         assert_eq!(part.content.data, data);
         assert_eq!(part.media_type(), "image/jpeg");
         assert_eq!(part.part_kind(), "file");
@@ -1654,14 +1668,17 @@ mod tests {
     fn test_file_part_with_builders() {
         let mut details = serde_json::Map::new();
         details.insert("model".to_string(), serde_json::json!("dall-e-3"));
-        details.insert("revised_prompt".to_string(), serde_json::json!("A cute puppy"));
-        
+        details.insert(
+            "revised_prompt".to_string(),
+            serde_json::json!("A cute puppy"),
+        );
+
         let data = vec![0x89, 0x50, 0x4E, 0x47];
         let part = FilePart::from_bytes(data, "image/png")
             .with_id("file-123")
             .with_provider_name("openai")
             .with_provider_details(details.clone());
-        
+
         assert_eq!(part.id, Some("file-123".to_string()));
         assert_eq!(part.provider_name, Some("openai".to_string()));
         assert_eq!(part.provider_details, Some(details));
@@ -1678,10 +1695,10 @@ mod tests {
     fn test_serde_roundtrip_binary_content() {
         let data = vec![0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD];
         let content = BinaryContent::new(data.clone(), "application/octet-stream");
-        
+
         let json = serde_json::to_string(&content).unwrap();
         let parsed: BinaryContent = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(content, parsed);
         assert_eq!(parsed.data, data);
     }
@@ -1690,16 +1707,16 @@ mod tests {
     fn test_serde_roundtrip_file_part() {
         let mut details = serde_json::Map::new();
         details.insert("quality".to_string(), serde_json::json!("hd"));
-        
+
         let data = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
         let part = FilePart::from_bytes(data.clone(), "image/png")
             .with_id("img-001")
             .with_provider_name("openai")
             .with_provider_details(details);
-        
+
         let json = serde_json::to_string(&part).unwrap();
         let parsed: FilePart = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(part, parsed);
         assert_eq!(parsed.data(), &data);
     }
@@ -1709,7 +1726,7 @@ mod tests {
         // Verify that None fields are not serialized
         let part = FilePart::from_bytes(vec![0x00], "application/octet-stream");
         let json = serde_json::to_string(&part).unwrap();
-        
+
         assert!(json.contains("content"));
         assert!(!json.contains("id"));
         assert!(!json.contains("provider_name"));
@@ -1720,7 +1737,7 @@ mod tests {
     fn test_builtin_tool_call_part() {
         let part = BuiltinToolCallPart::new("web_search", serde_json::json!({"query": "rust"}))
             .with_tool_call_id("call_123");
-        
+
         assert_eq!(part.tool_name, "web_search");
         assert_eq!(part.tool_call_id, Some("call_123".to_string()));
         assert_eq!(part.part_kind(), "builtin-tool-call");
@@ -1730,12 +1747,13 @@ mod tests {
     fn test_builtin_tool_call_part_with_all_fields() {
         let mut details = serde_json::Map::new();
         details.insert("provider".to_string(), serde_json::json!("google"));
-        
-        let part = BuiltinToolCallPart::new("code_execution", serde_json::json!({"code": "print(1)"}))
-            .with_tool_call_id("call_456")
-            .with_part_id("part-789")
-            .with_provider_details(details.clone());
-        
+
+        let part =
+            BuiltinToolCallPart::new("code_execution", serde_json::json!({"code": "print(1)"}))
+                .with_tool_call_id("call_456")
+                .with_part_id("part-789")
+                .with_provider_details(details.clone());
+
         assert_eq!(part.tool_call_id, Some("call_456".to_string()));
         assert_eq!(part.id, Some("part-789".to_string()));
         assert_eq!(part.provider_details, Some(details));
@@ -1746,10 +1764,13 @@ mod tests {
         let result = WebSearchResult::new("Rust Programming", "https://rust-lang.org")
             .with_snippet("A systems programming language")
             .with_content("Full article content...");
-        
+
         assert_eq!(result.title, "Rust Programming");
         assert_eq!(result.url, "https://rust-lang.org");
-        assert_eq!(result.snippet, Some("A systems programming language".to_string()));
+        assert_eq!(
+            result.snippet,
+            Some("A systems programming language".to_string())
+        );
         assert!(result.content.is_some());
     }
 
@@ -1761,8 +1782,9 @@ mod tests {
                 WebSearchResult::new("Rust", "https://rust-lang.org"),
                 WebSearchResult::new("Crates.io", "https://crates.io"),
             ],
-        ).with_total_results(1000);
-        
+        )
+        .with_total_results(1000);
+
         assert_eq!(results.query, "rust programming");
         assert_eq!(results.len(), 2);
         assert!(!results.is_empty());
@@ -1774,7 +1796,7 @@ mod tests {
         let result = CodeExecutionResult::new("print('hello')")
             .with_stdout("hello\n")
             .with_exit_code(0);
-        
+
         assert_eq!(result.code, "print('hello')");
         assert_eq!(result.stdout, Some("hello\n".to_string()));
         assert!(result.is_success());
@@ -1786,7 +1808,7 @@ mod tests {
             .with_stderr("SyntaxError")
             .with_exit_code(1)
             .with_error("Compilation failed");
-        
+
         assert!(!result.is_success());
         assert_eq!(result.error, Some("Compilation failed".to_string()));
     }
@@ -1797,7 +1819,7 @@ mod tests {
         let result = CodeExecutionResult::new("plot()")
             .with_stdout("Plot saved")
             .with_output_file(image);
-        
+
         assert_eq!(result.output_files.len(), 1);
         assert_eq!(result.output_files[0].media_type, "image/png");
     }
@@ -1806,11 +1828,11 @@ mod tests {
     fn test_file_search_result() {
         let mut metadata = serde_json::Map::new();
         metadata.insert("size".to_string(), serde_json::json!(1024));
-        
+
         let result = FileSearchResult::new("main.rs", "fn main() {}")
             .with_score(0.95)
             .with_metadata(metadata);
-        
+
         assert_eq!(result.file_name, "main.rs");
         assert_eq!(result.score, Some(0.95));
         assert!(result.metadata.is_some());
@@ -1822,7 +1844,7 @@ mod tests {
             "main function",
             vec![FileSearchResult::new("main.rs", "fn main() {}")],
         );
-        
+
         assert_eq!(results.query, "main function");
         assert_eq!(results.len(), 1);
         assert!(!results.is_empty());
@@ -1830,39 +1852,33 @@ mod tests {
 
     #[test]
     fn test_builtin_tool_return_content() {
-        let web_content = BuiltinToolReturnContent::web_search(
-            WebSearchResults::new("test", vec![])
-        );
+        let web_content =
+            BuiltinToolReturnContent::web_search(WebSearchResults::new("test", vec![]));
         assert_eq!(web_content.content_type(), "web_search");
-        
-        let code_content = BuiltinToolReturnContent::code_execution(
-            CodeExecutionResult::new("x = 1")
-        );
+
+        let code_content =
+            BuiltinToolReturnContent::code_execution(CodeExecutionResult::new("x = 1"));
         assert_eq!(code_content.content_type(), "code_execution");
-        
-        let file_content = BuiltinToolReturnContent::file_search(
-            FileSearchResults::new("query", vec![])
-        );
+
+        let file_content =
+            BuiltinToolReturnContent::file_search(FileSearchResults::new("query", vec![]));
         assert_eq!(file_content.content_type(), "file_search");
-        
-        let other_content = BuiltinToolReturnContent::other(
-            "custom_tool",
-            serde_json::json!({"result": "data"})
-        );
+
+        let other_content =
+            BuiltinToolReturnContent::other("custom_tool", serde_json::json!({"result": "data"}));
         assert_eq!(other_content.content_type(), "custom_tool");
     }
 
     #[test]
     fn test_builtin_tool_return_part() {
-        let content = BuiltinToolReturnContent::web_search(
-            WebSearchResults::new("rust", vec![
-                WebSearchResult::new("Rust", "https://rust-lang.org")
-            ])
-        );
-        
-        let part = BuiltinToolReturnPart::new("web_search", content, "call_123")
-            .with_id("return-001");
-        
+        let content = BuiltinToolReturnContent::web_search(WebSearchResults::new(
+            "rust",
+            vec![WebSearchResult::new("Rust", "https://rust-lang.org")],
+        ));
+
+        let part =
+            BuiltinToolReturnPart::new("web_search", content, "call_123").with_id("return-001");
+
         assert_eq!(part.tool_name, "web_search");
         assert_eq!(part.tool_call_id, "call_123");
         assert_eq!(part.part_kind(), "builtin-tool-return");
@@ -1874,7 +1890,7 @@ mod tests {
     fn test_serde_roundtrip_builtin_tool_call() {
         let part = BuiltinToolCallPart::new("web_search", serde_json::json!({"q": "test"}))
             .with_tool_call_id("call_1");
-        
+
         let json = serde_json::to_string(&part).unwrap();
         let parsed: BuiltinToolCallPart = serde_json::from_str(&json).unwrap();
         assert_eq!(part, parsed);
@@ -1884,12 +1900,11 @@ mod tests {
     fn test_serde_roundtrip_web_search_results() {
         let results = WebSearchResults::new(
             "rust",
-            vec![
-                WebSearchResult::new("Rust", "https://rust-lang.org")
-                    .with_snippet("Systems programming")
-            ]
-        ).with_total_results(100);
-        
+            vec![WebSearchResult::new("Rust", "https://rust-lang.org")
+                .with_snippet("Systems programming")],
+        )
+        .with_total_results(100);
+
         let json = serde_json::to_string(&results).unwrap();
         let parsed: WebSearchResults = serde_json::from_str(&json).unwrap();
         assert_eq!(results, parsed);
@@ -1900,15 +1915,15 @@ mod tests {
         let content = BuiltinToolReturnContent::code_execution(
             CodeExecutionResult::new("print(1)")
                 .with_stdout("1\n")
-                .with_exit_code(0)
+                .with_exit_code(0),
         );
-        
-        let part = BuiltinToolReturnPart::new("code_execution", content, "call_xyz")
-            .with_id("ret-1");
-        
+
+        let part =
+            BuiltinToolReturnPart::new("code_execution", content, "call_xyz").with_id("ret-1");
+
         let json = serde_json::to_string(&part).unwrap();
         let parsed: BuiltinToolReturnPart = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(part.tool_name, parsed.tool_name);
         assert_eq!(part.tool_call_id, parsed.tool_call_id);
         assert_eq!(part.id, parsed.id);

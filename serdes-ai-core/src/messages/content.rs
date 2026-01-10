@@ -130,13 +130,17 @@ impl UserContentPart {
     /// Create image content from URL.
     #[must_use]
     pub fn image_url(url: impl Into<String>) -> Self {
-        Self::Image { image: ImageContent::url(url) }
+        Self::Image {
+            image: ImageContent::url(url),
+        }
     }
 
     /// Create image content from binary data.
     #[must_use]
     pub fn image_binary(data: Vec<u8>, media_type: ImageMediaType) -> Self {
-        Self::Image { image: ImageContent::binary(data, media_type) }
+        Self::Image {
+            image: ImageContent::binary(data, media_type),
+        }
     }
 }
 
@@ -249,7 +253,11 @@ impl BinaryImage {
     /// Get as data URL.
     #[must_use]
     pub fn to_data_url(&self) -> String {
-        format!("data:{};base64,{}", self.media_type.mime_type(), self.to_base64())
+        format!(
+            "data:{};base64,{}",
+            self.media_type.mime_type(),
+            self.to_base64()
+        )
     }
 }
 
@@ -633,8 +641,8 @@ mod tests {
 
     #[test]
     fn test_image_url() {
-        let img = ImageUrl::new("https://example.com/image.png")
-            .with_media_type(ImageMediaType::Png);
+        let img =
+            ImageUrl::new("https://example.com/image.png").with_media_type(ImageMediaType::Png);
         assert_eq!(img.url, "https://example.com/image.png");
         assert_eq!(img.media_type, Some(ImageMediaType::Png));
     }

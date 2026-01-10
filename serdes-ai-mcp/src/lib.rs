@@ -108,9 +108,7 @@ pub use server::{AsyncFnToolHandler, FnToolHandler, McpServer, ToolHandler};
 
 /// Prelude for common imports.
 pub mod prelude {
-    pub use crate::{
-        CallToolResult, McpError, McpResult, McpTool, McpToolset, McpTransport,
-    };
+    pub use crate::{CallToolResult, McpError, McpResult, McpTool, McpToolset, McpTransport};
 
     #[cfg(feature = "client")]
     pub use crate::{McpClient, McpClientBuilder};

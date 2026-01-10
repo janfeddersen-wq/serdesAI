@@ -30,7 +30,10 @@ pub struct ObjectJsonSchema {
     pub description: Option<String>,
 
     /// Whether additional properties are allowed.
-    #[serde(rename = "additionalProperties", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "additionalProperties",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub additional_properties: Option<bool>,
 
     /// Extra schema properties.
@@ -255,7 +258,6 @@ impl ToolDefinition {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,16 +273,8 @@ mod tests {
     #[test]
     fn test_object_json_schema_with_property() {
         let schema = ObjectJsonSchema::new()
-            .with_property(
-                "name",
-                serde_json::json!({"type": "string"}),
-                true,
-            )
-            .with_property(
-                "age",
-                serde_json::json!({"type": "integer"}),
-                false,
-            );
+            .with_property("name", serde_json::json!({"type": "string"}), true)
+            .with_property("age", serde_json::json!({"type": "integer"}), false);
 
         assert_eq!(schema.property_count(), 2);
         assert!(schema.is_required("name"));

@@ -13,12 +13,13 @@ use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse};
 use crate::profile::{openai_o1_profile, ModelProfile};
 use async_trait::async_trait;
+use base64::Engine;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serdes_ai_core::messages::{
-    ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs,
-    ToolCallPart, ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
+    ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart,
+    ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
 };
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
@@ -26,7 +27,6 @@ use serdes_ai_core::{
 };
 use serdes_ai_tools::ToolDefinition;
 use std::time::Duration;
-use base64::Engine;
 
 // ============================================================================
 // Responses API Settings
@@ -507,16 +507,10 @@ pub enum ResponseOutputItem {
     },
     /// Function tool call output.
     #[serde(rename = "function_call_output")]
-    FunctionCallOutput {
-        call_id: String,
-        output: String,
-    },
+    FunctionCallOutput { call_id: String, output: String },
     /// Web search tool call.
     #[serde(rename = "web_search_call")]
-    WebSearchCall {
-        id: String,
-        status: Option<String>,
-    },
+    WebSearchCall { id: String, status: Option<String> },
     /// Code interpreter tool call.
     #[serde(rename = "code_interpreter_call")]
     CodeInterpreterCall {
@@ -837,9 +831,7 @@ impl OpenAIResponsesModel {
 
     fn convert_content_part(&self, part: &UserContentPart) -> Option<ResponseInputPart> {
         match part {
-            UserContentPart::Text { text } => {
-                Some(ResponseInputPart::Text { text: text.clone() })
-            }
+            UserContentPart::Text { text } => Some(ResponseInputPart::Text { text: text.clone() }),
             UserContentPart::Image { image } => {
                 let url = match image {
                     ImageContent::Url(u) => u.url.clone(),
@@ -914,8 +906,8 @@ impl OpenAIResponsesModel {
         tools
             .iter()
             .map(|t| {
-                let params =
-                    serde_json::to_value(&t.parameters_json_schema).unwrap_or(serde_json::json!({}));
+                let params = serde_json::to_value(&t.parameters_json_schema)
+                    .unwrap_or(serde_json::json!({}));
 
                 ResponseTool::Function {
                     name: t.name.clone(),
@@ -954,9 +946,10 @@ impl OpenAIResponsesModel {
             None
         };
 
-        let truncation = self.default_settings.truncation.map(|t| TruncationConfig {
-            truncation_type: t,
-        });
+        let truncation = self
+            .default_settings
+            .truncation
+            .map(|t| TruncationConfig { truncation_type: t });
 
         ResponsesApiRequest {
             model: self.model_name.clone(),
@@ -1034,7 +1027,8 @@ impl OpenAIResponsesModel {
                     let args: JsonValue =
                         serde_json::from_str(&arguments).unwrap_or(serde_json::json!({}));
                     parts.push(ModelResponsePart::ToolCall(
-                        ToolCallPart::new(name, ToolCallArgs::Json(args)).with_tool_call_id(call_id),
+                        ToolCallPart::new(name, ToolCallArgs::Json(args))
+                            .with_tool_call_id(call_id),
                     ));
                 }
                 // Built-in tool results are typically internal, but we can expose them
@@ -1172,18 +1166,21 @@ impl Model for OpenAIResponsesModel {
         // For now, fall back to non-streaming
         // TODO: Implement proper streaming with ResponsesStreamParser
         let response = self.request(messages, settings, params).await?;
-        
+
         // Convert to a single-event stream
-        let events: Vec<Result<serdes_ai_core::messages::ModelResponseStreamEvent, ModelError>> = response
-            .parts
-            .into_iter()
-            .enumerate()
-            .map(|(idx, part)| {
-                Ok(serdes_ai_core::messages::ModelResponseStreamEvent::PartStart(
-                    serdes_ai_core::messages::PartStartEvent::new(idx, part),
-                ))
-            })
-            .collect();
+        let events: Vec<Result<serdes_ai_core::messages::ModelResponseStreamEvent, ModelError>> =
+            response
+                .parts
+                .into_iter()
+                .enumerate()
+                .map(|(idx, part)| {
+                    Ok(
+                        serdes_ai_core::messages::ModelResponseStreamEvent::PartStart(
+                            serdes_ai_core::messages::PartStartEvent::new(idx, part),
+                        ),
+                    )
+                })
+                .collect();
 
         Ok(Box::pin(futures::stream::iter(events)))
     }

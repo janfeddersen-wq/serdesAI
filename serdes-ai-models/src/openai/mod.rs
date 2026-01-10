@@ -42,9 +42,8 @@ pub use responses::{
     ServiceTier, TruncationMode,
 };
 pub use types::{
-    ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatMessage,
-    ChatTool, ContentPart, FunctionDefinition, MessageContent, ResponseFormat,
-    ToolChoiceValue, Usage,
+    ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ChatTool,
+    ContentPart, FunctionDefinition, MessageContent, ResponseFormat, ToolChoiceValue, Usage,
 };
 
 /// Create a new OpenAI chat model.
@@ -83,7 +82,10 @@ pub fn chat(model_name: impl Into<String>, api_key: impl Into<String>) -> OpenAI
 ///
 /// let model = openai::responses("o3-mini", "sk-...");
 /// ```
-pub fn responses(model_name: impl Into<String>, api_key: impl Into<String>) -> OpenAIResponsesModel {
+pub fn responses(
+    model_name: impl Into<String>,
+    api_key: impl Into<String>,
+) -> OpenAIResponsesModel {
     OpenAIResponsesModel::new(model_name, api_key)
 }
 

@@ -6,9 +6,8 @@ use crate::error::{McpError, McpResult};
 use crate::transport::{McpTransport, StdioTransport};
 use crate::types::{
     CallToolParams, CallToolResult, Implementation, InitializeParams, InitializeResult,
-    JsonRpcNotification, JsonRpcRequest, ListPromptsResult, ListResourcesResult,
-    ListToolsResult, McpTool, ReadResourceParams, ReadResourceResult, RequestId,
-    ServerCapabilities,
+    JsonRpcNotification, JsonRpcRequest, ListPromptsResult, ListResourcesResult, ListToolsResult,
+    McpTool, ReadResourceParams, ReadResourceResult, RequestId, ServerCapabilities,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -66,10 +65,8 @@ impl McpClient {
     ///
     /// This must be called before using any other methods.
     pub async fn initialize(&self) -> McpResult<InitializeResult> {
-        let params = InitializeParams::new(Implementation::new(
-            "serdes-ai",
-            env!("CARGO_PKG_VERSION"),
-        ));
+        let params =
+            InitializeParams::new(Implementation::new("serdes-ai", env!("CARGO_PKG_VERSION")));
 
         let result: InitializeResult = self.call("initialize", params).await?;
 
@@ -109,9 +106,7 @@ impl McpClient {
         self.ensure_initialized().await?;
 
         // Use empty object {} instead of null for params - some servers are picky
-        let result: ListToolsResult = self
-            .call("tools/list", serde_json::json!({}))
-            .await?;
+        let result: ListToolsResult = self.call("tools/list", serde_json::json!({})).await?;
         Ok(result.tools)
     }
 
@@ -278,9 +273,7 @@ impl McpClientBuilder {
             return McpClient::stdio(&command, &args).await;
         }
 
-        Err(McpError::Other(
-            "No transport configured".to_string(),
-        ))
+        Err(McpError::Other("No transport configured".to_string()))
     }
 }
 

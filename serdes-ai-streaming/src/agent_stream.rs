@@ -157,29 +157,32 @@ where
             } => {
                 // Emit tool call start if we have a name
                 if let Some(name) = name {
-                    self.pending_events.push_back(AgentStreamEvent::ToolCallStart {
-                        name: name.clone(),
-                        tool_call_id: id.clone(),
-                        index: *index,
-                    });
+                    self.pending_events
+                        .push_back(AgentStreamEvent::ToolCallStart {
+                            name: name.clone(),
+                            tool_call_id: id.clone(),
+                            index: *index,
+                        });
                 }
 
                 // Emit args delta if we have args
                 if let Some(args) = args {
                     if !self.config.buffer_tool_args {
-                        self.pending_events.push_back(AgentStreamEvent::ToolCallDelta {
-                            args_delta: args.clone(),
-                            index: *index,
-                        });
+                        self.pending_events
+                            .push_back(AgentStreamEvent::ToolCallDelta {
+                                args_delta: args.clone(),
+                                index: *index,
+                            });
                     }
                 }
             }
             ResponseDelta::Thinking { index, content, .. } => {
                 if self.config.emit_thinking {
-                    self.pending_events.push_back(AgentStreamEvent::ThinkingDelta {
-                        content: content.clone(),
-                        index: *index,
-                    });
+                    self.pending_events
+                        .push_back(AgentStreamEvent::ThinkingDelta {
+                            content: content.clone(),
+                            index: *index,
+                        });
                 }
             }
             ResponseDelta::Finish { .. } => {
@@ -187,9 +190,10 @@ where
             }
             ResponseDelta::Usage { usage } => {
                 self.accumulated_usage = self.accumulated_usage.clone() + usage.clone();
-                self.pending_events.push_back(AgentStreamEvent::UsageUpdate {
-                    usage: self.accumulated_usage.clone(),
-                });
+                self.pending_events
+                    .push_back(AgentStreamEvent::UsageUpdate {
+                        usage: self.accumulated_usage.clone(),
+                    });
             }
         }
 
@@ -246,44 +250,50 @@ where
                         id,
                     } => {
                         if let Some(name) = name {
-                            this.pending_events.push_back(AgentStreamEvent::ToolCallStart {
-                                name: name.clone(),
-                                tool_call_id: id.clone(),
-                                index: *index,
-                            });
+                            this.pending_events
+                                .push_back(AgentStreamEvent::ToolCallStart {
+                                    name: name.clone(),
+                                    tool_call_id: id.clone(),
+                                    index: *index,
+                                });
                         }
                         if let Some(args) = args {
                             if !this.config.buffer_tool_args {
-                                this.pending_events.push_back(AgentStreamEvent::ToolCallDelta {
-                                    args_delta: args.clone(),
-                                    index: *index,
-                                });
+                                this.pending_events
+                                    .push_back(AgentStreamEvent::ToolCallDelta {
+                                        args_delta: args.clone(),
+                                        index: *index,
+                                    });
                             }
                         }
                     }
                     ResponseDelta::Thinking { index, content, .. } => {
                         if this.config.emit_thinking {
-                            this.pending_events.push_back(AgentStreamEvent::ThinkingDelta {
-                                content: content.clone(),
-                                index: *index,
-                            });
+                            this.pending_events
+                                .push_back(AgentStreamEvent::ThinkingDelta {
+                                    content: content.clone(),
+                                    index: *index,
+                                });
                         }
                     }
                     ResponseDelta::Finish { .. } => {
                         *this.state = StreamState::Completed;
-                        this.pending_events.push_back(AgentStreamEvent::ResponseComplete {
-                            response: this.partial_response.as_response(),
-                        });
-                        this.pending_events.push_back(AgentStreamEvent::RunComplete {
-                            run_id: this.run_id.clone(),
-                            total_steps: *this.step,
-                        });
+                        this.pending_events
+                            .push_back(AgentStreamEvent::ResponseComplete {
+                                response: this.partial_response.as_response(),
+                            });
+                        this.pending_events
+                            .push_back(AgentStreamEvent::RunComplete {
+                                run_id: this.run_id.clone(),
+                                total_steps: *this.step,
+                            });
                     }
                     ResponseDelta::Usage { usage } => {
                         *this.accumulated_usage = this.accumulated_usage.clone() + usage.clone();
-                        this.pending_events.push_back(AgentStreamEvent::UsageUpdate {
-                            usage: this.accumulated_usage.clone(),
-                        });
+                        this.pending_events
+                            .push_back(AgentStreamEvent::UsageUpdate {
+                                usage: this.accumulated_usage.clone(),
+                            });
                     }
                 }
 
@@ -309,13 +319,15 @@ where
                 // Stream ended - finalize if not already done
                 if *this.state == StreamState::Streaming {
                     *this.state = StreamState::Completed;
-                    this.pending_events.push_back(AgentStreamEvent::ResponseComplete {
-                        response: this.partial_response.as_response(),
-                    });
-                    this.pending_events.push_back(AgentStreamEvent::RunComplete {
-                        run_id: this.run_id.clone(),
-                        total_steps: *this.step,
-                    });
+                    this.pending_events
+                        .push_back(AgentStreamEvent::ResponseComplete {
+                            response: this.partial_response.as_response(),
+                        });
+                    this.pending_events
+                        .push_back(AgentStreamEvent::RunComplete {
+                            run_id: this.run_id.clone(),
+                            total_steps: *this.step,
+                        });
 
                     if let Some(event) = this.pending_events.pop_front() {
                         return Poll::Ready(Some(event));
@@ -365,7 +377,7 @@ pub trait AgentStreamExt<Output>: Stream<Item = AgentStreamEvent<Output>> + Size
 impl<S, Output> AgentStreamExt<Output> for S where S: Stream<Item = AgentStreamEvent<Output>> {}
 
 /// A text delta with position information.
-/// 
+///
 /// This struct is emitted by `TextDeltaStream` when using `text_accumulated()`.
 /// It provides incremental text content along with position metadata,
 /// avoiding O(n²) string cloning.
@@ -392,7 +404,7 @@ impl TextDelta {
 
 pin_project! {
     /// Stream that filters to text deltas.
-    /// 
+    ///
     /// When created via `text_deltas()`, emits just the delta content as `String`.
     /// When created via `text_accumulated()`, emits `TextDelta` with position info.
     pub struct TextDeltaStream<S> {
@@ -405,7 +417,7 @@ pin_project! {
 
 impl<S> TextDeltaStream<S> {
     /// Get the current accumulated text.
-    /// 
+    ///
     /// This is useful when you need the full text at the end of streaming.
     pub fn accumulated_text(&self) -> &str {
         &self.accumulated
@@ -438,11 +450,7 @@ where
                         let total_length = this.accumulated.len();
 
                         // Always emit just the delta, never clone the full accumulated string
-                        return Poll::Ready(Some(TextDelta::new(
-                            content,
-                            position,
-                            total_length,
-                        )));
+                        return Poll::Ready(Some(TextDelta::new(content, position, total_length)));
                     }
                     AgentStreamEvent::RunComplete { .. } | AgentStreamEvent::Error { .. } => {
                         return Poll::Ready(None);
@@ -584,7 +592,7 @@ mod tests {
         let agent_stream: AgentStream<_, String> = AgentStream::new(inner, "test-run");
 
         let text_deltas: Vec<TextDelta> = agent_stream.text_deltas().collect().await;
-        
+
         // Should get individual deltas with position info
         assert_eq!(text_deltas.len(), 2);
         assert_eq!(text_deltas[0].content, "Hello");
@@ -617,25 +625,23 @@ mod tests {
 
         // Collect all deltas
         let text_deltas: Vec<TextDelta> = (&mut stream).collect().await;
-        
+
         // Each delta only contains the new content, not the full accumulated string
         // This is the O(n²) fix - we no longer clone the full string each time!
         assert_eq!(text_deltas.len(), 2);
         assert_eq!(text_deltas[0].content, "Hello");
         assert_eq!(text_deltas[1].content, " world");
-        
+
         // The accumulated text can be retrieved via accumulated_text() method
         assert_eq!(stream.accumulated_text(), "Hello world");
     }
 
     #[tokio::test]
     async fn test_stream_state() {
-        let deltas = vec![
-            Ok(ResponseDelta::Text {
-                index: 0,
-                content: "Test".to_string(),
-            }),
-        ];
+        let deltas = vec![Ok(ResponseDelta::Text {
+            index: 0,
+            content: "Test".to_string(),
+        })];
 
         let inner = stream::iter(deltas);
         let agent_stream: AgentStream<_, String> = AgentStream::new(inner, "test-run");

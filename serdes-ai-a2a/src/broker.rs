@@ -138,7 +138,7 @@ impl InMemoryBroker {
     pub async fn clear(&self) {
         let mut queue = self.queue.lock().await;
         queue.clear();
-        
+
         // Also clear cancellation tokens
         let mut tokens = self.cancellation_tokens.lock().await;
         tokens.clear();

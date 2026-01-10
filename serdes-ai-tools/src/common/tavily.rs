@@ -339,12 +339,14 @@ impl TavilyTool {
 
         let status = response.status();
         if !status.is_success() {
-            let error_body: TavilyErrorResponse = response.json().await.unwrap_or_else(|_| {
-                TavilyErrorResponse {
-                    detail: None,
-                    message: Some(format!("HTTP {status}")),
-                }
-            });
+            let error_body: TavilyErrorResponse =
+                response
+                    .json()
+                    .await
+                    .unwrap_or_else(|_| TavilyErrorResponse {
+                        detail: None,
+                        message: Some(format!("HTTP {status}")),
+                    });
 
             let error_msg = error_body
                 .detail
@@ -481,8 +483,7 @@ mod tests {
 
     #[test]
     fn test_result_builder() {
-        let result = TavilyResult::new("Title", "https://example.com", "Content")
-            .with_score(0.95);
+        let result = TavilyResult::new("Title", "https://example.com", "Content").with_score(0.95);
 
         assert_eq!(result.title, "Title");
         assert_eq!(result.url, "https://example.com");

@@ -3,12 +3,12 @@
 //! This module provides `TextOutputSchema` for handling plain text output
 //! with optional validation constraints like patterns, length limits, etc.
 
-use async_trait::async_trait;
-use regex::Regex;
-use serde_json::Value as JsonValue;
 use crate::error::OutputParseError;
 use crate::mode::OutputMode;
 use crate::schema::OutputSchema;
+use async_trait::async_trait;
+use regex::Regex;
+use serde_json::Value as JsonValue;
 
 /// Schema for plain text output.
 ///

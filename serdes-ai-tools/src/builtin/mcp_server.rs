@@ -160,15 +160,14 @@ mod tests {
 
     #[test]
     fn test_mcp_server_with_auth() {
-        let server = MCPServerTool::new("test", "https://example.com")
-            .with_auth("my-token");
+        let server = MCPServerTool::new("test", "https://example.com").with_auth("my-token");
         assert_eq!(server.authorization_token, Some("my-token".to_string()));
     }
 
     #[test]
     fn test_mcp_server_with_description() {
-        let server = MCPServerTool::new("test", "https://example.com")
-            .with_description("A test server");
+        let server =
+            MCPServerTool::new("test", "https://example.com").with_description("A test server");
         assert_eq!(server.description, Some("A test server".to_string()));
     }
 
@@ -176,7 +175,10 @@ mod tests {
     fn test_mcp_server_with_allowed_tools() {
         let server = MCPServerTool::new("test", "https://example.com")
             .with_allowed_tools(vec!["tool1".to_string(), "tool2".to_string()]);
-        assert_eq!(server.allowed_tools, Some(vec!["tool1".to_string(), "tool2".to_string()]));
+        assert_eq!(
+            server.allowed_tools,
+            Some(vec!["tool1".to_string(), "tool2".to_string()])
+        );
     }
 
     #[test]
@@ -184,16 +186,19 @@ mod tests {
         let server = MCPServerTool::new("test", "https://example.com")
             .allow_tool("tool1")
             .allow_tool("tool2");
-        assert_eq!(server.allowed_tools, Some(vec!["tool1".to_string(), "tool2".to_string()]));
+        assert_eq!(
+            server.allowed_tools,
+            Some(vec!["tool1".to_string(), "tool2".to_string()])
+        );
     }
 
     #[test]
     fn test_mcp_server_with_headers() {
         let mut headers = HashMap::new();
         headers.insert("X-Custom".to_string(), "value".to_string());
-        
-        let server = MCPServerTool::new("test", "https://example.com")
-            .with_headers(headers.clone());
+
+        let server =
+            MCPServerTool::new("test", "https://example.com").with_headers(headers.clone());
         assert_eq!(server.headers, Some(headers));
     }
 
@@ -202,7 +207,7 @@ mod tests {
         let server = MCPServerTool::new("test", "https://example.com")
             .with_header("X-First", "one")
             .with_header("X-Second", "two");
-        
+
         let headers = server.headers.unwrap();
         assert_eq!(headers.get("X-First"), Some(&"one".to_string()));
         assert_eq!(headers.get("X-Second"), Some(&"two".to_string()));
@@ -227,20 +232,23 @@ mod tests {
             .with_description("Fully configured server")
             .with_allowed_tools(vec!["read".to_string(), "write".to_string()])
             .with_header("Authorization", "Bearer xyz");
-        
+
         assert_eq!(server.id, "full-test");
         assert_eq!(server.url, "https://example.com/mcp");
         assert_eq!(server.authorization_token, Some("secret".to_string()));
-        assert_eq!(server.description, Some("Fully configured server".to_string()));
+        assert_eq!(
+            server.description,
+            Some("Fully configured server".to_string())
+        );
         assert!(server.allowed_tools.is_some());
         assert!(server.headers.is_some());
     }
 
     #[test]
     fn test_mcp_server_serialize() {
-        let server = MCPServerTool::new("test", "https://example.com")
-            .with_description("Test server");
-        
+        let server =
+            MCPServerTool::new("test", "https://example.com").with_description("Test server");
+
         let json = serde_json::to_string(&server).unwrap();
         assert!(json.contains("\"id\":\"test\""));
         assert!(json.contains("\"url\":\"https://example.com\""));
@@ -260,7 +268,7 @@ mod tests {
             "kind": "mcp_server",
             "description": "Test server"
         }"#;
-        
+
         let server: MCPServerTool = serde_json::from_str(json).unwrap();
         assert_eq!(server.id, "test");
         assert_eq!(server.url, "https://example.com");

@@ -10,8 +10,8 @@ use base64::Engine;
 use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serdes_ai_core::messages::{
-    DocumentContent, ImageContent, RetryPromptPart, TextPart, ThinkingPart,
-    ToolCallArgs, ToolCallPart, ToolReturnPart, UserContent, UserContentPart,
+    DocumentContent, ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs,
+    ToolCallPart, ToolReturnPart, UserContent, UserContentPart,
 };
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
@@ -225,7 +225,9 @@ impl AnthropicModel {
         let system = if system_parts.is_empty() {
             None
         } else if self.enable_caching && system_parts.len() == 1 {
-            Some(SystemContent::cached(system_parts.into_iter().next().unwrap()))
+            Some(SystemContent::cached(
+                system_parts.into_iter().next().unwrap(),
+            ))
         } else {
             Some(SystemContent::text(system_parts.join("\n\n")))
         };
@@ -258,9 +260,7 @@ impl AnthropicModel {
                     if think.is_redacted() {
                         // Redacted thinking must be sent back with the signature
                         if let Some(sig) = &think.signature {
-                            blocks.push(ContentBlock::RedactedThinking {
-                                data: sig.clone(),
-                            });
+                            blocks.push(ContentBlock::RedactedThinking { data: sig.clone() });
                         }
                     } else {
                         blocks.push(ContentBlock::Thinking {
@@ -389,8 +389,7 @@ impl AnthropicModel {
     fn add_block_to_content(content: &mut AnthropicContent, block: ContentBlock) {
         match content {
             AnthropicContent::Text(s) => {
-                *content =
-                    AnthropicContent::Blocks(vec![ContentBlock::text(s.clone()), block]);
+                *content = AnthropicContent::Blocks(vec![ContentBlock::text(s.clone()), block]);
             }
             AnthropicContent::Blocks(blocks) => {
                 blocks.push(block);
@@ -404,8 +403,8 @@ impl AnthropicModel {
             .iter()
             .enumerate()
             .map(|(i, t)| {
-                let schema =
-                    serde_json::to_value(&t.parameters_json_schema).unwrap_or(serde_json::json!({}));
+                let schema = serde_json::to_value(&t.parameters_json_schema)
+                    .unwrap_or(serde_json::json!({}));
                 let mut tool = AnthropicTool::new(&t.name, &t.description, schema);
 
                 // Cache the last tool definition for efficiency
@@ -462,7 +461,8 @@ impl AnthropicModel {
             model: self.model_name.clone(),
             messages: api_messages,
             // Use profile max_tokens as default, or 16384 if not set
-            max_tokens: settings.max_tokens
+            max_tokens: settings
+                .max_tokens
                 .or(self.profile.max_tokens)
                 .unwrap_or(16384),
             system,
@@ -492,7 +492,10 @@ impl AnthropicModel {
                         ToolCallPart::new(name, ToolCallArgs::Json(input)).with_tool_call_id(id),
                     ));
                 }
-                ResponseContentBlock::Thinking { thinking, signature } => {
+                ResponseContentBlock::Thinking {
+                    thinking,
+                    signature,
+                } => {
                     let mut think = ThinkingPart::new(thinking);
                     if let Some(sig) = signature {
                         think = think.with_signature(sig);
@@ -501,9 +504,10 @@ impl AnthropicModel {
                 }
                 ResponseContentBlock::RedactedThinking { data } => {
                     // Redacted thinking contains encrypted content - preserve the signature
-                    parts.push(ModelResponsePart::Thinking(
-                        ThinkingPart::redacted(data, "anthropic"),
-                    ));
+                    parts.push(ModelResponsePart::Thinking(ThinkingPart::redacted(
+                        data,
+                        "anthropic",
+                    )));
                 }
             }
         }
@@ -720,9 +724,8 @@ mod tests {
         use serdes_ai_tools::ObjectJsonSchema;
 
         let model = AnthropicModel::new("claude-3-5-sonnet-20241022", "key");
-        let tools = vec![
-            ToolDefinition::new("search", "Search the web").with_parameters(ObjectJsonSchema::new()),
-        ];
+        let tools = vec![ToolDefinition::new("search", "Search the web")
+            .with_parameters(ObjectJsonSchema::new())];
 
         let converted = model.convert_tools(&tools);
         assert_eq!(converted.len(), 1);
@@ -768,7 +771,8 @@ mod tests {
 
     #[test]
     fn test_build_request_with_thinking() {
-        let model = AnthropicModel::new("claude-3-5-sonnet-20241022", "key").with_thinking(Some(5000));
+        let model =
+            AnthropicModel::new("claude-3-5-sonnet-20241022", "key").with_thinking(Some(5000));
 
         let mut req = ModelRequest::new();
         req.add_user_prompt("Think about this.");
@@ -811,11 +815,9 @@ mod tests {
             id: "msg_123".to_string(),
             response_type: "message".to_string(),
             role: "assistant".to_string(),
-            content: vec![
-                ResponseContentBlock::Text {
-                    text: "Hello!".to_string(),
-                },
-            ],
+            content: vec![ResponseContentBlock::Text {
+                text: "Hello!".to_string(),
+            }],
             model: "claude-3-5-sonnet-20241022".to_string(),
             stop_reason: Some("end_turn".to_string()),
             stop_sequence: None,

@@ -7,11 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{
-    definition::ToolDefinition,
-    errors::ToolError,
-    return_types::ToolReturn,
-    tool::Tool,
-    RunContext,
+    definition::ToolDefinition, errors::ToolError, return_types::ToolReturn, tool::Tool, RunContext,
 };
 
 /// Registry of tools that can be called by an agent.
@@ -123,10 +119,7 @@ impl<Deps> ToolRegistry<Deps> {
     ///
     /// This calls the `prepare` method on each tool with the given context,
     /// allowing tools to modify their definitions or hide themselves.
-    pub async fn prepared_definitions(
-        &self,
-        ctx: &RunContext<Deps>,
-    ) -> Vec<ToolDefinition>
+    pub async fn prepared_definitions(&self, ctx: &RunContext<Deps>) -> Vec<ToolDefinition>
     where
         Deps: Send + Sync,
     {
@@ -362,7 +355,9 @@ mod tests {
     async fn test_call_not_found() {
         let registry = ToolRegistry::<()>::new();
         let ctx = RunContext::minimal("test");
-        let result = registry.call("nonexistent", &ctx, serde_json::json!({})).await;
+        let result = registry
+            .call("nonexistent", &ctx, serde_json::json!({}))
+            .await;
         assert!(matches!(result, Err(ToolError::NotFound(_))));
     }
 

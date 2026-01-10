@@ -6,8 +6,7 @@
 use async_trait::async_trait;
 use futures::Stream;
 use serdes_ai_core::{
-    messages::ModelResponseStreamEvent,
-    ModelRequest, ModelResponse, ModelSettings,
+    messages::ModelResponseStreamEvent, ModelRequest, ModelResponse, ModelSettings,
 };
 use serdes_ai_output::OutputMode;
 use serdes_ai_tools::{ObjectJsonSchema, ToolDefinition};

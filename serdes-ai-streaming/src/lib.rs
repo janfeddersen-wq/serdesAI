@@ -84,17 +84,15 @@ pub use debounce::{
 pub use error::{StreamError, StreamResult};
 pub use events::AgentStreamEvent;
 pub use partial_response::{PartialResponse, ResponseDelta};
-pub use parts_manager::{
-    ManagedPart, ModelResponsePartsManager, ToolCallAccumulator, VendorId,
-};
+pub use parts_manager::{ManagedPart, ModelResponsePartsManager, ToolCallAccumulator, VendorId};
 pub use sse::{SseEvent, SseEventExt, SseParser, SseStream};
 
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::{
-        AgentStream, AgentStreamEvent, AgentStreamExt, PartialResponse, ResponseDelta,
-        SseEvent, SseEventExt, SseParser, StreamConfig, StreamDebounceExt, StreamError,
-        StreamResult, StreamState, TextDelta, TextStreamExt,
+        AgentStream, AgentStreamEvent, AgentStreamExt, PartialResponse, ResponseDelta, SseEvent,
+        SseEventExt, SseParser, StreamConfig, StreamDebounceExt, StreamError, StreamResult,
+        StreamState, TextDelta, TextStreamExt,
     };
 }
 

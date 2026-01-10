@@ -72,12 +72,18 @@ impl<TaskOutput> CaseResult<TaskOutput> {
 
     /// Get count of passed evaluations.
     pub fn pass_count(&self) -> usize {
-        self.evaluations.iter().filter(|e| e.result.is_pass()).count()
+        self.evaluations
+            .iter()
+            .filter(|e| e.result.is_pass())
+            .count()
     }
 
     /// Get count of failed evaluations.
     pub fn fail_count(&self) -> usize {
-        self.evaluations.iter().filter(|e| e.result.is_fail()).count()
+        self.evaluations
+            .iter()
+            .filter(|e| e.result.is_fail())
+            .count()
     }
 }
 
@@ -227,7 +233,9 @@ impl<TaskOutput> EvaluationReport<TaskOutput> {
                 }
 
                 if let Some(score) = eval.result.score() {
-                    let entry = evaluator_scores.entry(eval.evaluator.clone()).or_insert((0.0, 0));
+                    let entry = evaluator_scores
+                        .entry(eval.evaluator.clone())
+                        .or_insert((0.0, 0));
                     entry.0 += score;
                     entry.1 += 1;
                 }
@@ -306,7 +314,10 @@ impl<TaskOutput> EvaluationReport<TaskOutput> {
             output.push_str(&format!("\n\u{1F4C8} Average Score: {:.2}\n", avg));
         }
 
-        output.push_str(&format!("\n⏱️ Duration: {:?}\n", self.summary.total_duration));
+        output.push_str(&format!(
+            "\n⏱️ Duration: {:?}\n",
+            self.summary.total_duration
+        ));
 
         // Per-evaluator breakdown
         if !self.summary.evaluator_stats.is_empty() {
@@ -446,18 +457,16 @@ mod tests {
 
     #[test]
     fn test_evaluator_stats() {
-        let cases = vec![
-            CaseResult::new(
-                "case1",
-                0,
-                "out".to_string(),
-                vec![
-                    NamedEvaluationResult::new("ExactMatch", EvaluationResult::pass()),
-                    NamedEvaluationResult::new("Contains", EvaluationResult::fail("no")),
-                ],
-                Duration::from_millis(10),
-            ),
-        ];
+        let cases = vec![CaseResult::new(
+            "case1",
+            0,
+            "out".to_string(),
+            vec![
+                NamedEvaluationResult::new("ExactMatch", EvaluationResult::pass()),
+                NamedEvaluationResult::new("Contains", EvaluationResult::fail("no")),
+            ],
+            Duration::from_millis(10),
+        )];
 
         let report = EvaluationReport::new(cases);
         let stats = &report.summary.evaluator_stats;

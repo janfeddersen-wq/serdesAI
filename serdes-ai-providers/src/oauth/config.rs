@@ -25,7 +25,11 @@ pub struct OAuthConfig {
 
 impl OAuthConfig {
     /// Create a new OAuth configuration.
-    pub fn new(client_id: impl Into<String>, auth_url: impl Into<String>, token_url: impl Into<String>) -> Self {
+    pub fn new(
+        client_id: impl Into<String>,
+        auth_url: impl Into<String>,
+        token_url: impl Into<String>,
+    ) -> Self {
         Self {
             client_id: client_id.into(),
             auth_url: auth_url.into(),

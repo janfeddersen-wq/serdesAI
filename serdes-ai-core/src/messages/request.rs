@@ -50,9 +50,10 @@ impl ModelRequest {
 
     /// Add a system prompt.
     pub fn add_system_prompt(&mut self, content: impl Into<String>) {
-        self.parts.push(ModelRequestPart::SystemPrompt(
-            SystemPromptPart::new(content),
-        ));
+        self.parts
+            .push(ModelRequestPart::SystemPrompt(SystemPromptPart::new(
+                content,
+            )));
     }
 
     /// Add a user prompt.
@@ -505,10 +506,7 @@ impl RetryPromptPart {
 
     /// Create a tool retry.
     #[must_use]
-    pub fn tool_retry(
-        tool_name: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn tool_retry(tool_name: impl Into<String>, message: impl Into<String>) -> Self {
         Self::new(message.into()).with_tool_name(tool_name)
     }
 }
@@ -521,10 +519,10 @@ mod tests {
     fn test_model_request_new() {
         let mut req = ModelRequest::new();
         assert!(req.is_empty());
-        
+
         req.add_system_prompt("You are a helpful assistant.");
         req.add_user_prompt("Hello!");
-        
+
         assert_eq!(req.len(), 2);
         assert_eq!(req.system_prompts().count(), 1);
         assert_eq!(req.user_prompts().count(), 1);
@@ -532,8 +530,7 @@ mod tests {
 
     #[test]
     fn test_system_prompt_part() {
-        let part = SystemPromptPart::new("Be helpful")
-            .with_dynamic_ref("main_prompt");
+        let part = SystemPromptPart::new("Be helpful").with_dynamic_ref("main_prompt");
         assert_eq!(part.content, "Be helpful");
         assert_eq!(part.dynamic_ref, Some("main_prompt".to_string()));
         assert_eq!(part.part_kind(), "system-prompt");
@@ -541,16 +538,15 @@ mod tests {
 
     #[test]
     fn test_tool_return_part() {
-        let part = ToolReturnPart::success("get_weather", "72°F, sunny")
-            .with_tool_call_id("call_123");
+        let part =
+            ToolReturnPart::success("get_weather", "72°F, sunny").with_tool_call_id("call_123");
         assert_eq!(part.tool_name, "get_weather");
         assert_eq!(part.tool_call_id, Some("call_123".to_string()));
     }
 
     #[test]
     fn test_retry_prompt_part() {
-        let part = RetryPromptPart::tool_retry("my_tool", "Invalid JSON")
-            .with_tool_call_id("id1");
+        let part = RetryPromptPart::tool_retry("my_tool", "Invalid JSON").with_tool_call_id("id1");
         assert_eq!(part.tool_name, Some("my_tool".to_string()));
         assert_eq!(part.content.message(), "Invalid JSON");
     }
@@ -568,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_builtin_tool_return() {
-        use crate::messages::parts::{BuiltinToolReturnContent, WebSearchResults, WebSearchResult};
+        use crate::messages::parts::{BuiltinToolReturnContent, WebSearchResult, WebSearchResults};
 
         let results = WebSearchResults::new(
             "rust programming",
@@ -603,7 +599,9 @@ mod tests {
 
     #[test]
     fn test_serde_roundtrip_with_builtin_tool_return() {
-        use crate::messages::parts::{BuiltinToolReturnContent, FileSearchResults, FileSearchResult};
+        use crate::messages::parts::{
+            BuiltinToolReturnContent, FileSearchResult, FileSearchResults,
+        };
 
         let results = FileSearchResults::new(
             "main function",
@@ -619,7 +617,7 @@ mod tests {
 
         let json = serde_json::to_string(&req).unwrap();
         let parsed: ModelRequest = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(req.len(), parsed.len());
         assert_eq!(parsed.builtin_tool_returns().count(), 1);
     }

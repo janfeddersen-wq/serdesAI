@@ -84,10 +84,7 @@ impl Provider for AnthropicProvider {
             headers.insert("anthropic-version", value);
         }
 
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
 
         headers
     }
@@ -114,15 +111,9 @@ impl Provider for AnthropicProvider {
                 profile.supports_documents = true;
                 Some(profile)
             }
-            "claude-3-sonnet-20240229" => {
-                Some(anthropic_claude_profile())
-            }
-            "claude-3-haiku-20240307" => {
-                Some(anthropic_claude_profile())
-            }
-            _ if model_name.starts_with("claude-") => {
-                Some(anthropic_claude_profile())
-            }
+            "claude-3-sonnet-20240229" => Some(anthropic_claude_profile()),
+            "claude-3-haiku-20240307" => Some(anthropic_claude_profile()),
+            _ if model_name.starts_with("claude-") => Some(anthropic_claude_profile()),
             _ => None,
         }
     }
@@ -165,8 +156,7 @@ mod tests {
 
     #[test]
     fn test_anthropic_provider_custom_version() {
-        let provider = AnthropicProvider::new("key")
-            .with_api_version("2024-01-01");
+        let provider = AnthropicProvider::new("key").with_api_version("2024-01-01");
 
         let headers = provider.default_headers();
         let version = headers.get("anthropic-version").unwrap();
@@ -177,7 +167,9 @@ mod tests {
     fn test_anthropic_provider_model_profile() {
         let provider = AnthropicProvider::new("key");
 
-        assert!(provider.model_profile("claude-3-5-sonnet-20241022").is_some());
+        assert!(provider
+            .model_profile("claude-3-5-sonnet-20241022")
+            .is_some());
         assert!(provider.model_profile("claude-3-opus-20240229").is_some());
         assert!(provider.model_profile("unknown-model").is_none());
     }

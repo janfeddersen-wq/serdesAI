@@ -155,6 +155,7 @@ pub mod mock;
 // Re-exports
 pub use error::{ModelError, ModelResult};
 pub use fallback::{FallbackModel, RetryOn};
+pub use mock::{FunctionModel, MockModel, TestModel};
 pub use model::{
     BoxedModel, Model, ModelCapability, ModelRequestParameters, ModelWithMetadata,
     StreamedResponse, ToolChoice,
@@ -165,7 +166,6 @@ pub use profile::{
     DEFAULT_PROFILE, DEFAULT_PROMPTED_OUTPUT_TEMPLATE,
 };
 pub use schema_transformer::JsonSchemaTransformer;
-pub use mock::{FunctionModel, MockModel, TestModel};
 
 // Re-export provider types for convenience
 #[cfg(feature = "openai")]
@@ -195,20 +195,22 @@ pub use bedrock::BedrockModel;
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::{
-        BoxedModel, FallbackModel, FunctionModel, Model, MockModel, ModelCapability,
-        ModelError, ModelProfile, ModelRequestParameters, ModelResult, RetryOn,
-        StreamedResponse, TestModel, ToolChoice,
+        BoxedModel, FallbackModel, FunctionModel, MockModel, Model, ModelCapability, ModelError,
+        ModelProfile, ModelRequestParameters, ModelResult, RetryOn, StreamedResponse, TestModel,
+        ToolChoice,
     };
 
     #[cfg(feature = "openai")]
-    pub use crate::openai::{OpenAIChatModel, OpenAIResponsesModel, ReasoningEffort, ReasoningSummary};
+    pub use crate::openai::{
+        OpenAIChatModel, OpenAIResponsesModel, ReasoningEffort, ReasoningSummary,
+    };
 
     #[cfg(feature = "anthropic")]
     pub use crate::anthropic::AnthropicModel;
 
     #[cfg(feature = "gemini")]
     pub use crate::google::GoogleModel as GeminiModel;
-    
+
     #[cfg(feature = "google")]
     pub use crate::google::GoogleModel;
 

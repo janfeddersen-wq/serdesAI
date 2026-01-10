@@ -63,32 +63,38 @@
 mod stream;
 mod types;
 
-pub use stream::{
-    chunks_to_sse, VercelAIEventStream, VERCEL_AI_DSP_HEADERS,
-};
+pub use stream::{chunks_to_sse, VercelAIEventStream, VERCEL_AI_DSP_HEADERS};
 pub use types::{
     // Core trait and helper
     encode_chunk,
-    Chunk,
-    // Enums
-    FinishReason,
-    ProviderMetadata,
-    UsageInfo,
     // Message lifecycle
     AbortChunk,
+    Chunk,
+    // Data
+    DataChunk,
     DoneChunk,
+    // Error & metadata
+    ErrorChunk,
+    FileChunk,
     FinishChunk,
+    // Enums
+    FinishReason,
     FinishStepChunk,
+    MessageMetadataChunk,
+    ProviderMetadata,
+    // Reasoning/thinking
+    ReasoningDeltaChunk,
+    ReasoningEndChunk,
+    ReasoningStartChunk,
+    // Sources/citations
+    SourceDocumentChunk,
+    SourceUrlChunk,
     StartChunk,
     StartStepChunk,
     // Text streaming
     TextDeltaChunk,
     TextEndChunk,
     TextStartChunk,
-    // Reasoning/thinking
-    ReasoningDeltaChunk,
-    ReasoningEndChunk,
-    ReasoningStartChunk,
     // Tool input
     ToolApprovalRequestChunk,
     ToolInputAvailableChunk,
@@ -99,13 +105,5 @@ pub use types::{
     ToolOutputAvailableChunk,
     ToolOutputDeniedChunk,
     ToolOutputErrorChunk,
-    // Sources/citations
-    SourceDocumentChunk,
-    SourceUrlChunk,
-    // Data
-    DataChunk,
-    FileChunk,
-    // Error & metadata
-    ErrorChunk,
-    MessageMetadataChunk,
+    UsageInfo,
 };

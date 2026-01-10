@@ -417,9 +417,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_instruction_fn() {
-        let instruction = SyncInstructionFn::new(|ctx: &RunContext<()>| {
-            Some(format!("Run ID: {}", ctx.run_id))
-        });
+        let instruction =
+            SyncInstructionFn::new(|ctx: &RunContext<()>| Some(format!("Run ID: {}", ctx.run_id)));
         let ctx = make_test_context();
         let result = instruction.generate(&ctx).await;
         assert_eq!(result, Some("Run ID: test-run".to_string()));

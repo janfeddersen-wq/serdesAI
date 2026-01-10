@@ -131,10 +131,7 @@ mod tests {
 
     #[test]
     fn test_eval_result_all_passed() {
-        let cases = vec![
-            EvalMetrics::new(true),
-            EvalMetrics::new(true),
-        ];
+        let cases = vec![EvalMetrics::new(true), EvalMetrics::new(true)];
 
         let result = EvalResult::new(None, cases);
         assert!(result.all_passed());
@@ -142,10 +139,7 @@ mod tests {
 
     #[test]
     fn test_pass_rate() {
-        let cases = vec![
-            EvalMetrics::new(true),
-            EvalMetrics::new(false),
-        ];
+        let cases = vec![EvalMetrics::new(true), EvalMetrics::new(false)];
 
         let result = EvalResult::new(None, cases);
         assert!((result.pass_rate() - 0.5).abs() < 0.01);

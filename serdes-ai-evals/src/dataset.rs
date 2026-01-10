@@ -342,14 +342,12 @@ mod tests {
         let dataset = StringDataset {
             name: Some("test".to_string()),
             description: None,
-            cases: vec![
-                StringCase {
-                    name: Some("case1".to_string()),
-                    input: "hello".to_string(),
-                    expected: Some("world".to_string()),
-                    tags: vec![],
-                },
-            ],
+            cases: vec![StringCase {
+                name: Some("case1".to_string()),
+                input: "hello".to_string(),
+                expected: Some("world".to_string()),
+                tags: vec![],
+            }],
         };
 
         let json = dataset.to_json_string().unwrap();

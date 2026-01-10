@@ -30,11 +30,11 @@ use std::time::Duration;
 use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::ModelProfile;
-use serdes_ai_core::{
-    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
-    ModelSettings, RequestUsage, TextPart, ToolCallPart, UserContent, UserContentPart,
-};
 use serdes_ai_core::messages::ImageContent;
+use serdes_ai_core::{
+    FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
+    RequestUsage, TextPart, ToolCallPart, UserContent, UserContentPart,
+};
 
 /// Mistral AI model client.
 #[derive(Debug, Clone)]
@@ -219,7 +219,11 @@ impl MistralModel {
                         result.push(types::Message {
                             role: types::Role::Assistant,
                             content: types::Content::Text(text_content),
-                            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                            tool_calls: if tool_calls.is_empty() {
+                                None
+                            } else {
+                                Some(tool_calls)
+                            },
                             tool_call_id: None,
                             name: None,
                         });
@@ -282,8 +286,7 @@ impl MistralModel {
                 function: types::FunctionDef {
                     name: t.name.clone(),
                     description: Some(t.description.clone()),
-                    parameters: serde_json::to_value(&t.parameters_json_schema)
-                        .unwrap_or_default(),
+                    parameters: serde_json::to_value(&t.parameters_json_schema).unwrap_or_default(),
                 },
             })
             .collect()
@@ -428,8 +431,8 @@ mod tests {
 
     #[test]
     fn test_mistral_with_settings() {
-        let model = MistralModel::new("mistral-small-latest", "key")
-            .with_timeout(Duration::from_secs(60));
+        let model =
+            MistralModel::new("mistral-small-latest", "key").with_timeout(Duration::from_secs(60));
 
         assert_eq!(model.default_timeout, Duration::from_secs(60));
     }

@@ -265,7 +265,10 @@ impl GatewayProvider {
     ) -> Self {
         Self::with_config(
             GatewayConfig::new("https://oai.helicone.ai/v1")
-                .with_header("Helicone-Auth", format!("Bearer {}", helicone_api_key.into()))
+                .with_header(
+                    "Helicone-Auth",
+                    format!("Bearer {}", helicone_api_key.into()),
+                )
                 .with_header("Helicone-Target-URL", target_base_url)
                 .with_name("helicone"),
         )
@@ -283,10 +286,7 @@ impl GatewayProvider {
         let openai_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| ProviderError::MissingApiKey("OPENAI_API_KEY"))?;
 
-        Ok(
-            Self::helicone(helicone_key, "https://api.openai.com/v1")
-                .with_api_key(openai_key),
-        )
+        Ok(Self::helicone(helicone_key, "https://api.openai.com/v1").with_api_key(openai_key))
     }
 
     /// Create a Cloudflare AI Gateway provider.
@@ -331,8 +331,8 @@ impl GatewayProvider {
 
         let mut config = GatewayConfig::new(gateway_url);
 
-        if let Ok(api_key) = std::env::var("AI_GATEWAY_API_KEY")
-            .or_else(|_| std::env::var("GATEWAY_API_KEY"))
+        if let Ok(api_key) =
+            std::env::var("AI_GATEWAY_API_KEY").or_else(|_| std::env::var("GATEWAY_API_KEY"))
         {
             config.api_key = Some(api_key);
         }
@@ -422,10 +422,7 @@ impl Provider for GatewayProvider {
         }
 
         // Content-Type
-        headers.insert(
-            "content-type",
-            HeaderValue::from_static("application/json"),
-        );
+        headers.insert("content-type", HeaderValue::from_static("application/json"));
 
         // Portkey-specific headers
         if self.config.name == "portkey" {
@@ -532,8 +529,8 @@ mod tests {
 
     #[test]
     fn test_basic_gateway() {
-        let gateway = GatewayProvider::new("https://gateway.example.com/v1")
-            .with_api_key("sk-test");
+        let gateway =
+            GatewayProvider::new("https://gateway.example.com/v1").with_api_key("sk-test");
 
         assert_eq!(gateway.name(), "gateway");
         assert_eq!(gateway.base_url(), "https://gateway.example.com/v1");
@@ -542,8 +539,7 @@ mod tests {
 
     #[test]
     fn test_portkey_gateway() {
-        let portkey = GatewayProvider::portkey("pk-test")
-            .with_virtual_key("openai-prod");
+        let portkey = GatewayProvider::portkey("pk-test").with_virtual_key("openai-prod");
 
         assert_eq!(portkey.name(), "portkey");
         assert_eq!(portkey.base_url(), "https://api.portkey.ai/v1");
@@ -582,8 +578,7 @@ mod tests {
 
     #[test]
     fn test_cloudflare_gateway() {
-        let cf = GatewayProvider::cloudflare("acc123", "my-gw", "openai")
-            .with_api_key("sk-test");
+        let cf = GatewayProvider::cloudflare("acc123", "my-gw", "openai").with_api_key("sk-test");
 
         assert_eq!(cf.name(), "cloudflare-ai-gateway");
         assert!(cf.base_url().contains("acc123"));
@@ -604,8 +599,7 @@ mod tests {
 
     #[test]
     fn test_backend_specification() {
-        let gateway = GatewayProvider::new("https://gateway.com/v1")
-            .with_backend("anthropic");
+        let gateway = GatewayProvider::new("https://gateway.com/v1").with_backend("anthropic");
 
         assert_eq!(gateway.backend(), Some("anthropic"));
 
@@ -629,8 +623,8 @@ mod tests {
 
     #[test]
     fn test_timeout_configuration() {
-        let gateway = GatewayProvider::new("https://gateway.com/v1")
-            .with_timeout(Duration::from_secs(120));
+        let gateway =
+            GatewayProvider::new("https://gateway.com/v1").with_timeout(Duration::from_secs(120));
 
         assert_eq!(gateway.config.timeout, Duration::from_secs(120));
     }

@@ -165,9 +165,9 @@ pub fn format_as_xml_with_options<T: Serialize>(
 ) -> Result<String, XmlFormatError> {
     // Convert to serde_json::Value first for uniform handling
     let json_value = serde_json::to_value(value)?;
-    
+
     let mut output = String::new();
-    
+
     if let Some(ref root_tag) = options.root_tag {
         // With root tag, wrap the content
         output.push_str(&format!("<{root_tag}>"));
@@ -180,7 +180,7 @@ pub fn format_as_xml_with_options<T: Serialize>(
         // No root tag, just output the content
         value_to_xml_inner(&json_value, options, 0, &mut output);
     }
-    
+
     Ok(output)
 }
 
@@ -192,7 +192,7 @@ fn value_to_xml_inner(
     output: &mut String,
 ) {
     let indent = get_indent(options, depth);
-    
+
     match value {
         serde_json::Value::Null => {
             output.push_str(&options.none_str);
@@ -210,7 +210,7 @@ fn value_to_xml_inner(
             for item in arr {
                 output.push_str(&indent);
                 output.push_str(&format!("<{}>", options.item_tag));
-                
+
                 if is_complex_value(item) {
                     if options.indent.is_some() {
                         output.push('\n');
@@ -220,7 +220,7 @@ fn value_to_xml_inner(
                 } else {
                     value_to_xml_inner(item, options, depth + 1, output);
                 }
-                
+
                 output.push_str(&format!("</{}>", options.item_tag));
                 if options.indent.is_some() {
                     output.push('\n');
@@ -232,7 +232,7 @@ fn value_to_xml_inner(
                 let tag = sanitize_tag_name(key);
                 output.push_str(&indent);
                 output.push_str(&format!("<{tag}>"));
-                
+
                 if is_complex_value(val) {
                     if options.indent.is_some() {
                         output.push('\n');
@@ -242,7 +242,7 @@ fn value_to_xml_inner(
                 } else {
                     value_to_xml_inner(val, options, depth + 1, output);
                 }
-                
+
                 output.push_str(&format!("</{tag}>"));
                 if options.indent.is_some() {
                     output.push('\n');
@@ -254,7 +254,10 @@ fn value_to_xml_inner(
 
 /// Check if a value is complex (object or array) and needs nested formatting.
 fn is_complex_value(value: &serde_json::Value) -> bool {
-    matches!(value, serde_json::Value::Object(_) | serde_json::Value::Array(_))
+    matches!(
+        value,
+        serde_json::Value::Object(_) | serde_json::Value::Array(_)
+    )
 }
 
 /// Get the indentation string for a given depth.
@@ -274,7 +277,7 @@ fn get_indent(options: &XmlFormatOptions, depth: usize) -> String {
 /// - Not start with "xml" (case-insensitive)
 fn sanitize_tag_name(name: &str) -> String {
     let mut result = String::with_capacity(name.len());
-    
+
     for (i, c) in name.chars().enumerate() {
         if i == 0 {
             // First character must be letter or underscore
@@ -295,12 +298,12 @@ fn sanitize_tag_name(name: &str) -> String {
             }
         }
     }
-    
+
     // Handle empty result
     if result.is_empty() {
         return "_".to_string();
     }
-    
+
     result
 }
 
@@ -331,7 +334,7 @@ mod tests {
             "name": "John",
             "age": 30
         });
-        
+
         let xml = format_as_xml(&data, Some("user")).unwrap();
         assert!(xml.contains("<user>"));
         assert!(xml.contains("</user>"));
@@ -349,7 +352,7 @@ mod tests {
                 }
             }
         });
-        
+
         let xml = format_as_xml(&data, Some("root")).unwrap();
         assert!(xml.contains("<city>NYC</city>"));
     }
@@ -359,7 +362,7 @@ mod tests {
         let data = json!({
             "hobbies": ["reading", "coding", "gaming"]
         });
-        
+
         let xml = format_as_xml(&data, None).unwrap();
         assert!(xml.contains("<item>reading</item>"));
         assert!(xml.contains("<item>coding</item>"));
@@ -369,11 +372,11 @@ mod tests {
     #[test]
     fn test_custom_item_tag() {
         let data = vec!["apple", "banana"];
-        
+
         let options = XmlFormatOptions::new()
             .with_root_tag("fruits")
             .with_item_tag("fruit");
-        
+
         let xml = format_as_xml_with_options(&data, &options).unwrap();
         assert!(xml.contains("<fruit>apple</fruit>"));
         assert!(xml.contains("<fruit>banana</fruit>"));
@@ -382,11 +385,9 @@ mod tests {
     #[test]
     fn test_compact_output() {
         let data = json!({"a": 1, "b": 2});
-        
-        let options = XmlFormatOptions::new()
-            .with_root_tag("data")
-            .compact();
-        
+
+        let options = XmlFormatOptions::new().with_root_tag("data").compact();
+
         let xml = format_as_xml_with_options(&data, &options).unwrap();
         // Should not have newlines
         assert!(!xml.contains("\n"));
@@ -395,7 +396,7 @@ mod tests {
     #[test]
     fn test_null_value() {
         let data = json!({"value": null});
-        
+
         let xml = format_as_xml(&data, None).unwrap();
         assert!(xml.contains("<value>null</value>"));
     }
@@ -403,9 +404,9 @@ mod tests {
     #[test]
     fn test_custom_none_str() {
         let data = json!({"value": null});
-        
+
         let options = XmlFormatOptions::new().with_none_str("N/A");
-        
+
         let xml = format_as_xml_with_options(&data, &options).unwrap();
         assert!(xml.contains("<value>N/A</value>"));
     }
@@ -413,7 +414,7 @@ mod tests {
     #[test]
     fn test_boolean_values() {
         let data = json!({"active": true, "disabled": false});
-        
+
         let xml = format_as_xml(&data, None).unwrap();
         assert!(xml.contains("<active>true</active>"));
         assert!(xml.contains("<disabled>false</disabled>"));
@@ -422,7 +423,7 @@ mod tests {
     #[test]
     fn test_xml_escape() {
         let data = json!({"text": "<script>alert('xss')</script>"});
-        
+
         let xml = format_as_xml(&data, None).unwrap();
         assert!(xml.contains("&lt;script&gt;"));
         assert!(xml.contains("&apos;"));
@@ -449,7 +450,7 @@ mod tests {
     #[test]
     fn test_no_root_tag() {
         let data = json!({"key": "value"});
-        
+
         let xml = format_as_xml(&data, None).unwrap();
         assert!(xml.contains("<key>value</key>"));
         // Should not have a root wrapper
@@ -468,7 +469,7 @@ mod tests {
                 "count": 2
             }
         });
-        
+
         let xml = format_as_xml(&data, Some("response")).unwrap();
         assert!(xml.contains("<response>"));
         assert!(xml.contains("</response>"));
@@ -483,7 +484,7 @@ mod tests {
             .with_item_tag("entry")
             .with_none_str("nil")
             .with_indent(Some("    ".to_string()));
-        
+
         assert_eq!(options.root_tag, Some("root".to_string()));
         assert_eq!(options.item_tag, "entry");
         assert_eq!(options.none_str, "nil");
@@ -497,12 +498,12 @@ mod tests {
             name: String,
             age: u32,
         }
-        
+
         let person = Person {
             name: "Charlie".to_string(),
             age: 35,
         };
-        
+
         let xml = format_as_xml(&person, Some("person")).unwrap();
         assert!(xml.contains("<name>Charlie</name>"));
         assert!(xml.contains("<age>35</age>"));

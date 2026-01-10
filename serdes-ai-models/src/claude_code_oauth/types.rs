@@ -30,6 +30,35 @@ impl Default for ClaudeCodeConfig {
     }
 }
 
+/// Extended thinking configuration.
+#[derive(Debug, Clone, Serialize)]
+pub struct ThinkingConfig {
+    /// Thinking type: "enabled".
+    #[serde(rename = "type")]
+    pub thinking_type: String,
+    /// Budget tokens for thinking.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<u64>,
+}
+
+impl ThinkingConfig {
+    /// Create enabled thinking config without a budget.
+    pub fn enabled() -> Self {
+        Self {
+            thinking_type: "enabled".to_string(),
+            budget_tokens: None,
+        }
+    }
+
+    /// Create thinking config with a specific budget.
+    pub fn with_budget(budget: u64) -> Self {
+        Self {
+            thinking_type: "enabled".to_string(),
+            budget_tokens: Some(budget),
+        }
+    }
+}
+
 /// Request body for Claude messages API.
 #[derive(Debug, Serialize)]
 pub struct ClaudeRequest {
@@ -46,6 +75,9 @@ pub struct ClaudeRequest {
     pub tools: Option<Vec<ClaudeTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+    /// Extended thinking configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
 }
 
 /// Message in a Claude request.
@@ -72,7 +104,9 @@ pub struct CacheControl {
 
 impl CacheControl {
     pub fn ephemeral() -> Self {
-        Self { cache_type: "ephemeral".to_string() }
+        Self {
+            cache_type: "ephemeral".to_string(),
+        }
     }
 }
 
@@ -81,7 +115,7 @@ impl CacheControl {
 #[serde(tag = "type")]
 pub enum ContentBlock {
     #[serde(rename = "text")]
-    Text { 
+    Text {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<CacheControl>,
@@ -108,9 +142,7 @@ pub enum ContentBlock {
         signature: Option<String>,
     },
     #[serde(rename = "redacted_thinking")]
-    RedactedThinking {
-        data: String,
-    },
+    RedactedThinking { data: String },
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -156,15 +188,13 @@ pub enum ResponseContentBlock {
         input: serde_json::Value,
     },
     #[serde(rename = "thinking")]
-    Thinking { 
+    Thinking {
         thinking: String,
         #[serde(default)]
         signature: Option<String>,
     },
     #[serde(rename = "redacted_thinking")]
-    RedactedThinking {
-        data: String,
-    },
+    RedactedThinking { data: String },
 }
 
 #[derive(Debug, Deserialize, Default)]

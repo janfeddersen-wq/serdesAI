@@ -59,10 +59,7 @@ impl ProviderRegistry {
     /// Infer provider from model string (e.g., "openai:gpt-4o").
     ///
     /// Returns the provider and the model name without the prefix.
-    pub fn infer_provider(
-        &self,
-        model: &str,
-    ) -> Result<(BoxedProvider, String), ProviderError> {
+    pub fn infer_provider(&self, model: &str) -> Result<(BoxedProvider, String), ProviderError> {
         // Check for explicit prefix
         if let Some((provider_name, model_name)) = model.split_once(':') {
             if let Some(provider) = self.get(provider_name) {
@@ -103,7 +100,10 @@ pub fn infer_provider_from_model_name(model: &str) -> Option<&'static str> {
     let model_lower = model.to_lowercase();
 
     // OpenAI models
-    if model_lower.starts_with("gpt-") || model_lower.starts_with("o1") || model_lower.starts_with("o3") {
+    if model_lower.starts_with("gpt-")
+        || model_lower.starts_with("o1")
+        || model_lower.starts_with("o3")
+    {
         return Some("openai");
     }
 
@@ -118,7 +118,10 @@ pub fn infer_provider_from_model_name(model: &str) -> Option<&'static str> {
     }
 
     // Mistral models
-    if model_lower.starts_with("mistral") || model_lower.starts_with("codestral") || model_lower.starts_with("pixtral") {
+    if model_lower.starts_with("mistral")
+        || model_lower.starts_with("codestral")
+        || model_lower.starts_with("pixtral")
+    {
         return Some("mistral");
     }
 
@@ -272,12 +275,27 @@ mod tests {
     #[test]
     fn test_infer_provider_from_model_name() {
         assert_eq!(infer_provider_from_model_name("gpt-4o"), Some("openai"));
-        assert_eq!(infer_provider_from_model_name("gpt-4-turbo"), Some("openai"));
+        assert_eq!(
+            infer_provider_from_model_name("gpt-4-turbo"),
+            Some("openai")
+        );
         assert_eq!(infer_provider_from_model_name("o1-preview"), Some("openai"));
-        assert_eq!(infer_provider_from_model_name("claude-3-5-sonnet-20241022"), Some("anthropic"));
-        assert_eq!(infer_provider_from_model_name("gemini-2.0-flash"), Some("google"));
-        assert_eq!(infer_provider_from_model_name("mistral-large"), Some("mistral"));
-        assert_eq!(infer_provider_from_model_name("deepseek-chat"), Some("deepseek"));
+        assert_eq!(
+            infer_provider_from_model_name("claude-3-5-sonnet-20241022"),
+            Some("anthropic")
+        );
+        assert_eq!(
+            infer_provider_from_model_name("gemini-2.0-flash"),
+            Some("google")
+        );
+        assert_eq!(
+            infer_provider_from_model_name("mistral-large"),
+            Some("mistral")
+        );
+        assert_eq!(
+            infer_provider_from_model_name("deepseek-chat"),
+            Some("deepseek")
+        );
         assert_eq!(infer_provider_from_model_name("unknown-model"), None);
     }
 }

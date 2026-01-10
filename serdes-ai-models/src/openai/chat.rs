@@ -6,9 +6,9 @@ use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{openai_gpt4o_profile, ModelProfile};
 use async_trait::async_trait;
+use base64::Engine;
 use reqwest::header::HeaderMap;
 use reqwest::Client;
-use base64::Engine;
 use serdes_ai_core::messages::{
     ImageContent, RetryPromptPart, SystemPromptPart, TextPart, ToolCallArgs, ToolCallPart,
     ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
@@ -141,10 +141,7 @@ impl OpenAIChatModel {
                     // Convert builtin tool return to a tool message
                     let content_str = serde_json::to_string(&builtin.content)
                         .unwrap_or_else(|_| builtin.content_type().to_string());
-                    messages.push(ChatMessage::tool(
-                        content_str,
-                        builtin.tool_call_id.clone(),
-                    ));
+                    messages.push(ChatMessage::tool(content_str, builtin.tool_call_id.clone()));
                 }
                 ModelRequestPart::ModelResponse(response) => {
                     // Add the assistant response to messages for proper alternation
@@ -293,8 +290,8 @@ impl OpenAIChatModel {
         tools
             .iter()
             .map(|t| {
-                let params =
-                    serde_json::to_value(&t.parameters_json_schema).unwrap_or(serde_json::json!({}));
+                let params = serde_json::to_value(&t.parameters_json_schema)
+                    .unwrap_or(serde_json::json!({}));
 
                 if t.strict.unwrap_or(false) {
                     ChatTool::function_strict(&t.name, &t.description, params)
@@ -359,7 +356,9 @@ impl OpenAIChatModel {
             user: None,
             stream: if stream { Some(true) } else { None },
             stream_options: if stream {
-                Some(StreamOptions { include_usage: true })
+                Some(StreamOptions {
+                    include_usage: true,
+                })
             } else {
                 None
             },
@@ -396,7 +395,7 @@ impl OpenAIChatModel {
 
                 parts.push(ModelResponsePart::ToolCall(
                     ToolCallPart::new(tc.function.name, ToolCallArgs::Json(args))
-                        .with_tool_call_id(tc.id)
+                        .with_tool_call_id(tc.id),
                 ));
             }
         }
@@ -617,9 +616,8 @@ mod tests {
         use serdes_ai_tools::ObjectJsonSchema;
 
         let model = OpenAIChatModel::new("gpt-4o", "key");
-        let tools = vec![
-            ToolDefinition::new("search", "Search the web").with_parameters(ObjectJsonSchema::new()),
-        ];
+        let tools = vec![ToolDefinition::new("search", "Search the web")
+            .with_parameters(ObjectJsonSchema::new())];
 
         let converted = model.convert_tools(&tools);
         assert_eq!(converted.len(), 1);

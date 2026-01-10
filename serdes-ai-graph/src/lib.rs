@@ -81,7 +81,9 @@ pub use executor::{ExecutionOptions, GraphExecutor, NoPersistence};
 pub use graph::{Graph, SimpleGraph};
 pub use iter::GraphIter;
 pub use iter::StepResult;
-pub use mermaid::{generate_flowchart, generate_mermaid, MermaidBuilder, MermaidDirection, MermaidOptions};
+pub use mermaid::{
+    generate_flowchart, generate_mermaid, MermaidBuilder, MermaidDirection, MermaidOptions,
+};
 pub use node::{
     AgentNode, BaseNode, ConditionalNode, End, FunctionNode, Node, NodeDef, NodeResult, RouterNode,
 };
@@ -137,9 +139,7 @@ mod tests {
 
     #[test]
     fn test_edge_builder() {
-        let edge = EdgeBuilder::<TestState>::from("a")
-            .to("b")
-            .always();
+        let edge = EdgeBuilder::<TestState>::from("a").to("b").always();
 
         assert_eq!(edge.from, "a");
         assert_eq!(edge.to, "b");

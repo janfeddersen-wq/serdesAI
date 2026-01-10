@@ -99,13 +99,13 @@ impl RequestUsage {
             (None, Some(b)) => Some(b),
             (None, None) => None,
         };
-        self.cache_creation_tokens =
-            match (self.cache_creation_tokens, other.cache_creation_tokens) {
-                (Some(a), Some(b)) => Some(a + b),
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            };
+        self.cache_creation_tokens = match (self.cache_creation_tokens, other.cache_creation_tokens)
+        {
+            (Some(a), Some(b)) => Some(a + b),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
         self.cache_read_tokens = match (self.cache_read_tokens, other.cache_read_tokens) {
             (Some(a), Some(b)) => Some(a + b),
             (Some(a), None) => Some(a),
@@ -296,7 +296,11 @@ impl UsageLimits {
         if let Some(max) = self.max_requests {
             let count = usage.request_count() as u64;
             if count > max {
-                return Err(UsageLimitExceeded::new(UsageLimitType::Requests, count, max));
+                return Err(UsageLimitExceeded::new(
+                    UsageLimitType::Requests,
+                    count,
+                    max,
+                ));
             }
         }
 
@@ -346,7 +350,7 @@ mod tests {
         let mut run = RunUsage::new();
         run.add_request(RequestUsage::with_tokens(100, 50));
         run.add_request(RequestUsage::with_tokens(200, 100));
-        
+
         assert_eq!(run.request_count(), 2);
         assert_eq!(run.total_request_tokens, 300);
         assert_eq!(run.total_response_tokens, 150);
@@ -355,23 +359,21 @@ mod tests {
 
     #[test]
     fn test_usage_limits_check_pass() {
-        let limits = UsageLimits::new()
-            .max_total_tokens(1000)
-            .max_requests(10);
-        
+        let limits = UsageLimits::new().max_total_tokens(1000).max_requests(10);
+
         let mut run = RunUsage::new();
         run.add_request(RequestUsage::with_tokens(100, 50));
-        
+
         assert!(limits.check(&run).is_ok());
     }
 
     #[test]
     fn test_usage_limits_check_fail() {
         let limits = UsageLimits::new().max_total_tokens(100);
-        
+
         let mut run = RunUsage::new();
         run.add_request(RequestUsage::with_tokens(100, 50));
-        
+
         let result = limits.check(&run);
         assert!(result.is_err());
         let err = result.unwrap_err();

@@ -39,7 +39,6 @@ pub enum ToolError {
         retryable: bool,
     },
 
-
     /// Tool not found in registry.
     #[error("Tool not found: {0}")]
     NotFound(String),
@@ -154,10 +153,7 @@ impl ToolError {
 
     /// Create an invalid arguments error for argument parsing.
     #[must_use]
-    pub fn invalid_arguments(
-        tool_name: impl Into<String>,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn invalid_arguments(tool_name: impl Into<String>, message: impl Into<String>) -> Self {
         Self::validation_failed(tool_name, vec![ValidationError::new(None, message)])
     }
 
@@ -196,7 +192,6 @@ impl ToolError {
     pub fn timeout(duration: Duration) -> Self {
         Self::Timeout(duration)
     }
-
 
     /// Get the error message.
     #[must_use]
@@ -293,9 +288,7 @@ impl From<&ToolError> for ToolErrorInfo {
         };
 
         let details = match err {
-            ToolError::ValidationFailed { errors, .. } => {
-                serde_json::to_value(errors).ok()
-            }
+            ToolError::ValidationFailed { errors, .. } => serde_json::to_value(errors).ok(),
             _ => None,
         };
 
@@ -361,11 +354,8 @@ mod tests {
 
     #[test]
     fn test_validation_failed() {
-        let err = ToolError::validation_error(
-            "test_tool",
-            Some("field".to_string()),
-            "Invalid value",
-        );
+        let err =
+            ToolError::validation_error("test_tool", Some("field".to_string()), "Invalid value");
         assert!(!err.is_retryable());
         let info = ToolErrorInfo::from(&err);
         assert_eq!(info.error_type, "validation_failed");

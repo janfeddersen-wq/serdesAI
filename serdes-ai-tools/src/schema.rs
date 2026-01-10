@@ -192,13 +192,7 @@ impl SchemaBuilder {
 
     /// Add an array property.
     #[must_use]
-    pub fn array(
-        mut self,
-        name: &str,
-        desc: &str,
-        items: JsonValue,
-        required: bool,
-    ) -> Self {
+    pub fn array(mut self, name: &str, desc: &str, items: JsonValue, required: bool) -> Self {
         self.properties.insert(
             name.to_string(),
             serde_json::json!({
@@ -244,13 +238,7 @@ impl SchemaBuilder {
 
     /// Add an enum property (string values).
     #[must_use]
-    pub fn enum_values(
-        mut self,
-        name: &str,
-        desc: &str,
-        values: &[&str],
-        required: bool,
-    ) -> Self {
+    pub fn enum_values(mut self, name: &str, desc: &str, values: &[&str], required: bool) -> Self {
         self.properties.insert(
             name.to_string(),
             serde_json::json!({

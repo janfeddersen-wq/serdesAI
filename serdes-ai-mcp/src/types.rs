@@ -422,9 +422,7 @@ impl CallToolResult {
     /// Create a success result with text.
     pub fn text(text: impl Into<String>) -> Self {
         Self {
-            content: vec![ToolResultContent::Text {
-                text: text.into(),
-            }],
+            content: vec![ToolResultContent::Text { text: text.into() }],
             is_error: false,
         }
     }

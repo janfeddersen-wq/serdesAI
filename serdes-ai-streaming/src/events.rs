@@ -184,9 +184,13 @@ impl<Output> AgentStreamEvent<Output> {
         match self {
             Self::RunStart { run_id, step } => AgentStreamEvent::RunStart { run_id, step },
             Self::RequestStart { step } => AgentStreamEvent::RequestStart { step },
-            Self::TextDelta { content, part_index } => {
-                AgentStreamEvent::TextDelta { content, part_index }
-            }
+            Self::TextDelta {
+                content,
+                part_index,
+            } => AgentStreamEvent::TextDelta {
+                content,
+                part_index,
+            },
             Self::ToolCallStart {
                 name,
                 tool_call_id,
@@ -248,7 +252,12 @@ impl<Output: fmt::Display> fmt::Display for AgentStreamEvent<Output> {
             Self::ToolCallDelta { args_delta, .. } => write!(f, "{}", args_delta),
             Self::ToolCallComplete { name, .. } => write!(f, "[tool_complete] {}", name),
             Self::ToolResult { name, success, .. } => {
-                write!(f, "[tool_result] {} ({})", name, if *success { "ok" } else { "error" })
+                write!(
+                    f,
+                    "[tool_result] {} ({})",
+                    name,
+                    if *success { "ok" } else { "error" }
+                )
             }
             Self::ThinkingDelta { content, .. } => write!(f, "[thinking] {}", content),
             Self::PartialOutput { output } => write!(f, "[partial] {}", output),
@@ -295,7 +304,7 @@ mod tests {
     fn test_map_output() {
         let event: AgentStreamEvent<i32> = AgentStreamEvent::FinalOutput { output: 42 };
         let mapped = event.map_output(|n| n.to_string());
-        
+
         if let AgentStreamEvent::FinalOutput { output } = mapped {
             assert_eq!(output, "42");
         } else {
