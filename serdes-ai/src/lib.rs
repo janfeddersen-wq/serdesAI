@@ -304,7 +304,7 @@ pub use serdes_ai_core::{
 // Agent
 pub use serdes_ai_agent::{
     Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent, EndStrategy,
-    RunContext, RunOptions, StepResult,
+    ModelConfig, RunContext, RunOptions, StepResult,
 };
 
 // Models
@@ -423,7 +423,7 @@ pub mod prelude {
     // Agent
     pub use crate::agent::{
         Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent, EndStrategy,
-        RunContext, RunOptions,
+        ModelConfig, RunContext, RunOptions,
     };
 
     // Models

@@ -340,6 +340,174 @@ pub fn infer_model(identifier: &str) -> ModelResult<std::sync::Arc<dyn Model>> {
     }
 }
 
+/// Build a model with custom configuration.
+///
+/// This is a helper function for `serdes_ai_agent::ModelConfig` that creates
+/// models with custom API keys, base URLs, and timeouts.
+///
+/// # Arguments
+///
+/// * `provider` - The provider name (e.g., "openai", "anthropic")
+/// * `model_name` - The model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
+/// * `api_key` - Optional API key (overrides environment variable)
+/// * `base_url` - Optional base URL (for custom endpoints)
+/// * `timeout` - Optional request timeout
+pub fn build_model_with_config(
+    provider: &str,
+    model_name: &str,
+    api_key: Option<&str>,
+    base_url: Option<&str>,
+    timeout: Option<std::time::Duration>,
+) -> ModelResult<std::sync::Arc<dyn Model>> {
+    use std::sync::Arc;
+
+    match provider {
+        "openai" | "gpt" => {
+            #[cfg(feature = "openai")]
+            {
+                let model = if let Some(key) = api_key {
+                    OpenAIChatModel::new(model_name, key)
+                } else {
+                    OpenAIChatModel::from_env(model_name)?
+                };
+
+                let model = if let Some(url) = base_url {
+                    model.with_base_url(url)
+                } else {
+                    model
+                };
+
+                let model = if let Some(t) = timeout {
+                    model.with_timeout(t)
+                } else {
+                    model
+                };
+
+                Ok(Arc::new(model))
+            }
+            #[cfg(not(feature = "openai"))]
+            {
+                let _ = (model_name, api_key, base_url, timeout);
+                Err(ModelError::Configuration(
+                    "OpenAI support not enabled. Enable 'openai' feature.".to_string(),
+                ))
+            }
+        }
+        "anthropic" | "claude" => {
+            #[cfg(feature = "anthropic")]
+            {
+                let model = if let Some(key) = api_key {
+                    AnthropicModel::new(model_name, key)
+                } else {
+                    AnthropicModel::from_env(model_name)?
+                };
+
+                let model = if let Some(url) = base_url {
+                    model.with_base_url(url)
+                } else {
+                    model
+                };
+
+                let model = if let Some(t) = timeout {
+                    model.with_timeout(t)
+                } else {
+                    model
+                };
+
+                Ok(Arc::new(model))
+            }
+            #[cfg(not(feature = "anthropic"))]
+            {
+                let _ = (model_name, api_key, base_url, timeout);
+                Err(ModelError::Configuration(
+                    "Anthropic support not enabled. Enable 'anthropic' feature.".to_string(),
+                ))
+            }
+        }
+        #[cfg(feature = "groq")]
+        "groq" => {
+            let model = if let Some(key) = api_key {
+                GroqModel::new(model_name, key)
+            } else {
+                GroqModel::from_env(model_name)?
+            };
+
+            // GroqModel doesn't have with_base_url/with_timeout
+            let _ = (base_url, timeout);
+
+            Ok(Arc::new(model))
+        }
+        #[cfg(feature = "mistral")]
+        "mistral" => {
+            let model = if let Some(key) = api_key {
+                MistralModel::new(model_name, key)
+            } else {
+                MistralModel::from_env(model_name)?
+            };
+
+            let model = if let Some(url) = base_url {
+                model.with_base_url(url)
+            } else {
+                model
+            };
+
+            let model = if let Some(t) = timeout {
+                model.with_timeout(t)
+            } else {
+                model
+            };
+
+            Ok(Arc::new(model))
+        }
+        #[cfg(feature = "ollama")]
+        "ollama" => {
+            let model = OllamaModel::from_env(model_name)?;
+
+            let model = if let Some(url) = base_url {
+                model.with_base_url(url)
+            } else {
+                model
+            };
+
+            // Ollama doesn't use API keys or timeouts in the same way
+            let _ = (api_key, timeout);
+
+            Ok(Arc::new(model))
+        }
+        #[cfg(feature = "google")]
+        "google" | "gemini" => {
+            // Google model requires an API key - no from_env helper
+            let key: String = if let Some(k) = api_key {
+                k.to_string()
+            } else {
+                std::env::var("GOOGLE_API_KEY").map_err(|_| {
+                    ModelError::Configuration(
+                        "Google/Gemini models require an API key. Use ModelConfig::with_api_key() \
+                         or set GOOGLE_API_KEY environment variable.".to_string()
+                    )
+                })?
+            };
+
+            let model = GoogleModel::new(model_name, key);
+
+            let model = if let Some(url) = base_url {
+                model.with_base_url(url)
+            } else {
+                model
+            };
+
+            let _ = timeout; // Google model doesn't have with_timeout
+
+            Ok(Arc::new(model))
+        }
+        _ => Err(ModelError::Configuration(format!(
+            "Unknown or unsupported provider: '{}'. Supported providers depend on enabled features: \
+             openai, anthropic, groq, mistral, ollama, google",
+            provider
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,5 +517,11 @@ mod tests {
         let model = MockModel::new("test-model");
         assert_eq!(model.name(), "test-model");
         assert_eq!(model.system(), "mock");
+    }
+
+    #[test]
+    fn test_build_model_unknown_provider() {
+        let result = build_model_with_config("unknown", "model", None, None, None);
+        assert!(result.is_err());
     }
 }
