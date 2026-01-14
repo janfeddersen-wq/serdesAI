@@ -218,7 +218,7 @@ mod tests {
     use super::*;
     use crate::FunctionToolset;
     use async_trait::async_trait;
-    use serdes_ai_tools::{ObjectJsonSchema, PropertySchema, Tool, ToolDefinition};
+    use serdes_ai_tools::{Tool, ToolDefinition};
 
     struct ToolA;
 

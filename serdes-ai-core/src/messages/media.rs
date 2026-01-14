@@ -269,12 +269,13 @@ impl FromStr for VideoMediaType {
 }
 
 /// Document media types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DocumentMediaType {
     /// PDF document.
     Pdf,
     /// Plain text.
+    #[default]
     Plain,
     /// CSV file.
     Csv,
@@ -396,12 +397,6 @@ impl FromStr for DocumentMediaType {
             "application/xml" | "text/xml" | "xml" => Ok(Self::Xml),
             _ => Err(format!("Unknown document media type: {}", s)),
         }
-    }
-}
-
-impl Default for DocumentMediaType {
-    fn default() -> Self {
-        Self::Plain
     }
 }
 

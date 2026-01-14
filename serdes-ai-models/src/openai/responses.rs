@@ -991,8 +991,8 @@ impl OpenAIResponsesModel {
                     // Convert reasoning to ThinkingPart
                     let content: String = summary
                         .iter()
-                        .filter_map(|s| match s {
-                            ReasoningSummaryItem::Text { text } => Some(text.as_str()),
+                        .map(|s| match s {
+                            ReasoningSummaryItem::Text { text } => text.as_str(),
                         })
                         .collect::<Vec<_>>()
                         .join("\n");

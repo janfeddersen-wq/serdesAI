@@ -107,10 +107,7 @@ impl AgentStream {
         Output: Send + Sync + 'static,
     {
         let run_id = generate_run_id();
-        let (tx, rx): (
-            mpsc::Sender<Result<AgentStreamEvent, AgentRunError>>,
-            mpsc::Receiver<Result<AgentStreamEvent, AgentRunError>>,
-        ) = mpsc::channel(64);
+        let (tx, rx) = mpsc::channel(64);
 
         // Clone what we need for the spawned task
         let model = agent.model_arc();
@@ -130,7 +127,7 @@ impl AgentStream {
         let run_usage_limits = options.usage_limits.clone();
 
         // Clone tool executors - now possible because RegisteredTool implements Clone!
-        let tools: Vec<RegisteredTool<Deps>> = agent.tools.iter().cloned().collect();
+        let tools: Vec<RegisteredTool<Deps>> = agent.tools.to_vec();
 
         // Wrap deps in Arc for shared access in tool execution
         let deps = Arc::new(deps);
@@ -393,7 +390,7 @@ impl AgentStream {
                     kind: "response".to_string(),
                 };
 
-                finish_reason = response.finish_reason.clone();
+                finish_reason = response.finish_reason;
                 responses.push(response.clone());
 
                 // Emit ResponseComplete
@@ -564,7 +561,7 @@ mod tests {
 
     #[test]
     fn test_stream_event_variants() {
-        let events = vec![
+        let events = [
             AgentStreamEvent::RunStart {
                 run_id: "123".to_string(),
             },

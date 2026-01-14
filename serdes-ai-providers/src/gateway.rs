@@ -460,6 +460,7 @@ impl Provider for GatewayProvider {
         headers
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
         // Infer profile from model name since gateways can route to any model
         let mut profile = ModelProfile::default();
@@ -487,9 +488,7 @@ impl Provider for GatewayProvider {
             profile.context_window = Some(131072);
         } else if model_lower.contains("llama") {
             profile.context_window = Some(8192);
-        } else if model_lower.contains("mistral") {
-            profile.context_window = Some(32768);
-        } else if model_lower.contains("mixtral") {
+        } else if model_lower.contains("mistral") || model_lower.contains("mixtral") {
             profile.context_window = Some(32768);
         } else if model_lower.contains("deepseek") {
             profile.context_window = Some(65536);

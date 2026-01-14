@@ -93,7 +93,7 @@ impl std::fmt::Display for ImageQuality {
 }
 
 /// Aspect ratio for generated images.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageAspectRatio {
     /// Ultra-wide 21:9 ratio.
@@ -110,6 +110,7 @@ pub enum ImageAspectRatio {
     R4_3,
     /// Square 1:1 ratio.
     #[serde(rename = "1_1")]
+    #[default]
     R1_1,
     /// Portrait 3:4 ratio.
     #[serde(rename = "3_4")]
@@ -123,12 +124,6 @@ pub enum ImageAspectRatio {
     /// Ultra-tall 9:21 ratio.
     #[serde(rename = "9_21")]
     R9_21,
-}
-
-impl Default for ImageAspectRatio {
-    fn default() -> Self {
-        Self::R1_1
-    }
 }
 
 impl std::fmt::Display for ImageAspectRatio {
@@ -148,10 +143,11 @@ impl std::fmt::Display for ImageAspectRatio {
 }
 
 /// Predefined image sizes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageSize {
     /// Let the provider decide based on aspect ratio.
+    #[default]
     Auto,
     /// 256x256 pixels (small).
     #[serde(rename = "256x256")]
@@ -171,12 +167,6 @@ pub enum ImageSize {
     /// 2048x2048 pixels (large).
     #[serde(rename = "2048x2048")]
     Size2048x2048,
-}
-
-impl Default for ImageSize {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl std::fmt::Display for ImageSize {

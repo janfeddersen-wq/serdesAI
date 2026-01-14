@@ -289,7 +289,6 @@ impl SchemaBuilder {
     }
 
     /// Build the schema as JSON.
-    #[must_use]
     pub fn build(self) -> Result<JsonValue, serde_json::Error> {
         self.build_object_schema().to_json()
     }

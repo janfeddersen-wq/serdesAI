@@ -63,7 +63,6 @@ impl ModelRequest {
     }
 
     /// Get all system prompts.
-    #[must_use]
     pub fn system_prompts(&self) -> impl Iterator<Item = &SystemPromptPart> {
         self.parts.iter().filter_map(|p| match p {
             ModelRequestPart::SystemPrompt(s) => Some(s),
@@ -72,7 +71,6 @@ impl ModelRequest {
     }
 
     /// Get all user prompts.
-    #[must_use]
     pub fn user_prompts(&self) -> impl Iterator<Item = &UserPromptPart> {
         self.parts.iter().filter_map(|p| match p {
             ModelRequestPart::UserPrompt(u) => Some(u),
@@ -81,7 +79,6 @@ impl ModelRequest {
     }
 
     /// Get all tool returns.
-    #[must_use]
     pub fn tool_returns(&self) -> impl Iterator<Item = &ToolReturnPart> {
         self.parts.iter().filter_map(|p| match p {
             ModelRequestPart::ToolReturn(t) => Some(t),
@@ -90,7 +87,6 @@ impl ModelRequest {
     }
 
     /// Get all builtin tool returns.
-    #[must_use]
     pub fn builtin_tool_returns(&self) -> impl Iterator<Item = &BuiltinToolReturnPart> {
         self.parts.iter().filter_map(|p| match p {
             ModelRequestPart::BuiltinToolReturn(b) => Some(b),

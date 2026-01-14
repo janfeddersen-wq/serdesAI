@@ -181,7 +181,7 @@ mod tests {
 
         storage.save_task(&task).await.unwrap();
 
-        task.start();
+        let _ = task.start();
         storage.update_task(&task).await.unwrap();
 
         let retrieved = storage.get_task(&task.id).await.unwrap().unwrap();

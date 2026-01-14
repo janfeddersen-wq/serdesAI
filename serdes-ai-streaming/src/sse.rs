@@ -98,9 +98,7 @@ impl SseParser {
         let mut events = self.parse_buffer()?;
 
         if !self.buffer.trim().is_empty() {
-            if let Some(event) =
-                self.parse_event(self.buffer.trim_end_matches(|c| c == '\n' || c == '\r'))
-            {
+            if let Some(event) = self.parse_event(self.buffer.trim_end_matches(['\n', '\r'])) {
                 if let Some(id) = &event.id {
                     self.last_event_id = Some(id.clone());
                 }
@@ -142,10 +140,7 @@ impl SseParser {
         while let Some((pos, delimiter_len)) = self.find_event_boundary() {
             let event_str = self.buffer[..pos].to_string();
             self.buffer = self.buffer[pos + delimiter_len..].to_string();
-            self.buffer = self
-                .buffer
-                .trim_start_matches(|c| c == '\n' || c == '\r')
-                .to_string();
+            self.buffer = self.buffer.trim_start_matches(['\n', '\r']).to_string();
 
             if let Some(event) = self.parse_event(&event_str) {
                 if let Some(id) = &event.id {

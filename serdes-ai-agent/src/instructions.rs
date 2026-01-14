@@ -246,6 +246,7 @@ impl<Deps: Send + Sync + 'static> InstructionBuilder<Deps> {
     }
 
     /// Add a static instruction.
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, text: impl Into<String>) -> Self {
         self.parts.push(Box::new(StaticInstruction::new(text)));
         self

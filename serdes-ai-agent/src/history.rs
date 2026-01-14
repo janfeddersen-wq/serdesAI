@@ -310,6 +310,7 @@ impl<Deps: Send + Sync + 'static> ChainedProcessor<Deps> {
     }
 
     /// Add a processor to the chain.
+    #[allow(clippy::should_implement_trait)]
     pub fn add<P: HistoryProcessor<Deps> + 'static>(mut self, processor: P) -> Self {
         self.processors.push(Box::new(processor));
         self

@@ -204,6 +204,7 @@ mod tests {
 
     #[derive(Debug, Deserialize)]
     struct TestStruct {
+        #[allow(dead_code)]
         name: String,
     }
 

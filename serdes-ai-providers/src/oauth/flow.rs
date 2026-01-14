@@ -149,13 +149,17 @@ async fn exchange_code_for_tokens(
             .await?
     } else {
         // Standard OAuth uses form-urlencoded
-        let params = [
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", redirect_uri),
-            ("client_id", &config.client_id),
-            ("code_verifier", &context.code_verifier),
+        let mut params = vec![
+            ("grant_type", "authorization_code".to_string()),
+            ("code", code.to_string()),
+            ("redirect_uri", redirect_uri.to_string()),
+            ("client_id", config.client_id.clone()),
+            ("code_verifier", context.code_verifier.clone()),
         ];
+
+        if let Some(secret) = &config.client_secret {
+            params.push(("client_secret", secret.clone()));
+        }
 
         client
             .post(&config.token_url)
@@ -205,11 +209,15 @@ pub async fn refresh_token(
             .send()
             .await?
     } else {
-        let params = [
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-            ("client_id", &config.client_id),
+        let mut params = vec![
+            ("grant_type", "refresh_token".to_string()),
+            ("refresh_token", refresh_token.to_string()),
+            ("client_id", config.client_id.clone()),
         ];
+
+        if let Some(secret) = &config.client_secret {
+            params.push(("client_secret", secret.clone()));
+        }
 
         client
             .post(&config.token_url)

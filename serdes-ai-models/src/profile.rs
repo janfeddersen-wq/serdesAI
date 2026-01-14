@@ -260,6 +260,7 @@ impl ModelProfile {
     }
 }
 /// Default model profile.
+#[allow(clippy::incompatible_msrv)]
 pub static DEFAULT_PROFILE: std::sync::LazyLock<ModelProfile> =
     std::sync::LazyLock::new(ModelProfile::default);
 

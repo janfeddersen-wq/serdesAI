@@ -10,7 +10,7 @@ use std::fmt;
 ///
 /// Different models support different output modes, and the choice of mode
 /// affects reliability, latency, and token usage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputMode {
     /// Let the model output free-form text, parse it ourselves.
@@ -36,13 +36,8 @@ pub enum OutputMode {
     /// This is the most reliable mode for structured output. A special
     /// "result" tool is added, and the model is instructed to call it
     /// with the final response.
+    #[default]
     Tool,
-}
-
-impl Default for OutputMode {
-    fn default() -> Self {
-        OutputMode::Tool
-    }
 }
 
 impl fmt::Display for OutputMode {

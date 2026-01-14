@@ -84,9 +84,10 @@ impl ModelRequestParameters {
 }
 
 /// Tool choice strategy.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum ToolChoice {
     /// Model decides whether to call tools.
+    #[default]
     Auto,
     /// Model must call at least one tool.
     Required,
@@ -94,12 +95,6 @@ pub enum ToolChoice {
     None,
     /// Model must call a specific tool.
     Specific(String),
-}
-
-impl Default for ToolChoice {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 /// Type alias for streaming response.

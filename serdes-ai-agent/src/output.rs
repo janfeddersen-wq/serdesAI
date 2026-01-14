@@ -246,6 +246,7 @@ impl<Output: Send + Sync + 'static, Deps: Send + Sync + 'static> ChainedValidato
     }
 
     /// Add a validator.
+    #[allow(clippy::should_implement_trait)]
     pub fn add<V: OutputValidator<Output, Deps> + 'static>(mut self, validator: V) -> Self {
         self.validators.push(Box::new(validator));
         self
@@ -465,7 +466,7 @@ fn extract_json(text: &str) -> Option<&str> {
     if let Some(start) = text.find("```json") {
         let content_start = start + 7;
         if let Some(end) = text[content_start..].find("```") {
-            return Some(&text[content_start..content_start + end].trim());
+            return Some(text[content_start..content_start + end].trim());
         }
     }
 

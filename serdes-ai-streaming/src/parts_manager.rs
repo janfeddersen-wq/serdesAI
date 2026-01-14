@@ -322,7 +322,7 @@ impl ModelResponsePartsManager {
     where
         F: Fn(&ManagedPart) -> bool,
     {
-        self.parts.iter().rposition(|p| predicate(p))
+        self.parts.iter().rposition(predicate)
     }
 
     /// Get or create a part index for the given vendor ID and type.
@@ -399,12 +399,12 @@ impl ModelResponsePartsManager {
         }
 
         // Skip whitespace-only content if requested and we'd create a new part
-        if ignore_leading_whitespace && content.trim().is_empty() {
-            if vendor_part_id.is_none()
-                && self.find_latest_part_index(ManagedPart::is_text).is_none()
-            {
-                return vec![];
-            }
+        if ignore_leading_whitespace
+            && content.trim().is_empty()
+            && vendor_part_id.is_none()
+            && self.find_latest_part_index(ManagedPart::is_text).is_none()
+        {
+            return vec![];
         }
 
         let mut events = vec![];
@@ -446,6 +446,7 @@ impl ModelResponsePartsManager {
     }
 
     /// Handle text with embedded thinking tag detection.
+    #[allow(clippy::too_many_arguments)]
     fn handle_text_with_thinking_tags(
         &mut self,
         vendor_part_id: Option<VendorId>,

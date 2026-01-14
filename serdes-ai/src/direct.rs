@@ -445,7 +445,7 @@ fn parse_model_name(name: &str) -> Result<BoxedModel, DirectError> {
     // Use the infer_model function from serdes-ai-models
     #[cfg(feature = "openai")]
     {
-        serdes_ai_models::infer_model(name).map_err(|e| DirectError::ModelError(e))
+        serdes_ai_models::infer_model(name).map_err(DirectError::ModelError)
     }
 
     #[cfg(not(feature = "openai"))]

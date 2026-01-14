@@ -112,7 +112,6 @@ impl ModelResponse {
     }
 
     /// Get all text parts.
-    #[must_use]
     pub fn text_parts(&self) -> impl Iterator<Item = &TextPart> {
         self.parts.iter().filter_map(|p| match p {
             ModelResponsePart::Text(t) => Some(t),
@@ -121,7 +120,6 @@ impl ModelResponse {
     }
 
     /// Get all tool call parts.
-    #[must_use]
     pub fn tool_call_parts(&self) -> impl Iterator<Item = &ToolCallPart> {
         self.parts.iter().filter_map(|p| match p {
             ModelResponsePart::ToolCall(t) => Some(t),
@@ -130,7 +128,6 @@ impl ModelResponse {
     }
 
     /// Get all thinking parts.
-    #[must_use]
     pub fn thinking_parts(&self) -> impl Iterator<Item = &ThinkingPart> {
         self.parts.iter().filter_map(|p| match p {
             ModelResponsePart::Thinking(t) => Some(t),
@@ -139,7 +136,6 @@ impl ModelResponse {
     }
 
     /// Get all file parts.
-    #[must_use]
     pub fn file_parts(&self) -> impl Iterator<Item = &FilePart> {
         self.parts.iter().filter_map(|p| match p {
             ModelResponsePart::File(f) => Some(f),
@@ -180,7 +176,6 @@ impl ModelResponse {
     }
 
     /// Get all builtin tool call parts.
-    #[must_use]
     pub fn builtin_tool_call_parts(&self) -> impl Iterator<Item = &BuiltinToolCallPart> {
         self.parts.iter().filter_map(|p| match p {
             ModelResponsePart::BuiltinToolCall(b) => Some(b),

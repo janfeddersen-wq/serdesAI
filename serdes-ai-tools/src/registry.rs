@@ -85,11 +85,11 @@ impl<Deps> ToolRegistry<Deps> {
     /// Returns `true` if the tool was registered, `false` if it already existed.
     pub fn register_if_absent<T: Tool<Deps> + 'static>(&mut self, tool: T) -> bool {
         let name = tool.definition().name.clone();
-        if self.tools.contains_key(&name) {
-            false
-        } else {
-            self.tools.insert(name, Arc::new(tool));
+        if let std::collections::hash_map::Entry::Vacant(e) = self.tools.entry(name) {
+            e.insert(Arc::new(tool));
             true
+        } else {
+            false
         }
     }
 

@@ -144,9 +144,9 @@ impl StdioTransport {
         stdin
             .write_all(data.as_bytes())
             .await
-            .map_err(|e| McpError::Io(e))?;
-        stdin.write_all(b"\n").await.map_err(|e| McpError::Io(e))?;
-        stdin.flush().await.map_err(|e| McpError::Io(e))?;
+            .map_err(McpError::Io)?;
+        stdin.write_all(b"\n").await.map_err(McpError::Io)?;
+        stdin.flush().await.map_err(McpError::Io)?;
         Ok(())
     }
 }
@@ -363,7 +363,7 @@ impl McpTransport for MemoryTransport {
             .lock()
             .await
             .pop_front()
-            .ok_or_else(|| McpError::NoResult)
+            .ok_or(McpError::NoResult)
     }
 
     async fn notify(&self, notification: &JsonRpcNotification) -> McpResult<()> {

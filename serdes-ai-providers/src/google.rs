@@ -39,6 +39,7 @@ impl GoogleProvider {
         Self::from_config(config)
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     fn create_profile(model: &str) -> ModelProfile {
         let mut profile = ModelProfile::default();
         profile.supports_tools = true;

@@ -334,7 +334,7 @@ impl PartialResponse {
                 self.apply_thinking_delta(*index, content, signature.as_deref());
             }
             ResponseDelta::Finish { reason } => {
-                self.set_finish_reason(reason.clone());
+                self.set_finish_reason(*reason);
             }
             ResponseDelta::Usage { usage } => {
                 self.set_usage(usage.clone());

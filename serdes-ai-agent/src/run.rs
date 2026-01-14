@@ -239,7 +239,7 @@ where
 
         // Store response
         if response.finish_reason.is_some() {
-            self.state.finish_reason = response.finish_reason.clone();
+            self.state.finish_reason = response.finish_reason;
         }
         self.state.responses.push(response.clone());
 
@@ -281,16 +281,13 @@ where
                     // Check if this is the output tool
                     if self.agent.is_output_tool(&tc.tool_name) {
                         let args = tc.args.to_json();
-                        match self
+                        if let Ok(output) = self
                             .agent
                             .output_schema
                             .parse_tool_call(&tc.tool_name, &args)
                         {
-                            Ok(output) => {
-                                found_output = Some(output);
-                                continue;
-                            }
-                            Err(_) => {}
+                            found_output = Some(output);
+                            continue;
                         }
                     }
 

@@ -83,6 +83,7 @@ impl Provider for OpenAICompatibleProvider {
         headers
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     fn model_profile(&self, _model_name: &str) -> Option<ModelProfile> {
         // Generic profile for unknown models
         let mut profile = ModelProfile::default();
@@ -152,6 +153,7 @@ impl Provider for TogetherProvider {
         self.inner.aliases()
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
         let mut profile = ModelProfile::default();
         profile.supports_tools = true;
@@ -163,9 +165,7 @@ impl Provider for TogetherProvider {
             profile.context_window = Some(131072);
         } else if model_lower.contains("llama") {
             profile.context_window = Some(8192);
-        } else if model_lower.contains("mixtral") {
-            profile.context_window = Some(32768);
-        } else if model_lower.contains("qwen") {
+        } else if model_lower.contains("mixtral") || model_lower.contains("qwen") {
             profile.context_window = Some(32768);
         } else if model_lower.contains("deepseek") {
             profile.context_window = Some(65536);
@@ -285,6 +285,7 @@ impl Provider for DeepSeekProvider {
         &[]
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
         let mut profile = ModelProfile::default();
         profile.supports_tools = true;
@@ -372,6 +373,7 @@ impl Provider for OpenRouterProvider {
         headers
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
         // OpenRouter routes to many models, so we try to infer from name
         let mut profile = ModelProfile::default();
@@ -458,6 +460,7 @@ impl Provider for CohereProvider {
         headers
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
         let mut profile = ModelProfile::default();
         profile.supports_tools = true;

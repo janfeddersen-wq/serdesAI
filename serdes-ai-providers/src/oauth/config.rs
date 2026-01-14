@@ -5,6 +5,8 @@
 pub struct OAuthConfig {
     /// OAuth client ID
     pub client_id: String,
+    /// OAuth client secret (optional, for confidential clients like Google)
+    pub client_secret: Option<String>,
     /// Authorization endpoint URL
     pub auth_url: String,
     /// Token endpoint URL  
@@ -32,6 +34,7 @@ impl OAuthConfig {
     ) -> Self {
         Self {
             client_id: client_id.into(),
+            client_secret: None,
             auth_url: auth_url.into(),
             token_url: token_url.into(),
             scopes: String::new(),
@@ -47,6 +50,13 @@ impl OAuthConfig {
     #[must_use]
     pub fn with_scopes(mut self, scopes: impl Into<String>) -> Self {
         self.scopes = scopes.into();
+        self
+    }
+
+    /// Set OAuth client secret.
+    #[must_use]
+    pub fn with_client_secret(mut self, secret: impl Into<String>) -> Self {
+        self.client_secret = Some(secret.into());
         self
     }
 
@@ -112,4 +122,18 @@ pub fn claude_code_oauth_config() -> OAuthConfig {
     .with_port_range(8765, 8795)
     .with_redirect_path("callback")
     .with_timeout(180)
+}
+
+/// Google OAuth configuration.
+pub fn google_oauth_config() -> OAuthConfig {
+    OAuthConfig::new(
+        "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+        "https://accounts.google.com/o/oauth2/v2/auth",
+        "https://oauth2.googleapis.com/token",
+    )
+    .with_client_secret("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")
+    .with_scopes("https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/cclog https://www.googleapis.com/auth/experimentsandconfigs")
+    .with_required_port(51121)
+    .with_redirect_path("oauth-callback")
+    .with_timeout(120)
 }

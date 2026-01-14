@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::str::FromStr;
 use std::time::Duration;
 
 use crate::{
@@ -146,22 +147,6 @@ impl ProgrammingLanguage {
         }
     }
 
-    /// Parse from a string.
-    #[must_use]
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "python" | "py" => Some(Self::Python),
-            "javascript" | "js" => Some(Self::JavaScript),
-            "typescript" | "ts" => Some(Self::TypeScript),
-            "ruby" | "rb" => Some(Self::Ruby),
-            "go" | "golang" => Some(Self::Go),
-            "rust" | "rs" => Some(Self::Rust),
-            "shell" | "bash" | "sh" => Some(Self::Shell),
-            "sql" => Some(Self::Sql),
-            _ => None,
-        }
-    }
-
     /// Get all language names for schema enum.
     #[must_use]
     pub fn all_names() -> &'static [&'static str] {
@@ -181,6 +166,24 @@ impl ProgrammingLanguage {
 impl std::fmt::Display for ProgrammingLanguage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for ProgrammingLanguage {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "python" | "py" => Ok(Self::Python),
+            "javascript" | "js" => Ok(Self::JavaScript),
+            "typescript" | "ts" => Ok(Self::TypeScript),
+            "ruby" | "rb" => Ok(Self::Ruby),
+            "go" | "golang" => Ok(Self::Go),
+            "rust" | "rs" => Ok(Self::Rust),
+            "shell" | "bash" | "sh" => Ok(Self::Shell),
+            "sql" => Ok(Self::Sql),
+            _ => Err(format!("Unknown language: {}", s)),
+        }
     }
 }
 
@@ -328,7 +331,7 @@ impl<Deps: Send + Sync> Tool<Deps> for CodeExecutionTool {
                 )
             })?;
 
-        let language = ProgrammingLanguage::from_str(language_str).ok_or_else(|| {
+        let language = ProgrammingLanguage::from_str(language_str).map_err(|_| {
             ToolError::validation_error(
                 "code_execution",
                 Some("language".to_string()),
@@ -447,13 +450,13 @@ mod tests {
         assert_eq!(ProgrammingLanguage::Python.as_str(), "python");
         assert_eq!(
             ProgrammingLanguage::from_str("python"),
-            Some(ProgrammingLanguage::Python)
+            Ok(ProgrammingLanguage::Python)
         );
         assert_eq!(
             ProgrammingLanguage::from_str("js"),
-            Some(ProgrammingLanguage::JavaScript)
+            Ok(ProgrammingLanguage::JavaScript)
         );
-        assert_eq!(ProgrammingLanguage::from_str("unknown"), None);
+        assert!(ProgrammingLanguage::from_str("unknown").is_err());
     }
 
     #[test]

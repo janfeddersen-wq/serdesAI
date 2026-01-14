@@ -74,7 +74,7 @@ impl std::fmt::Display for WebFetchError {
 impl std::error::Error for WebFetchError {}
 
 /// Configuration for the web fetch tool.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct WebFetchConfig {
     /// Maximum number of URL fetches allowed.
     /// If None, unlimited fetches are allowed.
@@ -100,18 +100,6 @@ pub struct WebFetchConfig {
     /// If None, provider default is used.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_content_tokens: Option<usize>,
-}
-
-impl Default for WebFetchConfig {
-    fn default() -> Self {
-        Self {
-            max_uses: None,
-            allowed_domains: None,
-            blocked_domains: None,
-            enable_citations: false,
-            max_content_tokens: None,
-        }
-    }
 }
 
 impl WebFetchConfig {

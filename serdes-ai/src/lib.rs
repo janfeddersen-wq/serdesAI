@@ -519,8 +519,6 @@ mod tests {
 
     #[test]
     fn test_prelude_imports() {
-        use crate::prelude::*;
-
         // Just verify these types exist and are accessible
         let _: fn() -> &'static str = crate::version;
     }

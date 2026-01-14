@@ -503,6 +503,7 @@ impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
 // ============================================================================
 
 /// Sync function executor.
+#[allow(clippy::type_complexity)]
 struct SyncFnExecutor<Deps> {
     func: Arc<dyn Fn(&RunContext<Deps>, JsonValue) -> Result<ToolReturn, ToolError> + Send + Sync>,
     _phantom: PhantomData<Deps>,

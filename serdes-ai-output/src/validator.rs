@@ -79,6 +79,7 @@ impl<T: Send + 'static, Deps: Send + Sync + 'static> ValidatorChain<T, Deps> {
 
     /// Add a validator to the chain.
     #[must_use]
+    #[allow(clippy::should_implement_trait)]
     pub fn add<V: OutputValidator<T, Deps> + 'static>(mut self, validator: V) -> Self {
         self.validators.push(Arc::new(validator));
         self
