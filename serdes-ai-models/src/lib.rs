@@ -525,3 +525,235 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+/// Extended configuration options for model building.
+///
+/// This struct allows configuring advanced model features like extended thinking
+/// for Claude models, reasoning effort for OpenAI o1/o3, etc.
+#[derive(Debug, Clone, Default)]
+pub struct ExtendedModelConfig {
+    /// API key (overrides environment variable)
+    pub api_key: Option<String>,
+    /// Base URL for custom endpoints
+    pub base_url: Option<String>,
+    /// Request timeout
+    pub timeout: Option<std::time::Duration>,
+    /// Enable extended thinking (Anthropic Claude)
+    pub enable_thinking: bool,
+    /// Budget for thinking tokens (Anthropic Claude)
+    pub thinking_budget: Option<u64>,
+    /// Reasoning effort (OpenAI o1/o3)
+    pub reasoning_effort: Option<String>,
+}
+
+impl ExtendedModelConfig {
+    /// Create a new empty config
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set API key
+    pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
+    /// Set base URL
+    pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
+        self.base_url = Some(url.into());
+        self
+    }
+
+    /// Set timeout
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Enable extended thinking with optional budget
+    pub fn with_thinking(mut self, budget: Option<u64>) -> Self {
+        self.enable_thinking = true;
+        self.thinking_budget = budget;
+        self
+    }
+
+    /// Set reasoning effort for OpenAI o1/o3 models
+    pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = Some(effort.into());
+        self
+    }
+}
+
+/// Build a model with extended configuration options.
+///
+/// This function extends `build_model_with_config` to support advanced features
+/// like extended thinking for Claude models.
+///
+/// # Arguments
+///
+/// * `provider` - The provider name (e.g., "openai", "anthropic")
+/// * `model_name` - The model name (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
+/// * `config` - Extended configuration options
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use serdes_ai_models::{build_model_extended, ExtendedModelConfig};
+///
+/// // Build Anthropic model with thinking enabled
+/// let config = ExtendedModelConfig::new()
+///     .with_api_key("sk-...")
+///     .with_thinking(Some(10000));
+/// let model = build_model_extended("anthropic", "claude-3-5-sonnet-20241022", config)?;
+/// ```
+pub fn build_model_extended(
+    provider: &str,
+    model_name: &str,
+    config: ExtendedModelConfig,
+) -> ModelResult<std::sync::Arc<dyn Model>> {
+    use std::sync::Arc;
+
+    match provider {
+        "openai" | "gpt" => {
+            #[cfg(feature = "openai")]
+            {
+                let model = if let Some(ref key) = config.api_key {
+                    OpenAIChatModel::new(model_name, key)
+                } else {
+                    OpenAIChatModel::from_env(model_name)?
+                };
+
+                let model = if let Some(ref url) = config.base_url {
+                    model.with_base_url(url)
+                } else {
+                    model
+                };
+
+                let model = if let Some(t) = config.timeout {
+                    model.with_timeout(t)
+                } else {
+                    model
+                };
+
+                // TODO: Add reasoning_effort support when available in OpenAIChatModel
+
+                Ok(Arc::new(model))
+            }
+            #[cfg(not(feature = "openai"))]
+            {
+                let _ = (model_name, config);
+                Err(ModelError::Configuration(
+                    "OpenAI support not enabled. Enable 'openai' feature.".to_string(),
+                ))
+            }
+        }
+        "anthropic" | "claude" => {
+            #[cfg(feature = "anthropic")]
+            {
+                let model = if let Some(ref key) = config.api_key {
+                    AnthropicModel::new(model_name, key)
+                } else {
+                    AnthropicModel::from_env(model_name)?
+                };
+
+                let model = if let Some(ref url) = config.base_url {
+                    model.with_base_url(url)
+                } else {
+                    model
+                };
+
+                let model = if let Some(t) = config.timeout {
+                    model.with_timeout(t)
+                } else {
+                    model
+                };
+
+                // Enable extended thinking if requested
+                let model = if config.enable_thinking {
+                    model.with_thinking(config.thinking_budget)
+                } else {
+                    model
+                };
+
+                Ok(Arc::new(model))
+            }
+            #[cfg(not(feature = "anthropic"))]
+            {
+                let _ = (model_name, config);
+                Err(ModelError::Configuration(
+                    "Anthropic support not enabled. Enable 'anthropic' feature.".to_string(),
+                ))
+            }
+        }
+        #[cfg(feature = "groq")]
+        "groq" => {
+            let model = if let Some(ref key) = config.api_key {
+                GroqModel::new(model_name, key)
+            } else {
+                GroqModel::from_env(model_name)?
+            };
+
+            Ok(Arc::new(model))
+        }
+        #[cfg(feature = "mistral")]
+        "mistral" => {
+            let model = if let Some(ref key) = config.api_key {
+                MistralModel::new(model_name, key)
+            } else {
+                MistralModel::from_env(model_name)?
+            };
+
+            let model = if let Some(ref url) = config.base_url {
+                model.with_base_url(url)
+            } else {
+                model
+            };
+
+            let model = if let Some(t) = config.timeout {
+                model.with_timeout(t)
+            } else {
+                model
+            };
+
+            Ok(Arc::new(model))
+        }
+        #[cfg(feature = "ollama")]
+        "ollama" => {
+            let model = OllamaModel::from_env(model_name)?;
+
+            let model = if let Some(ref url) = config.base_url {
+                model.with_base_url(url)
+            } else {
+                model
+            };
+
+            Ok(Arc::new(model))
+        }
+        #[cfg(feature = "google")]
+        "google" | "gemini" => {
+            let key: String = if let Some(k) = config.api_key {
+                k
+            } else {
+                std::env::var("GOOGLE_API_KEY").map_err(|_| {
+                    ModelError::Configuration(
+                        "Google/Gemini models require an API key.".to_string()
+                    )
+                })?
+            };
+
+            let model = GoogleModel::new(model_name, key);
+
+            let model = if let Some(ref url) = config.base_url {
+                model.with_base_url(url)
+            } else {
+                model
+            };
+
+            Ok(Arc::new(model))
+        }
+        _ => Err(ModelError::Configuration(format!(
+            "Unknown or unsupported provider: '{}'. Supported providers depend on enabled features.",
+            provider
+        ))),
+    }
+}
