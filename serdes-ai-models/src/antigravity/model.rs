@@ -288,12 +288,18 @@ impl AntigravityModel {
                     parts.push(Part::text(&text.content));
                 }
                 ModelResponsePart::ToolCall(tc) => {
+                    // Extract thought signature from provider_details if present
+                    let thought_signature = tc.provider_details.as_ref().and_then(|d| {
+                        d.get("thoughtSignature").and_then(|v| v.as_str().map(|s| s.to_string()))
+                    });
+                    
                     parts.push(Part::FunctionCall {
                         function_call: FunctionCall {
                             name: tc.tool_name.clone(),
                             args: tc.args.to_json(),
                             id: tc.tool_call_id.clone(),
                         },
+                        thought_signature,
                     });
                 }
                 ModelResponsePart::Thinking(think) => {
@@ -443,16 +449,24 @@ impl AntigravityModel {
                         Part::Text { text } => {
                             parts.push(ModelResponsePart::text(text.clone()));
                         }
-                        Part::FunctionCall { function_call } => {
+                        Part::FunctionCall { function_call, thought_signature } => {
                             let call_id = function_call
                                 .id
                                 .clone()
                                 .unwrap_or_else(|| format!("call_{}", parts.len()));
-                            let tool_part = ToolCallPart::new(
+                            let mut tool_part = ToolCallPart::new(
                                 function_call.name.clone(),
                                 function_call.args.clone(),
                             )
                             .with_tool_call_id(call_id);
+                            
+                            // Store thought signature for multi-turn tool calls
+                            if let Some(sig) = thought_signature {
+                                let mut details = serde_json::Map::new();
+                                details.insert("thoughtSignature".to_string(), serde_json::Value::String(sig.clone()));
+                                tool_part.provider_details = Some(details);
+                            }
+                            
                             parts.push(ModelResponsePart::ToolCall(tool_part));
                             finish_reason = FinishReason::ToolCall;
                         }

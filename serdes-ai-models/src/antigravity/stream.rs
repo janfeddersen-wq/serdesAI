@@ -229,7 +229,7 @@ fn process_response(
                     )));
                 }
             }
-            Part::FunctionCall { function_call } => {
+            Part::FunctionCall { function_call, thought_signature } => {
                 // Start new function call part
                 let idx = *next_part_index;
                 *next_part_index += 1;
@@ -238,6 +238,13 @@ fn process_response(
                     ToolCallPart::new(&function_call.name, function_call.args.clone());
                 if let Some(id) = &function_call.id {
                     tool_part = tool_part.with_tool_call_id(id);
+                }
+                
+                // Store thought signature in provider_details for multi-turn tool calls
+                if let Some(sig) = thought_signature {
+                    let mut details = serde_json::Map::new();
+                    details.insert("thoughtSignature".to_string(), serde_json::Value::String(sig.clone()));
+                    tool_part.provider_details = Some(details);
                 }
 
                 parts.insert(

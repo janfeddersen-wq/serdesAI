@@ -173,11 +173,14 @@ pub enum Part {
         #[serde(rename = "inlineData")]
         inline_data: InlineData,
     },
-    /// Function call from model.
+    /// Function call from model (with optional thought signature).
     FunctionCall {
         /// The function call.
         #[serde(rename = "functionCall")]
         function_call: FunctionCall,
+        /// Thought signature for multi-turn tool calls.
+        #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
+        thought_signature: Option<String>,
     },
     /// Function response to model.
     FunctionResponse {
