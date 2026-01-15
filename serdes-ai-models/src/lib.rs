@@ -149,6 +149,15 @@ pub mod claude_code_oauth;
 #[cfg(feature = "claude-code-oauth")]
 pub use claude_code_oauth::ClaudeCodeOAuthModel;
 
+/// Antigravity models (Google Cloud Code API with OAuth tokens).
+/// Provides access to Gemini and Claude models via Google's Antigravity API.
+#[cfg(feature = "antigravity")]
+#[cfg_attr(docsrs, doc(cfg(feature = "antigravity")))]
+pub mod antigravity;
+
+#[cfg(feature = "antigravity")]
+pub use antigravity::AntigravityModel;
+
 // Mock for testing
 pub mod mock;
 

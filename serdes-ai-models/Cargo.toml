@@ -12,7 +12,7 @@ categories = ["api-bindings"]
 
 [features]
 default = ["openai"]
-full = ["openai", "anthropic", "google", "mistral", "groq", "ollama", "bedrock", "azure", "openrouter", "huggingface", "cohere", "chatgpt-oauth", "claude-code-oauth"]
+full = ["openai", "anthropic", "google", "mistral", "groq", "ollama", "bedrock", "azure", "openrouter", "huggingface", "cohere", "chatgpt-oauth", "claude-code-oauth", "antigravity"]
 
 # Provider implementations
 openai = []
@@ -29,6 +29,7 @@ huggingface = []
 cohere = []
 chatgpt-oauth = []
 claude-code-oauth = []
+antigravity = ["dep:uuid"]
 
 [dependencies]
 serdes-ai-core = { workspace = true }
@@ -55,6 +56,9 @@ tokio-stream = "0.1"
 # Optional AWS dependencies for Bedrock
 aws-config = { version = "1.1", optional = true }
 aws-sdk-bedrockruntime = { version = "1.15", optional = true }
+
+# Optional UUID for Antigravity
+uuid = { version = "1.0", features = ["v4"], optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
