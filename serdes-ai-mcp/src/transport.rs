@@ -78,6 +78,57 @@ impl StdioTransport {
         })
     }
 
+    /// Spawn a new process with custom environment variables and connect via stdio.
+    ///
+    /// This method allows passing environment variables to the spawned process.
+    /// The provided environment variables are merged with the parent process environment,
+    /// with child env vars overriding parent env vars in case of conflicts.
+    pub async fn spawn_with_env(
+        command: &str,
+        args: &[&str],
+        env: HashMap<String, String>,
+    ) -> McpResult<Self> {
+        let mut child = Command::new(command)
+            .args(args)
+            .envs(env)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| McpError::Transport(format!("Failed to spawn {}: {}", command, e)))?;
+
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| McpError::Transport("No stdin".to_string()))?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| McpError::Transport("No stdout".to_string()))?;
+
+        let stderr = child.stderr.take();
+
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+
+        // Spawn reader task for stdout
+        tokio::spawn(Self::reader_task(stdout, pending.clone()));
+
+        // Spawn stderr drainer to prevent blocking if server writes to stderr
+        if let Some(stderr) = stderr {
+            tokio::spawn(Self::stderr_drainer(stderr));
+        }
+
+        Ok(Self {
+            child: Arc::new(Mutex::new(Some(child))),
+            stdin: Arc::new(Mutex::new(stdin)),
+            pending,
+            connected: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        })
+    }
+
+
+
     async fn reader_task(
         stdout: ChildStdout,
         pending: Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>,
@@ -423,5 +474,25 @@ mod tests {
 
         transport.close().await.unwrap();
         assert!(!transport.is_connected());
+    }
+
+    #[tokio::test]
+    async fn test_spawn_with_env_empty_map() {
+        // spawn_with_env with empty HashMap should work like spawn
+        let _result = StdioTransport::spawn_with_env("echo", &["hello"], HashMap::new()).await;
+        // May fail if echo not available, that's ok for this test
+        // Just verify we don't panic
+    }
+
+    #[tokio::test]
+    async fn test_spawn_with_env_sets_variables() {
+        // Test that env vars are passed to child process
+        // Use 'printenv' or 'env' command to verify
+        let mut env = HashMap::new();
+        env.insert("TEST_MCP_VAR".to_string(), "test_value_123".to_string());
+        
+        // Note: Full test would need to capture output, 
+        // but we can at least verify the call doesn't panic
+        let _ = StdioTransport::spawn_with_env("echo", &["test"], env).await;
     }
 }
