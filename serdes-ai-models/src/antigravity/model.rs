@@ -146,9 +146,10 @@ impl AntigravityModel {
                 .map_err(|e| ModelError::api(format!("Invalid auth header: {}", e)))?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        // Use Antigravity headers (same as CLIProxy/Vibeproxy)
         headers.insert(
             USER_AGENT,
-            HeaderValue::from_static("google-api-nodejs-client/9.15.1"),
+            HeaderValue::from_static("antigravity/1.11.5 windows/amd64"),
         );
         headers.insert(
             HeaderName::from_static("x-goog-api-client"),

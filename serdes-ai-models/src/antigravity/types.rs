@@ -404,10 +404,11 @@ pub struct AntigravityConfig {
 impl Default for AntigravityConfig {
     fn default() -> Self {
         Self {
-            endpoint: ANTIGRAVITY_ENDPOINT_PROD.to_string(),
+            // Daily sandbox first (same as CLIProxy/Vibeproxy)
+            endpoint: ANTIGRAVITY_ENDPOINT_DAILY.to_string(),
             fallback_endpoints: vec![
-                ANTIGRAVITY_ENDPOINT_DAILY.to_string(),
                 ANTIGRAVITY_ENDPOINT_AUTOPUSH.to_string(),
+                ANTIGRAVITY_ENDPOINT_PROD.to_string(),
             ],
             timeout_secs: 180,
         }
