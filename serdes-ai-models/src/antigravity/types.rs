@@ -159,9 +159,38 @@ impl Content {
 }
 
 /// Content part.
+/// 
+/// IMPORTANT: Order matters for untagged enums! More specific variants must come first.
+/// - Thinking (requires both `thought` and `text`) must come before Text (only requires `text`)
+/// - FunctionCall (requires `functionCall`) must come before ThoughtSignature
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Part {
+    /// Thinking block (for Claude/Gemini models).
+    /// Format: {"thought": true, "text": "thinking content"}
+    /// Must come BEFORE Text since both have `text` field!
+    Thinking {
+        /// Boolean flag indicating this is a thinking block.
+        thought: bool,
+        /// The actual thinking content.
+        text: String,
+    },
+    /// Function call from model (with optional thought signature).
+    /// Must come before ThoughtSignature since FunctionCall can also have thoughtSignature.
+    FunctionCall {
+        /// The function call.
+        #[serde(rename = "functionCall")]
+        function_call: FunctionCall,
+        /// Thought signature for multi-turn tool calls.
+        #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
+        thought_signature: Option<String>,
+    },
+    /// Thought signature only (for multi-turn conversations).
+    ThoughtSignature {
+        /// The thought signature.
+        #[serde(rename = "thoughtSignature")]
+        thought_signature: String,
+    },
     /// Text content.
     Text {
         /// The text content.
@@ -173,34 +202,11 @@ pub enum Part {
         #[serde(rename = "inlineData")]
         inline_data: InlineData,
     },
-    /// Function call from model (with optional thought signature).
-    FunctionCall {
-        /// The function call.
-        #[serde(rename = "functionCall")]
-        function_call: FunctionCall,
-        /// Thought signature for multi-turn tool calls.
-        #[serde(rename = "thoughtSignature", skip_serializing_if = "Option::is_none")]
-        thought_signature: Option<String>,
-    },
     /// Function response to model.
     FunctionResponse {
         /// The function response.
         #[serde(rename = "functionResponse")]
         function_response: FunctionResponse,
-    },
-    /// Thinking block (for Claude/Gemini models).
-    /// Format: {"thought": true, "text": "thinking content"}
-    Thinking {
-        /// Boolean flag indicating this is a thinking block.
-        thought: bool,
-        /// The actual thinking content.
-        text: String,
-    },
-    /// Thought signature (for multi-turn conversations).
-    ThoughtSignature {
-        /// The thought signature.
-        #[serde(rename = "thoughtSignature")]
-        thought_signature: String,
     },
 }
 
