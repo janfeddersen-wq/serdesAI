@@ -160,7 +160,7 @@ impl ModelConfig {
     ///
     /// # Note
     ///
-    /// This method delegates to `serdes_ai_models::infer_model_with_config` when 
+    /// This method delegates to `serdes_ai_models::infer_model_with_config` when
     /// using default settings (no custom API key/base URL), or creates the model
     /// directly when custom configuration is provided.
     ///

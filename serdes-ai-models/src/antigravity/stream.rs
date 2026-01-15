@@ -15,7 +15,7 @@ use serdes_ai_core::ModelResponsePart;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tracing::{debug, trace, warn};
+use tracing::{trace, warn};
 
 pin_project! {
     /// SSE stream parser for Antigravity responses.
@@ -71,31 +71,25 @@ where
         }
 
         loop {
-            // Try to parse complete SSE events from buffer
-            debug!("Buffer length: {}, looking for events", this.buffer.len());
-            if this.buffer.len() > 0 && this.buffer.len() < 1000 {
-                debug!("Buffer content: {:?}", this.buffer);
-            } else if this.buffer.len() >= 1000 {
-                debug!("Buffer first 500 chars: {:?}", &this.buffer[..500]);
-            }
             // Try both \r\n\r\n (Windows) and \n\n (Unix) line endings
             let separator = if this.buffer.contains("\r\n\r\n") {
                 "\r\n\r\n"
             } else {
                 "\n\n"
             };
+
+            // Parse complete SSE events from buffer
             while let Some(event_end) = this.buffer.find(separator) {
-                let event = this.buffer.drain(..event_end + separator.len()).collect::<String>();
-                debug!("Found SSE event: {:?}", &event[..event.len().min(200)]);
+                let event = this
+                    .buffer
+                    .drain(..event_end + separator.len())
+                    .collect::<String>();
 
                 // Parse SSE event lines
                 for line in event.lines() {
-                    debug!("SSE line: {:?}", line);
                     if let Some(data) = line.strip_prefix("data: ") {
-                        debug!("SSE data: {:?}", &data[..data.len().min(200)]);
                         // Handle [DONE] marker
                         if data == "[DONE]" {
-                            debug!("Got [DONE] marker");
                             *this.done = true;
                             return Poll::Ready(None);
                         }
@@ -103,7 +97,6 @@ where
                         // Parse the JSON response
                         match serde_json::from_str::<AntigravityResponse>(data) {
                             Ok(response) => {
-                                debug!("Parsed response with {} candidates", response.response.candidates.len());
                                 if let Some(event) = process_response(
                                     &response,
                                     this.parts,
@@ -115,7 +108,7 @@ where
                             }
                             Err(e) => {
                                 warn!("Failed to parse Antigravity stream chunk: {}", e);
-                                debug!("Raw data that failed: {}", data);
+                                trace!("Raw data that failed: {}", data);
                             }
                         }
                     }
@@ -126,8 +119,6 @@ where
             match this.inner.as_mut().poll_next(cx) {
                 Poll::Ready(Some(Ok(bytes))) => {
                     if let Ok(text) = std::str::from_utf8(&bytes) {
-                        trace!("SSE chunk received: {} bytes", text.len());
-                        trace!("SSE chunk content: {:?}", &text[..text.len().min(500)]);
                         this.buffer.push_str(text);
                     }
                 }
@@ -136,33 +127,22 @@ where
                 }
                 Poll::Ready(None) => {
                     *this.done = true;
-                    debug!("Stream ended, remaining buffer length: {}", this.buffer.len());
-                    if !this.buffer.is_empty() {
-                        debug!("Final buffer content (first 1000): {:?}", &this.buffer[..this.buffer.len().min(1000)]);
-                    }
-                    // Process any remaining buffer - try different line endings
+                    // Process any remaining buffer
                     if !this.buffer.is_empty() {
                         let remaining = std::mem::take(this.buffer);
-                        // Try splitting by single \n as well
                         for line in remaining.lines() {
-                            debug!("Processing remaining line: {:?}", &line[..line.len().min(200)]);
                             if let Some(data) = line.strip_prefix("data: ") {
-                                debug!("Found data line: {:?}", &data[..data.len().min(200)]);
                                 if data != "[DONE]" {
-                                    match serde_json::from_str::<AntigravityResponse>(data) {
-                                        Ok(response) => {
-                                            debug!("Parsed final response with {} candidates", response.response.candidates.len());
-                                            if let Some(event) = process_response(
-                                                &response,
-                                                this.parts,
-                                                this.next_part_index,
-                                                this.done,
-                                            ) {
-                                                return Poll::Ready(Some(event));
-                                            }
-                                        }
-                                        Err(e) => {
-                                            debug!("Failed to parse final data: {}", e);
+                                    if let Ok(response) =
+                                        serde_json::from_str::<AntigravityResponse>(data)
+                                    {
+                                        if let Some(event) = process_response(
+                                            &response,
+                                            this.parts,
+                                            this.next_part_index,
+                                            this.done,
+                                        ) {
+                                            return Poll::Ready(Some(event));
                                         }
                                     }
                                 }
@@ -229,7 +209,10 @@ fn process_response(
                     )));
                 }
             }
-            Part::FunctionCall { function_call, thought_signature } => {
+            Part::FunctionCall {
+                function_call,
+                thought_signature,
+            } => {
                 // Start new function call part
                 let idx = *next_part_index;
                 *next_part_index += 1;
@@ -239,11 +222,14 @@ fn process_response(
                 if let Some(id) = &function_call.id {
                     tool_part = tool_part.with_tool_call_id(id);
                 }
-                
+
                 // Store thought signature in provider_details for multi-turn tool calls
                 if let Some(sig) = thought_signature {
                     let mut details = serde_json::Map::new();
-                    details.insert("thoughtSignature".to_string(), serde_json::Value::String(sig.clone()));
+                    details.insert(
+                        "thoughtSignature".to_string(),
+                        serde_json::Value::String(sig.clone()),
+                    );
                     tool_part.provider_details = Some(details);
                 }
 

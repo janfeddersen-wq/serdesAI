@@ -309,7 +309,7 @@ pub use serdes_ai_agent::{
 
 // Models
 pub use serdes_ai_models::Model;
-pub use serdes_ai_models::{build_model_with_config, build_model_extended, ExtendedModelConfig};
+pub use serdes_ai_models::{build_model_extended, build_model_with_config, ExtendedModelConfig};
 
 #[cfg(feature = "openai")]
 #[cfg_attr(docsrs, doc(cfg(feature = "openai")))]

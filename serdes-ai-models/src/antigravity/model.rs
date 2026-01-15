@@ -65,12 +65,14 @@ impl AntigravityModel {
         let model_name = model_name.into();
         let is_claude = model_name.contains("claude");
 
-        let mut profile = ModelProfile::default();
-        profile.supports_tools = true;
-        profile.supports_parallel_tools = true;
-        profile.supports_images = true;
-        profile.supports_reasoning = is_claude && model_name.contains("thinking");
-        profile.max_tokens = Some(if is_claude { 200_000 } else { 1_000_000 });
+        let profile = ModelProfile {
+            supports_tools: true,
+            supports_parallel_tools: true,
+            supports_images: true,
+            supports_reasoning: is_claude && model_name.contains("thinking"),
+            max_tokens: Some(if is_claude { 200_000 } else { 1_000_000 }),
+            ..Default::default()
+        };
 
         Self {
             model_name,
@@ -204,9 +206,9 @@ impl AntigravityModel {
                         contents.push(Content::user_parts(parts));
                     }
                     ModelRequestPart::ToolReturn(ret) => {
-                        let response = ret.content.as_json().cloned().unwrap_or_else(|| {
-                            serde_json::json!({ "result": ret.content.to_string_content() })
-                        });
+                        let response = ret.content.as_json().cloned().unwrap_or_else(
+                            || serde_json::json!({ "result": ret.content.to_string_content() }),
+                        );
                         contents.push(Content {
                             role: "user".to_string(),
                             parts: vec![Part::FunctionResponse {
@@ -248,10 +250,7 @@ impl AntigravityModel {
     }
 
     /// Convert user content to parts.
-    fn convert_user_content(
-        &self,
-        user: &serdes_ai_core::messages::UserPromptPart,
-    ) -> Vec<Part> {
+    fn convert_user_content(&self, user: &serdes_ai_core::messages::UserPromptPart) -> Vec<Part> {
         let mut parts = Vec::new();
 
         for content_part in user.content.to_parts() {
@@ -259,13 +258,12 @@ impl AntigravityModel {
                 UserContentPart::Text { text } => {
                     parts.push(Part::text(text));
                 }
-                UserContentPart::Image { image } => {
-                    // Handle binary image data
-                    if let serdes_ai_core::messages::ImageContent::Binary(binary) = image {
-                        let mime_type = binary.media_type.mime_type();
-                        let data_b64 = binary.to_base64();
-                        parts.push(Part::inline_data(mime_type, data_b64));
-                    }
+                UserContentPart::Image {
+                    image: serdes_ai_core::messages::ImageContent::Binary(binary),
+                } => {
+                    let mime_type = binary.media_type.mime_type();
+                    let data_b64 = binary.to_base64();
+                    parts.push(Part::inline_data(mime_type, data_b64));
                 }
                 _ => {}
             }
@@ -290,9 +288,10 @@ impl AntigravityModel {
                 ModelResponsePart::ToolCall(tc) => {
                     // Extract thought signature from provider_details if present
                     let thought_signature = tc.provider_details.as_ref().and_then(|d| {
-                        d.get("thoughtSignature").and_then(|v| v.as_str().map(|s| s.to_string()))
+                        d.get("thoughtSignature")
+                            .and_then(|v| v.as_str().map(|s| s.to_string()))
                     });
-                    
+
                     parts.push(Part::FunctionCall {
                         function_call: FunctionCall {
                             name: tc.tool_name.clone(),
@@ -423,7 +422,10 @@ impl AntigravityModel {
                 gen_config.thinking_config = Some(ThinkingConfig {
                     include_thoughts: Some(true),
                     thinking_budget: None,
-                    thinking_level: self.thinking_level.clone().or_else(|| Some("low".to_string())),
+                    thinking_level: self
+                        .thinking_level
+                        .clone()
+                        .or_else(|| Some("low".to_string())),
                 });
             }
         }
@@ -449,7 +451,10 @@ impl AntigravityModel {
                         Part::Text { text } => {
                             parts.push(ModelResponsePart::text(text.clone()));
                         }
-                        Part::FunctionCall { function_call, thought_signature } => {
+                        Part::FunctionCall {
+                            function_call,
+                            thought_signature,
+                        } => {
                             let call_id = function_call
                                 .id
                                 .clone()
@@ -459,14 +464,17 @@ impl AntigravityModel {
                                 function_call.args.clone(),
                             )
                             .with_tool_call_id(call_id);
-                            
+
                             // Store thought signature for multi-turn tool calls
                             if let Some(sig) = thought_signature {
                                 let mut details = serde_json::Map::new();
-                                details.insert("thoughtSignature".to_string(), serde_json::Value::String(sig.clone()));
+                                details.insert(
+                                    "thoughtSignature".to_string(),
+                                    serde_json::Value::String(sig.clone()),
+                                );
                                 tool_part.provider_details = Some(details);
                             }
-                            
+
                             parts.push(ModelResponsePart::ToolCall(tool_part));
                             finish_reason = FinishReason::ToolCall;
                         }

@@ -37,7 +37,6 @@ pub use model::AntigravityModel;
 pub use types::{
     AntigravityConfig, AntigravityRequest, AntigravityResponse, Content, FunctionCall,
     FunctionDeclaration, FunctionResponse, GeminiRequest, GenerationConfig, Part,
-    SystemInstruction, ThinkingConfig, Tool, ToolConfig,
-    ANTIGRAVITY_ENDPOINT_AUTOPUSH, ANTIGRAVITY_ENDPOINT_DAILY, ANTIGRAVITY_ENDPOINT_PROD,
-    DEFAULT_PROJECT_ID,
+    SystemInstruction, ThinkingConfig, Tool, ToolConfig, ANTIGRAVITY_ENDPOINT_AUTOPUSH,
+    ANTIGRAVITY_ENDPOINT_DAILY, ANTIGRAVITY_ENDPOINT_PROD, DEFAULT_PROJECT_ID,
 };

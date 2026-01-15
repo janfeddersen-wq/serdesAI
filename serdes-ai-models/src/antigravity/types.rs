@@ -16,7 +16,8 @@ pub const ANTIGRAVITY_ENDPOINT_PROD: &str = "https://cloudcode-pa.googleapis.com
 pub const ANTIGRAVITY_ENDPOINT_DAILY: &str = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 
 /// Autopush sandbox endpoint.
-pub const ANTIGRAVITY_ENDPOINT_AUTOPUSH: &str = "https://autopush-cloudcode-pa.sandbox.googleapis.com";
+pub const ANTIGRAVITY_ENDPOINT_AUTOPUSH: &str =
+    "https://autopush-cloudcode-pa.sandbox.googleapis.com";
 
 /// Default fallback project ID.
 pub const DEFAULT_PROJECT_ID: &str = "rising-fact-p41fc";
@@ -159,7 +160,7 @@ impl Content {
 }
 
 /// Content part.
-/// 
+///
 /// IMPORTANT: Order matters for untagged enums! More specific variants must come first.
 /// - Thinking (requires both `thought` and `text`) must come before Text (only requires `text`)
 /// - FunctionCall (requires `functionCall`) must come before ThoughtSignature

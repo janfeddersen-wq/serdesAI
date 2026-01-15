@@ -287,9 +287,7 @@ impl AgentStream {
                                             }
                                         }
                                         ModelResponsePart::Thinking(t) => {
-                                            debug!("PartStart: Thinking part received, content_len={}", t.content.len());
                                             if !t.content.is_empty() {
-                                                debug!("PartStart: Sending ThinkingDelta with {} chars", t.content.len());
                                                 let _ = tx
                                                     .send(Ok(AgentStreamEvent::ThinkingDelta {
                                                         text: t.content.clone(),
@@ -342,7 +340,6 @@ impl AgentStream {
                                             }
                                         }
                                         ModelResponsePartDelta::Thinking(t) => {
-                                            debug!("PartDelta: Thinking delta received, content_len={}", t.content_delta.len());
                                             let _ = tx
                                                 .send(Ok(AgentStreamEvent::ThinkingDelta {
                                                     text: t.content_delta.clone(),
