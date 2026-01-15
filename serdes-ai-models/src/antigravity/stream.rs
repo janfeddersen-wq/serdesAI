@@ -15,7 +15,7 @@ use serdes_ai_core::ModelResponsePart;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 pin_project! {
     /// SSE stream parser for Antigravity responses.
@@ -72,14 +72,19 @@ where
 
         loop {
             // Try to parse complete SSE events from buffer
+            debug!("Buffer length: {}, looking for events", this.buffer.len());
             while let Some(event_end) = this.buffer.find("\n\n") {
                 let event = this.buffer.drain(..event_end + 2).collect::<String>();
+                debug!("Found SSE event: {:?}", &event[..event.len().min(200)]);
 
                 // Parse SSE event lines
                 for line in event.lines() {
+                    debug!("SSE line: {:?}", line);
                     if let Some(data) = line.strip_prefix("data: ") {
+                        debug!("SSE data: {:?}", &data[..data.len().min(200)]);
                         // Handle [DONE] marker
                         if data == "[DONE]" {
+                            debug!("Got [DONE] marker");
                             *this.done = true;
                             return Poll::Ready(None);
                         }
@@ -87,6 +92,7 @@ where
                         // Parse the JSON response
                         match serde_json::from_str::<AntigravityResponse>(data) {
                             Ok(response) => {
+                                debug!("Parsed response with {} candidates", response.candidates.len());
                                 if let Some(event) = process_response(
                                     &response,
                                     this.parts,
@@ -98,7 +104,7 @@ where
                             }
                             Err(e) => {
                                 warn!("Failed to parse Antigravity stream chunk: {}", e);
-                                trace!("Raw data: {}", data);
+                                debug!("Raw data that failed: {}", data);
                             }
                         }
                     }
@@ -109,6 +115,8 @@ where
             match this.inner.as_mut().poll_next(cx) {
                 Poll::Ready(Some(Ok(bytes))) => {
                     if let Ok(text) = std::str::from_utf8(&bytes) {
+                        trace!("SSE chunk received: {} bytes", text.len());
+                        trace!("SSE chunk content: {:?}", &text[..text.len().min(500)]);
                         this.buffer.push_str(text);
                     }
                 }
