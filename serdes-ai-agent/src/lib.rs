@@ -83,7 +83,7 @@ pub mod stream;
 
 // Re-exports
 pub use agent::{Agent, EndStrategy, InstrumentationSettings, RegisteredTool, ToolExecutor};
-pub use builder::{agent, agent_with_deps, AgentBuilder};
+pub use builder::{agent, agent_with_deps, AgentBuilder, ModelConfig};
 pub use context::{generate_run_id, RunContext, RunUsage, UsageLimits};
 pub use errors::{
     AgentBuildError, AgentRunError, OutputParseError, OutputValidationError, UsageLimitError,

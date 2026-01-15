@@ -1,6 +1,46 @@
 //! Agent builder pattern.
 //!
 //! The builder provides a fluent interface for configuring agents.
+//!
+//! # Examples
+//!
+//! ## Using a model spec string (simplest)
+//!
+//! ```ignore
+//! use serdes_ai_agent::AgentBuilder;
+//!
+//! // Uses environment variables for API keys
+//! let agent = AgentBuilder::from_model("openai:gpt-4o")?
+//!     .system_prompt("You are helpful.")
+//!     .build();
+//! ```
+//!
+//! ## With explicit API key
+//!
+//! ```ignore
+//! use serdes_ai_agent::{AgentBuilder, ModelConfig};
+//!
+//! let config = ModelConfig::new("openai:gpt-4o")
+//!     .with_api_key("sk-your-api-key");
+//!
+//! let agent = AgentBuilder::from_config(config)?
+//!     .system_prompt("You are helpful.")
+//!     .build();
+//! ```
+//!
+//! ## With concrete model type (most control)
+//!
+//! ```ignore
+//! use serdes_ai_agent::AgentBuilder;
+//! use serdes_ai_models::openai::OpenAIChatModel;
+//!
+//! let model = OpenAIChatModel::new("gpt-4o", "sk-your-api-key")
+//!     .with_base_url("https://custom-endpoint.com/v1");
+//!
+//! let agent = AgentBuilder::new(model)
+//!     .system_prompt("You are helpful.")
+//!     .build();
+//! ```
 
 use crate::agent::{Agent, EndStrategy, InstrumentationSettings, RegisteredTool, ToolExecutor};
 use crate::context::{RunContext, UsageLimits};
@@ -17,11 +57,150 @@ use crate::output::{
 use serde::de::DeserializeOwned;
 use serde_json::Value as JsonValue;
 use serdes_ai_core::ModelSettings;
-use serdes_ai_models::Model;
+use serdes_ai_models::{Model, ModelError};
 use serdes_ai_tools::{ToolDefinition, ToolError, ToolReturn};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::time::Duration;
+
+// ============================================================================
+// Model Configuration
+// ============================================================================
+
+/// Configuration for creating a model from a string spec.
+///
+/// This allows specifying a model using the standard `provider:model` format
+/// while also providing custom API keys, base URLs, and other options.
+///
+/// # Examples
+///
+/// ```ignore
+/// use serdes_ai_agent::ModelConfig;
+///
+/// // Simple: just a model spec (uses env vars for keys)
+/// let config = ModelConfig::new("openai:gpt-4o");
+///
+/// // With explicit API key
+/// let config = ModelConfig::new("anthropic:claude-3-5-sonnet-20241022")
+///     .with_api_key("sk-ant-your-key");
+///
+/// // With custom base URL (for proxies or compatible APIs)
+/// let config = ModelConfig::new("openai:gpt-4o")
+///     .with_api_key("your-key")
+///     .with_base_url("https://your-proxy.com/v1");
+/// ```
+#[derive(Debug, Clone)]
+pub struct ModelConfig {
+    /// Model spec in `provider:model` format (e.g., "openai:gpt-4o")
+    pub spec: String,
+    /// Optional API key (overrides environment variable)
+    pub api_key: Option<String>,
+    /// Optional base URL (for custom endpoints)
+    pub base_url: Option<String>,
+    /// Optional request timeout
+    pub timeout: Option<Duration>,
+}
+
+impl ModelConfig {
+    /// Create a new model config from a spec string.
+    ///
+    /// The spec should be in `provider:model` format, e.g.:
+    /// - `"openai:gpt-4o"`
+    /// - `"anthropic:claude-3-5-sonnet-20241022"`
+    /// - `"groq:llama-3.1-70b-versatile"`
+    /// - `"ollama:llama3.1"`
+    ///
+    /// If no provider prefix is given, OpenAI is assumed.
+    #[must_use]
+    pub fn new(spec: impl Into<String>) -> Self {
+        Self {
+            spec: spec.into(),
+            api_key: None,
+            base_url: None,
+            timeout: None,
+        }
+    }
+
+    /// Set an explicit API key (overrides environment variable).
+    #[must_use]
+    pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
+        self.api_key = Some(api_key.into());
+        self
+    }
+
+    /// Set a custom base URL (for proxies or compatible APIs).
+    #[must_use]
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = Some(base_url.into());
+        self
+    }
+
+    /// Set a request timeout.
+    #[must_use]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    /// Parse the provider and model name from the spec.
+    fn parse_spec(&self) -> (&str, &str) {
+        if self.spec.contains(':') {
+            let parts: Vec<&str> = self.spec.splitn(2, ':').collect();
+            (parts[0], parts[1])
+        } else {
+            ("openai", self.spec.as_str())
+        }
+    }
+
+    /// Build a model from this configuration.
+    ///
+    /// This creates the appropriate model type based on the provider,
+    /// applying any custom API key, base URL, or timeout settings.
+    ///
+    /// # Note
+    ///
+    /// This method delegates to `serdes_ai_models::infer_model_with_config` when 
+    /// using default settings (no custom API key/base URL), or creates the model
+    /// directly when custom configuration is provided.
+    ///
+    /// The available providers depend on the features enabled in `serdes-ai-models`:
+    /// - `openai` (default) - OpenAI models (gpt-4o, gpt-4, etc.)
+    /// - `anthropic` - Anthropic models (claude-3-5-sonnet, etc.)
+    /// - `groq` - Groq models
+    /// - `mistral` - Mistral models
+    /// - `ollama` - Local Ollama models
+    /// - `google` - Google/Gemini models
+    pub fn build_model(&self) -> Result<Arc<dyn Model>, ModelError> {
+        // If no custom config, use infer_model which handles feature flags
+        if self.api_key.is_none() && self.base_url.is_none() && self.timeout.is_none() {
+            return serdes_ai_models::infer_model(&self.spec);
+        }
+
+        // Custom config requires building the model directly
+        let (provider, model_name) = self.parse_spec();
+
+        // We need to build the model with custom settings
+        // This requires the concrete model types which are behind feature flags
+        // in serdes-ai-models. We use a helper function pattern.
+        self.build_model_with_config(provider, model_name)
+    }
+
+    fn build_model_with_config(
+        &self,
+        provider: &str,
+        model_name: &str,
+    ) -> Result<Arc<dyn Model>, ModelError> {
+        // Use serdes_ai_models to build models - it has the feature flags
+        serdes_ai_models::build_model_with_config(
+            provider,
+            model_name,
+            self.api_key.as_deref(),
+            self.base_url.as_deref(),
+            self.timeout,
+        )
+    }
+}
 
 /// Builder for creating agents.
 pub struct AgentBuilder<Deps = (), Output = String> {
@@ -52,9 +231,44 @@ where
     Output: Send + Sync + 'static,
 {
     /// Create a new agent builder with the given model.
+    ///
+    /// This is the most flexible constructor, accepting any type that implements
+    /// the `Model` trait. Use this when you need full control over model configuration.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use serdes_ai_agent::AgentBuilder;
+    /// use serdes_ai_models::openai::OpenAIChatModel;
+    ///
+    /// let model = OpenAIChatModel::new("gpt-4o", "sk-your-api-key");
+    /// let agent = AgentBuilder::new(model)
+    ///     .system_prompt("You are helpful.")
+    ///     .build();
+    /// ```
     pub fn new<M: Model + 'static>(model: M) -> Self {
+        Self::from_arc(Arc::new(model))
+    }
+
+    /// Create a new agent builder from an `Arc<dyn Model>`.
+    ///
+    /// This is useful when you already have a model wrapped in an Arc,
+    /// such as from `infer_model()`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use serdes_ai_agent::AgentBuilder;
+    /// use serdes_ai_models::infer_model;
+    ///
+    /// let model = infer_model("openai:gpt-4o")?;
+    /// let agent = AgentBuilder::from_arc(model)
+    ///     .system_prompt("You are helpful.")
+    ///     .build();
+    /// ```
+    pub fn from_arc(model: Arc<dyn Model>) -> Self {
         Self {
-            model: Arc::new(model),
+            model,
             name: None,
             model_settings: ModelSettings::default(),
             instructions: Vec::new(),
@@ -74,6 +288,67 @@ where
             max_concurrent_tools: None,
             _phantom: PhantomData,
         }
+    }
+
+    /// Create a new agent builder from a model spec string.
+    ///
+    /// This is the simplest way to create an agent when you just need to specify
+    /// the model. API keys are read from environment variables.
+    ///
+    /// # Model Spec Format
+    ///
+    /// The spec should be in `provider:model` format:
+    /// - `"openai:gpt-4o"` - OpenAI GPT-4o
+    /// - `"anthropic:claude-3-5-sonnet-20241022"` - Anthropic Claude
+    /// - `"groq:llama-3.1-70b-versatile"` - Groq
+    /// - `"ollama:llama3.1"` - Local Ollama
+    ///
+    /// If no provider prefix is given, OpenAI is assumed.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use serdes_ai_agent::AgentBuilder;
+    ///
+    /// let agent = AgentBuilder::from_model("openai:gpt-4o")?
+    ///     .system_prompt("You are helpful.")
+    ///     .build();
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model cannot be created (e.g., missing API key,
+    /// unsupported provider, or disabled feature).
+    pub fn from_model(spec: impl Into<String>) -> Result<Self, ModelError> {
+        let config = ModelConfig::new(spec);
+        Self::from_config(config)
+    }
+
+    /// Create a new agent builder from a model configuration.
+    ///
+    /// This allows specifying custom API keys, base URLs, and other options
+    /// while still using the convenient string-based model spec.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use serdes_ai_agent::{AgentBuilder, ModelConfig};
+    ///
+    /// let config = ModelConfig::new("openai:gpt-4o")
+    ///     .with_api_key("sk-your-api-key")
+    ///     .with_base_url("https://your-proxy.com/v1");
+    ///
+    /// let agent = AgentBuilder::from_config(config)?
+    ///     .system_prompt("You are helpful.")
+    ///     .build();
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the model cannot be created.
+    pub fn from_config(config: ModelConfig) -> Result<Self, ModelError> {
+        let model = config.build_model()?;
+        Ok(Self::from_arc(model))
     }
 
     /// Set agent name.
@@ -688,5 +963,81 @@ mod tests {
         // Config should be preserved when changing output type
         assert!(!agent.parallel_tool_calls());
         assert_eq!(agent.max_concurrent_tools(), Some(2));
+    }
+
+    #[test]
+    fn test_builder_from_arc() {
+        let model = create_mock_model();
+        let arc_model: Arc<dyn Model> = Arc::new(model);
+        let agent = AgentBuilder::<(), String>::from_arc(arc_model)
+            .name("arc-agent")
+            .build();
+
+        assert_eq!(agent.name(), Some("arc-agent"));
+    }
+
+    #[test]
+    fn test_model_config_basic() {
+        let config = ModelConfig::new("openai:gpt-4o");
+        assert_eq!(config.spec, "openai:gpt-4o");
+        assert!(config.api_key.is_none());
+        assert!(config.base_url.is_none());
+        assert!(config.timeout.is_none());
+    }
+
+    #[test]
+    fn test_model_config_with_options() {
+        let config = ModelConfig::new("anthropic:claude-3-5-sonnet-20241022")
+            .with_api_key("sk-test-key")
+            .with_base_url("https://custom.api.com")
+            .with_timeout(Duration::from_secs(60));
+
+        assert_eq!(config.spec, "anthropic:claude-3-5-sonnet-20241022");
+        assert_eq!(config.api_key, Some("sk-test-key".to_string()));
+        assert_eq!(config.base_url, Some("https://custom.api.com".to_string()));
+        assert_eq!(config.timeout, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn test_model_config_parse_spec_with_provider() {
+        let config = ModelConfig::new("openai:gpt-4o");
+        let (provider, model) = config.parse_spec();
+        assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-4o");
+    }
+
+    #[test]
+    fn test_model_config_parse_spec_without_provider() {
+        let config = ModelConfig::new("gpt-4o");
+        let (provider, model) = config.parse_spec();
+        assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-4o");
+    }
+
+    #[test]
+    fn test_model_config_parse_spec_anthropic() {
+        let config = ModelConfig::new("anthropic:claude-3-5-sonnet-20241022");
+        let (provider, model) = config.parse_spec();
+        assert_eq!(provider, "anthropic");
+        assert_eq!(model, "claude-3-5-sonnet-20241022");
+    }
+
+    #[test]
+    fn test_model_config_unknown_provider() {
+        let config = ModelConfig::new("unknown:some-model");
+        let result = config.build_model();
+        assert!(result.is_err());
+        // Can't use unwrap_err because Arc<dyn Model> doesn't impl Debug
+        match result {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(
+                    msg.contains("Unknown") || msg.contains("unsupported"),
+                    "Expected error about unknown provider, got: {}",
+                    msg
+                );
+            }
+            Ok(_) => panic!("Expected error for unknown provider"),
+        }
     }
 }
