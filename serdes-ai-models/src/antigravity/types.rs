@@ -309,16 +309,19 @@ pub struct GenerationConfig {
     pub thinking_config: Option<ThinkingConfig>,
 }
 
-/// Thinking configuration for Claude models.
+/// Thinking configuration for Claude and Gemini models.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThinkingConfig {
     /// Include thoughts in response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_thoughts: Option<bool>,
-    /// Thinking budget tokens.
+    /// Thinking budget tokens (for Claude models).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budget: Option<u64>,
+    /// Thinking level for Gemini 3 models (low, medium, high).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
 }
 
 // ============================================================================

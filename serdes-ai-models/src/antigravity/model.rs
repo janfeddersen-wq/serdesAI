@@ -39,10 +39,12 @@ pub struct AntigravityModel {
     client: Client,
     config: AntigravityConfig,
     profile: ModelProfile,
-    /// Enable thinking (for Claude models).
+    /// Enable thinking (for Claude and Gemini 3 models).
     enable_thinking: bool,
-    /// Thinking budget tokens.
+    /// Thinking budget tokens (for Claude models).
     thinking_budget: Option<u64>,
+    /// Thinking level for Gemini 3 models (low, medium, high).
+    thinking_level: Option<String>,
     /// Location for regional routing.
     location: String,
 }
@@ -79,15 +81,25 @@ impl AntigravityModel {
             profile,
             enable_thinking: false,
             thinking_budget: None,
+            thinking_level: None,
             location: "us-central1".to_string(),
         }
     }
 
-    /// Enable thinking mode (for Claude models).
+    /// Enable thinking mode (for Claude models with budget, or Gemini 3 with level).
     #[must_use]
     pub fn with_thinking(mut self, budget: Option<u64>) -> Self {
         self.enable_thinking = true;
         self.thinking_budget = budget;
+        self.profile.supports_reasoning = true;
+        self
+    }
+
+    /// Set thinking level for Gemini 3 models (low, medium, high).
+    #[must_use]
+    pub fn with_thinking_level(mut self, level: impl Into<String>) -> Self {
+        self.enable_thinking = true;
+        self.thinking_level = Some(level.into());
         self.profile.supports_reasoning = true;
         self
     }
@@ -385,17 +397,28 @@ impl AntigravityModel {
             gen_config.max_output_tokens = Some(max_tokens as i32);
         }
 
-        // Thinking config for Claude
-        if self.is_claude() && self.enable_thinking {
-            gen_config.thinking_config = Some(ThinkingConfig {
-                include_thoughts: Some(true),
-                thinking_budget: self.thinking_budget,
-            });
-            // Claude thinking needs larger max output
-            if gen_config.max_output_tokens.is_none()
-                || gen_config.max_output_tokens.unwrap() < 16000
-            {
-                gen_config.max_output_tokens = Some(64000);
+        // Thinking config
+        if self.enable_thinking {
+            if self.is_claude() {
+                // Claude uses thinking_budget
+                gen_config.thinking_config = Some(ThinkingConfig {
+                    include_thoughts: Some(true),
+                    thinking_budget: self.thinking_budget,
+                    thinking_level: None,
+                });
+                // Claude thinking needs larger max output
+                if gen_config.max_output_tokens.is_none()
+                    || gen_config.max_output_tokens.unwrap() < 16000
+                {
+                    gen_config.max_output_tokens = Some(64000);
+                }
+            } else if self.thinking_level.is_some() || self.model_name.contains("gemini-3") {
+                // Gemini 3 uses thinkingLevel
+                gen_config.thinking_config = Some(ThinkingConfig {
+                    include_thoughts: Some(true),
+                    thinking_budget: None,
+                    thinking_level: self.thinking_level.clone().or_else(|| Some("low".to_string())),
+                });
             }
         }
 
