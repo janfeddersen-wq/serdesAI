@@ -298,8 +298,8 @@ impl AntigravityModel {
                 }
                 ModelResponsePart::Thinking(think) => {
                     parts.push(Part::Thinking {
-                        thought: think.content.clone(),
-                        signature: think.signature.clone(),
+                        thought: true,
+                        text: think.content.clone(),
                     });
                 }
                 _ => {}
@@ -436,7 +436,7 @@ impl AntigravityModel {
         let mut parts = Vec::new();
         let mut finish_reason = FinishReason::EndTurn;
 
-        for candidate in &response.candidates {
+        for candidate in &response.response.candidates {
             if let Some(content) = &candidate.content {
                 for part in &content.parts {
                     match part {
@@ -456,12 +456,12 @@ impl AntigravityModel {
                             parts.push(ModelResponsePart::ToolCall(tool_part));
                             finish_reason = FinishReason::ToolCall;
                         }
-                        Part::Thinking { thought, signature } => {
-                            let mut thinking_part = ThinkingPart::new(thought.clone());
-                            if let Some(sig) = signature {
-                                thinking_part = thinking_part.with_signature(sig);
-                            }
+                        Part::Thinking { thought: _, text } => {
+                            let thinking_part = ThinkingPart::new(text.clone());
                             parts.push(ModelResponsePart::Thinking(thinking_part));
+                        }
+                        Part::ThoughtSignature { .. } => {
+                            // Skip thought signatures for now
                         }
                         _ => {}
                     }
@@ -478,7 +478,7 @@ impl AntigravityModel {
             }
         }
 
-        let usage = response.usage_metadata.map(|u| RequestUsage {
+        let usage = response.response.usage_metadata.map(|u| RequestUsage {
             request_tokens: u.prompt_token_count.map(|n| n as u64),
             response_tokens: u.candidates_token_count.map(|n| n as u64),
             total_tokens: u.total_token_count.map(|n| n as u64),

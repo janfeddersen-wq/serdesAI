@@ -185,13 +185,19 @@ pub enum Part {
         #[serde(rename = "functionResponse")]
         function_response: FunctionResponse,
     },
-    /// Thinking block (for Claude models).
+    /// Thinking block (for Claude/Gemini models).
+    /// Format: {"thought": true, "text": "thinking content"}
     Thinking {
-        /// The thought content.
-        thought: String,
-        /// Signature for the thinking block.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        signature: Option<String>,
+        /// Boolean flag indicating this is a thinking block.
+        thought: bool,
+        /// The actual thinking content.
+        text: String,
+    },
+    /// Thought signature (for multi-turn conversations).
+    ThoughtSignature {
+        /// The thought signature.
+        #[serde(rename = "thoughtSignature")]
+        thought_signature: String,
     },
 }
 
@@ -328,10 +334,22 @@ pub struct ThinkingConfig {
 // Response Types
 // ============================================================================
 
-/// Antigravity response (unwrapped from SSE or direct).
+/// Wrapped streaming response from Antigravity API.
+/// The actual Gemini response is nested inside "response" field.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AntigravityResponse {
+    /// The actual Gemini-style response.
+    pub response: GeminiStreamResponse,
+    /// Trace ID for debugging.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+}
+
+/// Inner Gemini-style response from stream.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeminiStreamResponse {
     /// Candidates (response options).
     #[serde(default)]
     pub candidates: Vec<Candidate>,
@@ -341,6 +359,9 @@ pub struct AntigravityResponse {
     /// Model version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_version: Option<String>,
+    /// Response ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_id: Option<String>,
 }
 
 /// Response candidate.

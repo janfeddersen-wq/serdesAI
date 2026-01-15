@@ -78,8 +78,14 @@ where
             } else if this.buffer.len() >= 1000 {
                 debug!("Buffer first 500 chars: {:?}", &this.buffer[..500]);
             }
-            while let Some(event_end) = this.buffer.find("\n\n") {
-                let event = this.buffer.drain(..event_end + 2).collect::<String>();
+            // Try both \r\n\r\n (Windows) and \n\n (Unix) line endings
+            let separator = if this.buffer.contains("\r\n\r\n") {
+                "\r\n\r\n"
+            } else {
+                "\n\n"
+            };
+            while let Some(event_end) = this.buffer.find(separator) {
+                let event = this.buffer.drain(..event_end + separator.len()).collect::<String>();
                 debug!("Found SSE event: {:?}", &event[..event.len().min(200)]);
 
                 // Parse SSE event lines
@@ -97,7 +103,7 @@ where
                         // Parse the JSON response
                         match serde_json::from_str::<AntigravityResponse>(data) {
                             Ok(response) => {
-                                debug!("Parsed response with {} candidates", response.candidates.len());
+                                debug!("Parsed response with {} candidates", response.response.candidates.len());
                                 if let Some(event) = process_response(
                                     &response,
                                     this.parts,
@@ -145,7 +151,7 @@ where
                                 if data != "[DONE]" {
                                     match serde_json::from_str::<AntigravityResponse>(data) {
                                         Ok(response) => {
-                                            debug!("Parsed final response with {} candidates", response.candidates.len());
+                                            debug!("Parsed final response with {} candidates", response.response.candidates.len());
                                             if let Some(event) = process_response(
                                                 &response,
                                                 this.parts,
@@ -178,8 +184,8 @@ fn process_response(
     next_part_index: &mut usize,
     done: &mut bool,
 ) -> Option<Result<ModelResponseStreamEvent, ModelError>> {
-    // Get the first candidate
-    let candidate = response.candidates.first()?;
+    // Get the first candidate from the wrapped response
+    let candidate = response.response.candidates.first()?;
     let content = candidate.content.as_ref()?;
 
     // Process each part
@@ -246,8 +252,9 @@ fn process_response(
                     PartStartEvent::new(idx, ModelResponsePart::ToolCall(tool_part)),
                 )));
             }
-            Part::Thinking { thought, .. } => {
-                if thought.is_empty() {
+            Part::Thinking { thought: _, text } => {
+                // thought is a bool flag, text contains the actual thinking content
+                if text.is_empty() {
                     continue;
                 }
 
@@ -262,7 +269,7 @@ fn process_response(
 
                 if let Some(idx) = think_part_idx {
                     if let Some(PartState::Thinking { content }) = parts.get_mut(&idx) {
-                        let delta = thought.clone();
+                        let delta = text.clone();
                         content.push_str(&delta);
                         return Some(Ok(ModelResponseStreamEvent::PartDelta(
                             PartDeltaEvent::thinking(idx, delta),
@@ -274,16 +281,20 @@ fn process_response(
                     parts.insert(
                         idx,
                         PartState::Thinking {
-                            content: thought.clone(),
+                            content: text.clone(),
                         },
                     );
                     return Some(Ok(ModelResponseStreamEvent::PartStart(
                         PartStartEvent::new(
                             idx,
-                            ModelResponsePart::Thinking(ThinkingPart::new(thought)),
+                            ModelResponsePart::Thinking(ThinkingPart::new(text)),
                         ),
                     )));
                 }
+            }
+            Part::ThoughtSignature { .. } => {
+                // Thought signatures are used for multi-turn, we can skip them for now
+                continue;
             }
             _ => {}
         }
