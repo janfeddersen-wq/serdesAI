@@ -73,6 +73,11 @@ where
         loop {
             // Try to parse complete SSE events from buffer
             debug!("Buffer length: {}, looking for events", this.buffer.len());
+            if this.buffer.len() > 0 && this.buffer.len() < 1000 {
+                debug!("Buffer content: {:?}", this.buffer);
+            } else if this.buffer.len() >= 1000 {
+                debug!("Buffer first 500 chars: {:?}", &this.buffer[..500]);
+            }
             while let Some(event_end) = this.buffer.find("\n\n") {
                 let event = this.buffer.drain(..event_end + 2).collect::<String>();
                 debug!("Found SSE event: {:?}", &event[..event.len().min(200)]);
@@ -125,22 +130,33 @@ where
                 }
                 Poll::Ready(None) => {
                     *this.done = true;
-                    // Process any remaining buffer
+                    debug!("Stream ended, remaining buffer length: {}", this.buffer.len());
+                    if !this.buffer.is_empty() {
+                        debug!("Final buffer content (first 1000): {:?}", &this.buffer[..this.buffer.len().min(1000)]);
+                    }
+                    // Process any remaining buffer - try different line endings
                     if !this.buffer.is_empty() {
                         let remaining = std::mem::take(this.buffer);
+                        // Try splitting by single \n as well
                         for line in remaining.lines() {
+                            debug!("Processing remaining line: {:?}", &line[..line.len().min(200)]);
                             if let Some(data) = line.strip_prefix("data: ") {
+                                debug!("Found data line: {:?}", &data[..data.len().min(200)]);
                                 if data != "[DONE]" {
-                                    if let Ok(response) =
-                                        serde_json::from_str::<AntigravityResponse>(data)
-                                    {
-                                        if let Some(event) = process_response(
-                                            &response,
-                                            this.parts,
-                                            this.next_part_index,
-                                            this.done,
-                                        ) {
-                                            return Poll::Ready(Some(event));
+                                    match serde_json::from_str::<AntigravityResponse>(data) {
+                                        Ok(response) => {
+                                            debug!("Parsed final response with {} candidates", response.candidates.len());
+                                            if let Some(event) = process_response(
+                                                &response,
+                                                this.parts,
+                                                this.next_part_index,
+                                                this.done,
+                                            ) {
+                                                return Poll::Ready(Some(event));
+                                            }
+                                        }
+                                        Err(e) => {
+                                            debug!("Failed to parse final data: {}", e);
                                         }
                                     }
                                 }
