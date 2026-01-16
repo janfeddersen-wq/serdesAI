@@ -127,8 +127,6 @@ impl StdioTransport {
         })
     }
 
-
-
     async fn reader_task(
         stdout: ChildStdout,
         pending: Arc<Mutex<HashMap<u64, oneshot::Sender<JsonRpcResponse>>>>,
@@ -286,12 +284,37 @@ impl HttpTransport {
     }
 }
 
+/// Parse SSE response format
+#[cfg(feature = "reqwest")]
+fn parse_sse_response(text: &str) -> McpResult<String> {
+    // SSE format:
+    // event: message
+    // data: {"jsonrpc":"2.0",...}
+    
+    for line in text.lines() {
+        if let Some(data) = line.strip_prefix("data: ") {
+            return Ok(data.to_string());
+        }
+    }
+    
+    // Maybe it's plain JSON (fallback)
+    if text.trim().starts_with('{') {
+        return Ok(text.trim().to_string());
+    }
+    
+    Err(McpError::Transport(format!("Cannot parse SSE response: {}", text)))
+}
+
 #[cfg(feature = "reqwest")]
 #[async_trait]
 impl McpTransport for HttpTransport {
     async fn request(&self, request: &JsonRpcRequest) -> McpResult<JsonRpcResponse> {
-        let url = format!("{}/message", self.base_url);
-        let mut req = self.client.post(&url).json(request);
+        // Use base_url directly (don't append /message)
+        let mut req = self.client
+            .post(&self.base_url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
+            .json(request);
 
         // Add session ID if we have one
         let session_id = self.session_id.lock().await;
@@ -312,21 +335,32 @@ impl McpTransport for HttpTransport {
             }
         }
 
-        if !response.status().is_success() {
-            return Err(McpError::Http(response.status().as_u16()));
+        let status = response.status();
+
+        if !status.is_success() {
+            return Err(McpError::Http(status.as_u16()));
         }
 
-        let json_response: JsonRpcResponse = response
-            .json()
-            .await
+        // Get response text
+        let text = response.text().await
             .map_err(|e| McpError::Transport(e.to_string()))?;
+        
+        // Parse SSE format
+        let json_str = parse_sse_response(&text)?;
+        
+        let json_response: JsonRpcResponse = serde_json::from_str(&json_str)
+            .map_err(|e| McpError::Transport(format!("Failed to parse response: {}", e)))?;
 
         Ok(json_response)
     }
 
     async fn notify(&self, notification: &JsonRpcNotification) -> McpResult<()> {
-        let url = format!("{}/message", self.base_url);
-        let mut req = self.client.post(&url).json(notification);
+        // Use base_url directly (don't append /message)
+        let mut req = self.client
+            .post(&self.base_url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream")
+            .json(notification);
 
         let session_id = self.session_id.lock().await;
         if let Some(ref id) = *session_id {
@@ -339,8 +373,10 @@ impl McpTransport for HttpTransport {
             .await
             .map_err(|e| McpError::Transport(e.to_string()))?;
 
-        if !response.status().is_success() {
-            return Err(McpError::Http(response.status().as_u16()));
+        let status = response.status();
+
+        if !status.is_success() {
+            return Err(McpError::Http(status.as_u16()));
         }
 
         Ok(())
