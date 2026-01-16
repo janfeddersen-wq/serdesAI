@@ -259,6 +259,7 @@ pub struct HttpTransport {
     base_url: String,
     session_id: Arc<Mutex<Option<String>>>,
     connected: Arc<std::sync::atomic::AtomicBool>,
+    custom_headers: HashMap<String, String>,
 }
 
 #[cfg(feature = "reqwest")]
@@ -270,6 +271,7 @@ impl HttpTransport {
             base_url: base_url.into(),
             session_id: Arc::new(Mutex::new(None)),
             connected: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            custom_headers: HashMap::new(),
         }
     }
 
@@ -280,6 +282,18 @@ impl HttpTransport {
             base_url: base_url.into(),
             session_id: Arc::new(Mutex::new(None)),
             connected: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            custom_headers: HashMap::new(),
+        }
+    }
+
+    /// Create with custom headers (e.g., Authorization).
+    pub fn with_headers(base_url: impl Into<String>, headers: HashMap<String, String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url: base_url.into(),
+            session_id: Arc::new(Mutex::new(None)),
+            connected: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            custom_headers: headers,
         }
     }
 }
@@ -315,6 +329,11 @@ impl McpTransport for HttpTransport {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
             .json(request);
+
+        // Add custom headers (e.g., Authorization)
+        for (key, value) in &self.custom_headers {
+            req = req.header(key, value);
+        }
 
         // Add session ID if we have one
         let session_id = self.session_id.lock().await;
@@ -361,6 +380,11 @@ impl McpTransport for HttpTransport {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
             .json(notification);
+
+        // Add custom headers (e.g., Authorization)
+        for (key, value) in &self.custom_headers {
+            req = req.header(key, value);
+        }
 
         let session_id = self.session_id.lock().await;
         if let Some(ref id) = *session_id {
