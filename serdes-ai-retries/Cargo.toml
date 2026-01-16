@@ -9,6 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 keywords = ["ai", "llm", "retry", "backoff", "resilience"]
 categories = ["asynchronous"]
+readme = "README.md"
 
 [features]
 default = []

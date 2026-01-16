@@ -9,6 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 keywords = ["ai", "llm", "agent", "autonomous"]
 categories = ["development-tools"]
+readme = "README.md"
 
 [features]
 default = []

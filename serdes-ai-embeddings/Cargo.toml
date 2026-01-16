@@ -9,6 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 keywords = ["ai", "llm", "embeddings", "vectors", "rag"]
 categories = ["api-bindings"]
+readme = "README.md"
 
 [features]
 default = ["openai"]

@@ -9,6 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 keywords = ["ai", "llm", "mcp", "protocol", "context"]
 categories = ["api-bindings"]
+readme = "README.md"
 
 [features]
 default = ["client"]

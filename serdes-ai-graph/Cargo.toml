@@ -9,6 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 keywords = ["ai", "llm", "graph", "workflow", "orchestration"]
 categories = ["asynchronous", "development-tools"]
+readme = "README.md"
 
 [features]
 default = []

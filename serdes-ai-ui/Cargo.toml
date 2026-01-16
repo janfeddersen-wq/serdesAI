@@ -7,6 +7,7 @@ license = "MIT"
 repository = "https://github.com/serdes-ai/serdes-ai"
 keywords = ["ai", "llm", "vercel", "ui", "streaming"]
 categories = ["api-bindings", "web-programming"]
+readme = "README.md"
 
 [features]
 default = ["vercel"]
@@ -15,8 +16,8 @@ ag-ui = []
 full = ["vercel", "ag-ui"]
 
 [dependencies]
-serdes-ai-core = { path = "../serdes-ai-core" }
-serdes-ai-streaming = { path = "../serdes-ai-streaming" }
+serdes-ai-core.workspace = true
+serdes-ai-streaming.workspace = true
 async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -9,6 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 keywords = ["ai", "llm", "evaluation", "testing", "benchmark"]
 categories = ["development-tools::testing"]
+readme = "README.md"
 
 [features]
 default = []

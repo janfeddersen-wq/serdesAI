@@ -9,6 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 keywords = ["ai", "agent", "a2a", "protocol", "rpc"]
 categories = ["api-bindings", "network-programming"]
+readme = "README.md"
 
 [features]
 default = []

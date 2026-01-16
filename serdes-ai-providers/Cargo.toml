@@ -9,6 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 keywords = ["ai", "llm", "providers", "openai", "anthropic"]
 categories = ["api-bindings"]
+readme = "README.md"
 
 [features]
 default = ["openai", "anthropic", "google"]
