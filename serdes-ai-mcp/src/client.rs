@@ -74,8 +74,8 @@ impl McpClient {
         *self.server_capabilities.lock().await = Some(result.capabilities.clone());
         *self.server_info.lock().await = Some(result.server_info.clone());
 
-        // Send initialized notification
-        self.notify("notifications/initialized", serde_json::Value::Null)
+        // Send initialized notification with empty object params (some servers require this)
+        self.notify("notifications/initialized", serde_json::json!({}))
             .await?;
         *self.initialized.lock().await = true;
 
