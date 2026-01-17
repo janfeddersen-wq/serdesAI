@@ -10,7 +10,7 @@ use base64::Engine;
 use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serdes_ai_core::messages::{
-    ImageContent, RetryPromptPart, SystemPromptPart, TextPart, ToolCallArgs, ToolCallPart,
+    ImageContent, RetryPromptPart, SystemPromptPart, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart,
     ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
 };
 use serdes_ai_core::{
@@ -380,6 +380,13 @@ impl OpenAIChatModel {
         // Check for refusal
         if let Some(refusal) = choice.message.refusal {
             return Err(ModelError::ContentFiltered(refusal));
+        }
+
+        // Handle reasoning_content (chain-of-thought from models like GLM-4)
+        if let Some(reasoning) = choice.message.reasoning_content {
+            if !reasoning.is_empty() {
+                parts.push(ModelResponsePart::Thinking(ThinkingPart::new(reasoning)));
+            }
         }
 
         if let Some(content) = choice.message.content {

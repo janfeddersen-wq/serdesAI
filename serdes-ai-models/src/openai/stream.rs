@@ -8,8 +8,8 @@ use bytes::Bytes;
 use futures::Stream;
 use pin_project_lite::pin_project;
 use serdes_ai_core::messages::{
-    ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent, PartStartEvent, TextPart, ToolCallArgs,
-    ToolCallPart,
+    ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent, PartStartEvent, TextPart, ThinkingPart,
+    ThinkingPartDelta, ToolCallArgs, ToolCallPart,
 };
 use serdes_ai_core::ModelResponsePart;
 use std::collections::HashMap;
@@ -28,6 +28,10 @@ pin_project! {
         text_started: bool,
         // Track if we've emitted a part start for text
         current_text_index: Option<usize>,
+        // Track thinking/reasoning part state
+        thinking_started: bool,
+        // Track if we've emitted a part start for thinking
+        current_thinking_index: Option<usize>,
         // Next part index to use
         next_part_index: usize,
         // Finished
@@ -59,6 +63,8 @@ where
             tool_calls: HashMap::new(),
             text_started: false,
             current_text_index: None,
+            thinking_started: false,
+            current_thinking_index: None,
             next_part_index: 0,
             done: false,
             pending_part_ends: Vec::new(),
@@ -95,6 +101,8 @@ where
                     this.tool_calls,
                     this.text_started,
                     this.current_text_index,
+                    this.thinking_started,
+                    this.current_thinking_index,
                     this.next_part_index,
                     this.done,
                     this.pending_part_ends,
@@ -124,6 +132,8 @@ where
                                 this.tool_calls,
                                 this.text_started,
                                 this.current_text_index,
+                                this.thinking_started,
+                                this.current_thinking_index,
                                 this.next_part_index,
                                 this.done,
                                 this.pending_part_ends,
@@ -146,6 +156,8 @@ fn parse_sse_line(
     tool_calls: &mut HashMap<u32, ToolCallState>,
     text_started: &mut bool,
     current_text_index: &mut Option<usize>,
+    thinking_started: &mut bool,
+    current_thinking_index: &mut Option<usize>,
     next_part_index: &mut usize,
     done: &mut bool,
     pending_part_ends: &mut Vec<usize>,
@@ -192,6 +204,34 @@ fn parse_sse_line(
                             // Emit text delta for subsequent content
                             let delta = PartDeltaEvent::text(current_text_index.unwrap(), content);
                             return Some(Ok(ModelResponseStreamEvent::PartDelta(delta)));
+                        }
+                    }
+
+                    // Handle reasoning/thinking content (for models like GLM-4)
+                    if let Some(reasoning) = delta.reasoning_content {
+                        if !reasoning.is_empty() {
+                            // Start thinking part if not started
+                            if !*thinking_started {
+                                *thinking_started = true;
+                                *current_thinking_index = Some(*next_part_index);
+                                *next_part_index += 1;
+
+                                // Include the first content in the PartStart
+                                let start = PartStartEvent::new(
+                                    current_thinking_index.unwrap(),
+                                    ModelResponsePart::Thinking(ThinkingPart::new(&reasoning)),
+                                );
+                                return Some(Ok(ModelResponseStreamEvent::PartStart(start)));
+                            }
+
+                            // Emit thinking delta for subsequent content
+                            let delta_event = PartDeltaEvent {
+                                index: current_thinking_index.unwrap(),
+                                delta: serdes_ai_core::messages::ModelResponsePartDelta::Thinking(
+                                    ThinkingPartDelta::new(reasoning),
+                                ),
+                            };
+                            return Some(Ok(ModelResponseStreamEvent::PartDelta(delta_event)));
                         }
                     }
 

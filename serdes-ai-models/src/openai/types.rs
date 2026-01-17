@@ -477,6 +477,9 @@ pub struct ResponseMessage {
     pub tool_calls: Option<Vec<ResponseToolCall>>,
     /// Refusal (for content filter).
     pub refusal: Option<String>,
+    /// Reasoning/thinking content (for models like GLM-4 that support chain-of-thought).
+    /// This is returned by some OpenAI-compatible providers when the model does reasoning.
+    pub reasoning_content: Option<String>,
 }
 
 /// Response tool call.
@@ -571,6 +574,8 @@ pub struct ChunkDelta {
     pub tool_calls: Option<Vec<ChunkToolCall>>,
     /// Refusal.
     pub refusal: Option<String>,
+    /// Reasoning/thinking content delta (for models like GLM-4).
+    pub reasoning_content: Option<String>,
 }
 
 /// Chunk tool call.
