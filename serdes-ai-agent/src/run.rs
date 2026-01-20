@@ -306,7 +306,19 @@ where
             }
         }
 
-        // Handle output if found
+        // Execute tool calls FIRST - they take priority over text output.
+        // This matches the behavior in stream.rs and prevents the agent from
+        // stopping early when the model returns both explanatory text AND tool
+        // calls in the same response. This is especially important when
+        // Output=String, since any text would be valid "output".
+        if !tool_calls.is_empty() {
+            let count = tool_calls.len();
+            let returns = self.execute_tool_calls(tool_calls).await;
+            self.add_tool_returns(returns)?;
+            return Ok(StepResult::ToolsExecuted(count));
+        }
+
+        // Handle output if found (only when no tool calls are pending)
         if let Some(output) = found_output {
             match self.validate_output(output).await {
                 Ok(validated) => {
@@ -329,14 +341,6 @@ where
                     return Ok(StepResult::RetryingOutput);
                 }
             }
-        }
-
-        // Execute tool calls
-        if !tool_calls.is_empty() {
-            let count = tool_calls.len();
-            let returns = self.execute_tool_calls(tool_calls).await;
-            self.add_tool_returns(returns)?;
-            return Ok(StepResult::ToolsExecuted(count));
         }
 
         // Check if we should finish

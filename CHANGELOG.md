@@ -191,6 +191,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.1] - 2025-01-27
+
+### Fixed
+
+- **Agent Loop Premature Termination**: Fixed a bug in `serdes-ai-agent` where the agent would stop early when the model returned both text AND tool calls in the same response. With `Output = String`, any text was being treated as valid output, causing tool calls to be skipped. The fix prioritizes tool call execution over text output parsing, matching the behavior in the streaming code path. (#1)
+
+### Changed
+
+- Tool calls are now executed before checking for text output in `process_response`. This ensures that when a model returns explanatory text along with tool calls, the tools are always executed.
+
+---
+
 ## [Unreleased]
 
 ### Planned
