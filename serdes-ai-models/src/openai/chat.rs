@@ -10,8 +10,8 @@ use base64::Engine;
 use reqwest::header::HeaderMap;
 use reqwest::Client;
 use serdes_ai_core::messages::{
-    ImageContent, RetryPromptPart, SystemPromptPart, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart,
-    ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
+    ImageContent, RetryPromptPart, SystemPromptPart, TextPart, ThinkingPart, ToolCallArgs,
+    ToolCallPart, ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
 };
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,

@@ -2902,7 +2902,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "futures",
  "pretty_assertions",
@@ -2929,7 +2929,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-a2a"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -2952,7 +2952,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-agent"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2978,7 +2978,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -3002,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-embeddings"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3018,7 +3018,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-evals"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3039,7 +3039,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-graph"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3055,7 +3055,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-macros"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3068,7 +3068,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-mcp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "base64",
@@ -3091,7 +3091,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-models"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-output"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3146,7 +3146,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-providers"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "base64",
@@ -3168,7 +3168,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-retries"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3184,7 +3184,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-streaming"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3205,7 +3205,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-tools"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3229,7 +3229,7 @@ dependencies = [
 
 [[package]]
 name = "serdes-ai-toolsets"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "indexmap",

@@ -7,7 +7,7 @@ use crate::anthropic::stream::AnthropicStreamParser;
 use crate::error::ModelError;
 use bytes::Bytes;
 use futures::Stream;
-use serdes_ai_core::messages::{ModelResponsePart, ModelResponseStreamEvent, PartStartEvent};
+use serdes_ai_core::messages::{ModelResponsePart, ModelResponseStreamEvent};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 

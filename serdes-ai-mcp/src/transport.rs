@@ -304,19 +304,22 @@ fn parse_sse_response(text: &str) -> McpResult<String> {
     // SSE format:
     // event: message
     // data: {"jsonrpc":"2.0",...}
-    
+
     for line in text.lines() {
         if let Some(data) = line.strip_prefix("data: ") {
             return Ok(data.to_string());
         }
     }
-    
+
     // Maybe it's plain JSON (fallback)
     if text.trim().starts_with('{') {
         return Ok(text.trim().to_string());
     }
-    
-    Err(McpError::Transport(format!("Cannot parse SSE response: {}", text)))
+
+    Err(McpError::Transport(format!(
+        "Cannot parse SSE response: {}",
+        text
+    )))
 }
 
 #[cfg(feature = "reqwest")]
@@ -324,7 +327,8 @@ fn parse_sse_response(text: &str) -> McpResult<String> {
 impl McpTransport for HttpTransport {
     async fn request(&self, request: &JsonRpcRequest) -> McpResult<JsonRpcResponse> {
         // Use base_url directly (don't append /message)
-        let mut req = self.client
+        let mut req = self
+            .client
             .post(&self.base_url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
@@ -361,12 +365,14 @@ impl McpTransport for HttpTransport {
         }
 
         // Get response text
-        let text = response.text().await
+        let text = response
+            .text()
+            .await
             .map_err(|e| McpError::Transport(e.to_string()))?;
-        
+
         // Parse SSE format
         let json_str = parse_sse_response(&text)?;
-        
+
         let json_response: JsonRpcResponse = serde_json::from_str(&json_str)
             .map_err(|e| McpError::Transport(format!("Failed to parse response: {}", e)))?;
 
@@ -375,7 +381,8 @@ impl McpTransport for HttpTransport {
 
     async fn notify(&self, notification: &JsonRpcNotification) -> McpResult<()> {
         // Use base_url directly (don't append /message)
-        let mut req = self.client
+        let mut req = self
+            .client
             .post(&self.base_url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
@@ -550,8 +557,8 @@ mod tests {
         // Use 'printenv' or 'env' command to verify
         let mut env = HashMap::new();
         env.insert("TEST_MCP_VAR".to_string(), "test_value_123".to_string());
-        
-        // Note: Full test would need to capture output, 
+
+        // Note: Full test would need to capture output,
         // but we can at least verify the call doesn't panic
         let _ = StdioTransport::spawn_with_env("echo", &["test"], env).await;
     }
