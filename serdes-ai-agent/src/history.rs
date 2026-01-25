@@ -54,7 +54,6 @@ fn extract_tool_use_ids(message: &ModelRequest) -> Vec<String> {
 ///
 /// This looks for `ModelRequestPart::ToolReturn` and `ModelRequestPart::BuiltinToolReturn`
 /// and extracts their `tool_call_id` values.
-#[cfg(test)]
 fn extract_tool_result_ids(message: &ModelRequest) -> Vec<String> {
     let mut ids = Vec::new();
     for part in &message.parts {
@@ -89,7 +88,6 @@ fn collect_all_tool_use_ids(messages: &[ModelRequest]) -> HashSet<String> {
 }
 
 /// Collect all tool_result IDs from a list of messages.
-#[cfg(test)]
 fn collect_all_tool_result_ids(messages: &[ModelRequest]) -> HashSet<String> {
     messages
         .iter()
@@ -188,6 +186,100 @@ fn remove_orphaned_tool_results(
         .collect()
 }
 
+/// Remove orphaned tool uses from messages.
+///
+/// An orphaned tool_use is a `ToolCallPart` or `BuiltinToolCallPart` whose `tool_call_id`
+/// has no corresponding `tool_result` (ToolReturnPart/BuiltinToolReturnPart) in the
+/// message history. This can happen when truncation removes later messages containing
+/// the tool_result.
+///
+/// This function modifies messages in-place:
+/// 1. For each `ModelRequestPart::ModelResponse`, filter out orphaned ToolCall/BuiltinToolCall parts
+/// 2. If the ModelResponse becomes empty after filtering, remove it from the message
+/// 3. If the message becomes empty after removing ModelResponses, filter it out entirely
+///
+/// # Behavior Notes
+///
+/// **Asymmetric handling mirrors `remove_orphaned_tool_results`:**
+///
+/// - `ToolCallPart`: If `tool_call_id` is `None`, the part is KEPT (edge case handling).
+/// - `BuiltinToolCallPart`: If `tool_call_id` is `None` or empty string, treated as invalid.
+///
+/// This ensures we don't accidentally remove tool calls that might be handled differently
+/// by certain providers.
+fn remove_orphaned_tool_uses(
+    messages: Vec<ModelRequest>,
+    valid_result_ids: &HashSet<String>,
+) -> Vec<ModelRequest> {
+    messages
+        .into_iter()
+        .filter_map(|mut msg| {
+            // Process each part in the message
+            msg.parts = msg.parts
+                .into_iter()
+                .filter_map(|part| {
+                    match part {
+                        ModelRequestPart::ModelResponse(mut response) => {
+                            // Filter out orphaned tool calls from the response
+                            response.parts.retain(|response_part| {
+                                match response_part {
+                                    ModelResponsePart::ToolCall(tc) => {
+                                        // INTENTIONAL: Keep if no tool_call_id (None)
+                                        let keep = tc.tool_call_id
+                                            .as_ref()
+                                            .map_or(true, |id| valid_result_ids.contains(id));
+                                        if !keep {
+                                            debug!(
+                                                tool_name = %tc.tool_name,
+                                                tool_call_id = ?tc.tool_call_id,
+                                                "Removing orphaned ToolCall: no matching tool_result found"
+                                            );
+                                        }
+                                        keep
+                                    }
+                                    ModelResponsePart::BuiltinToolCall(btc) => {
+                                        // BuiltinToolCall has Option<String> tool_call_id
+                                        let keep = btc.tool_call_id
+                                            .as_ref()
+                                            .map_or(true, |id| !id.is_empty() && valid_result_ids.contains(id));
+                                        if !keep {
+                                            debug!(
+                                                tool_name = %btc.tool_name,
+                                                tool_call_id = ?btc.tool_call_id,
+                                                "Removing orphaned BuiltinToolCall: no matching tool_result found"
+                                            );
+                                        }
+                                        keep
+                                    }
+                                    // Keep all other response parts (Text, Thinking, File, etc.)
+                                    _ => true,
+                                }
+                            });
+
+                            // Keep the ModelResponse only if it still has parts
+                            if response.parts.is_empty() {
+                                debug!("Removing empty ModelResponse after filtering orphaned tool calls");
+                                None
+                            } else {
+                                Some(ModelRequestPart::ModelResponse(response))
+                            }
+                        }
+                        // Keep all other request parts as-is
+                        other => Some(other),
+                    }
+                })
+                .collect();
+
+            // Only keep messages that still have parts
+            if msg.parts.is_empty() {
+                None
+            } else {
+                Some(msg)
+            }
+        })
+        .collect()
+}
+
 /// Trait for processing message history before model calls.
 #[async_trait]
 pub trait HistoryProcessor<Deps>: Send + Sync {
@@ -255,9 +347,15 @@ impl<Deps: Send + Sync> HistoryProcessor<Deps> for TruncateHistory {
             messages.drain(start..).collect()
         };
 
-        // Post-processing: Remove orphaned tool results
-        let valid_tool_ids = collect_all_tool_use_ids(&result);
-        remove_orphaned_tool_results(result, &valid_tool_ids)
+        // Post-processing: Remove orphaned tool pairs
+        // This prevents Claude API errors for both directions:
+        // 1. "unexpected tool_use_id in tool_result" (orphaned results)
+        // 2. "tool_use ids found without tool_result" (orphaned uses)
+        let valid_tool_use_ids = collect_all_tool_use_ids(&result);
+        let result = remove_orphaned_tool_results(result, &valid_tool_use_ids);
+        
+        let valid_tool_result_ids = collect_all_tool_result_ids(&result);
+        remove_orphaned_tool_uses(result, &valid_tool_result_ids)
     }
 }
 
@@ -411,14 +509,15 @@ impl<Deps: Send + Sync> HistoryProcessor<Deps> for TruncateByTokens {
         to_append.reverse();
         result.extend(to_append);
 
-        // Post-processing: Remove orphaned tool results
-        // This prevents Claude API errors like:
-        // "unexpected `tool_use_id` found in `tool_result` blocks. Each `tool_result`
-        // block must have a corresponding `tool_use` block in the previous message."
-        let valid_tool_ids = collect_all_tool_use_ids(&result);
-        let result = remove_orphaned_tool_results(result, &valid_tool_ids);
-
-        result
+        // Post-processing: Remove orphaned tool pairs
+        // This prevents Claude API errors for both directions:
+        // 1. "unexpected tool_use_id in tool_result" (orphaned results)
+        // 2. "tool_use ids found without tool_result" (orphaned uses)
+        let valid_tool_use_ids = collect_all_tool_use_ids(&result);
+        let result = remove_orphaned_tool_results(result, &valid_tool_use_ids);
+        
+        let valid_tool_result_ids = collect_all_tool_result_ids(&result);
+        remove_orphaned_tool_uses(result, &valid_tool_result_ids)
     }
 }
 
@@ -1104,5 +1203,158 @@ mod tests {
         // Should be kept because ID matches
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].parts.len(), 1);
+    }
+
+    // ========================================================================
+    // Remove Orphaned Tool Uses Tests
+    // ========================================================================
+
+    #[test]
+    fn test_remove_orphaned_tool_uses_basic() {
+        // Create a tool call without matching tool result
+        let orphan_call_msg = make_tool_call_message("orphan_call");
+        
+        let messages = vec![orphan_call_msg];
+        let valid_result_ids: HashSet<String> = HashSet::new(); // No matching results
+        
+        let result = remove_orphaned_tool_uses(messages, &valid_result_ids);
+        
+        // The message should be removed because the ModelResponse becomes empty
+        assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_remove_orphaned_tool_uses_keeps_matched() {
+        // Create a tool call with matching tool result ID
+        let tool_call_msg = make_tool_call_message("matched_call");
+        
+        let messages = vec![tool_call_msg];
+        let mut valid_result_ids: HashSet<String> = HashSet::new();
+        valid_result_ids.insert("matched_call".to_string());
+        
+        let result = remove_orphaned_tool_uses(messages, &valid_result_ids);
+        
+        // Should be kept because there's a matching result
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_orphaned_tool_uses_preserves_text() {
+        // Create a ModelResponse with both text and an orphaned tool call
+        let mut response = ModelResponse::new();
+        response.add_part(ModelResponsePart::Text(serdes_ai_core::TextPart::new("Some text")));
+        let tool_call = ToolCallPart::new("test_tool", serde_json::json!({"arg": "value"}))
+            .with_tool_call_id("orphan_id");
+        response.add_part(ModelResponsePart::ToolCall(tool_call));
+        
+        let msg = ModelRequest::with_parts(vec![
+            ModelRequestPart::ModelResponse(Box::new(response)),
+        ]);
+
+        let messages = vec![msg];
+        let valid_result_ids: HashSet<String> = HashSet::new(); // No matching results
+        
+        let result = remove_orphaned_tool_uses(messages, &valid_result_ids);
+        
+        // Message should be kept because it still has the Text part
+        assert_eq!(result.len(), 1);
+        
+        // Check that the ModelResponse only has the Text part now
+        if let ModelRequestPart::ModelResponse(ref resp) = result[0].parts[0] {
+            assert_eq!(resp.parts.len(), 1);
+            assert!(matches!(resp.parts[0], ModelResponsePart::Text(_)));
+        } else {
+            panic!("Expected ModelResponse");
+        }
+    }
+
+    #[test]
+    fn test_remove_orphaned_tool_uses_with_none_id_is_kept() {
+        // ToolCallPart with None tool_call_id should be kept
+        let mut response = ModelResponse::new();
+        let tool_call = ToolCallPart::new("test_tool", serde_json::json!({"arg": "value"}));
+        // Note: no .with_tool_call_id() - so it's None
+        response.add_part(ModelResponsePart::ToolCall(tool_call));
+        
+        let msg = ModelRequest::with_parts(vec![
+            ModelRequestPart::ModelResponse(Box::new(response)),
+        ]);
+
+        let messages = vec![msg];
+        let valid_result_ids: HashSet<String> = HashSet::new(); // No valid IDs
+        
+        let result = remove_orphaned_tool_uses(messages, &valid_result_ids);
+        
+        // Should be kept because tool_call_id is None
+        assert_eq!(result.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_truncate_removes_both_orphaned_directions() {
+        // Test that truncation removes orphans in BOTH directions:
+        // - Orphaned tool_results (tool_use was truncated)
+        // - Orphaned tool_uses (tool_result was truncated)
+        
+        // Message 0: Tool call (call_1) - will be kept
+        // Message 1: Tool return (call_1) - will be truncated
+        // Message 2: Tool call (call_2) - will be truncated  
+        // Message 3: Tool return (call_2) - will be kept
+        let mut messages = Vec::new();
+        
+        messages.push(make_tool_call_message("call_1"));   // Index 0
+        messages.push(make_tool_return_message("call_1")); // Index 1
+        messages.push(make_tool_call_message("call_2"));   // Index 2
+        messages.push(make_tool_return_message("call_2")); // Index 3
+
+        // Truncate to 2 messages, keeping first (keep_first=true, max=2)
+        // This keeps message 0 and 3: tool_call(1) and tool_return(2)
+        // Both are orphaned!
+        let processor = TruncateHistory::new(2).keep_first(true);
+        let ctx = make_test_context();
+        
+        let result = processor.process(&ctx, messages).await;
+        
+        // Both orphans should be removed
+        // The result should have no tool calls or returns with mismatched IDs
+        let tool_use_ids = collect_all_tool_use_ids(&result);
+        let tool_result_ids = collect_all_tool_result_ids(&result);
+        
+        // All remaining tool_results should have matching tool_uses
+        for id in &tool_result_ids {
+            assert!(tool_use_ids.contains(id), "Orphaned tool_result found: {}", id);
+        }
+        
+        // All remaining tool_uses should have matching tool_results
+        for id in &tool_use_ids {
+            assert!(tool_result_ids.contains(id), "Orphaned tool_use found: {}", id);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_truncate_by_tokens_removes_both_orphaned_directions() {
+        // Same test but for TruncateByTokens
+        let mut messages = Vec::new();
+        
+        messages.push(make_tool_call_message("call_a"));
+        messages.push(make_tool_return_message("call_a"));
+        messages.push(make_tool_call_message("call_b"));
+        messages.push(make_tool_return_message("call_b"));
+
+        let processor = TruncateByTokens::new(50).keep_first_n(0); // Very low to force truncation
+        let ctx = make_test_context();
+        
+        let result = processor.process(&ctx, messages).await;
+        
+        // Verify bidirectional consistency
+        let tool_use_ids = collect_all_tool_use_ids(&result);
+        let tool_result_ids = collect_all_tool_result_ids(&result);
+        
+        for id in &tool_result_ids {
+            assert!(tool_use_ids.contains(id), "Orphaned tool_result found: {}", id);
+        }
+        
+        for id in &tool_use_ids {
+            assert!(tool_result_ids.contains(id), "Orphaned tool_use found: {}", id);
+        }
     }
 }
