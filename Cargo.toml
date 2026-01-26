@@ -21,7 +21,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 license = "MIT"
 authors = ["serdes-ai contributors"]
@@ -96,7 +96,7 @@ regex = "1.10"
 serdes-ai-core = { path = "serdes-ai-core", version = "0.1.2" }
 serdes-ai-agent = { path = "serdes-ai-agent", version = "0.1.2" }
 serdes-ai-models = { path = "serdes-ai-models", version = "0.1.2" }
-serdes-ai-providers = { path = "serdes-ai-providers", version = "0.1.2" }
+serdes-ai-providers = { path = "serdes-ai-providers", version = "0.1.4" }
 serdes-ai-tools = { path = "serdes-ai-tools", version = "0.1.2" }
 serdes-ai-toolsets = { path = "serdes-ai-toolsets", version = "0.1.2" }
 serdes-ai-output = { path = "serdes-ai-output", version = "0.1.2" }
