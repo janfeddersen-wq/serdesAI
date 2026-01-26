@@ -81,18 +81,12 @@ fn extract_tool_result_ids(message: &ModelRequest) -> Vec<String> {
 
 /// Collect all tool_use IDs from a list of messages.
 fn collect_all_tool_use_ids(messages: &[ModelRequest]) -> HashSet<String> {
-    messages
-        .iter()
-        .flat_map(extract_tool_use_ids)
-        .collect()
+    messages.iter().flat_map(extract_tool_use_ids).collect()
 }
 
 /// Collect all tool_result IDs from a list of messages.
 fn collect_all_tool_result_ids(messages: &[ModelRequest]) -> HashSet<String> {
-    messages
-        .iter()
-        .flat_map(extract_tool_result_ids)
-        .collect()
+    messages.iter().flat_map(extract_tool_result_ids).collect()
 }
 
 /// Remove orphaned tool results from messages.
@@ -132,7 +126,8 @@ fn remove_orphaned_tool_results(
                         // INTENTIONAL: Keep if no tool_call_id (None) to handle edge cases
                         // gracefully. Only remove if we have an ID that doesn't match.
                         // See function docs for rationale.
-                        let dominated = tr.tool_call_id
+                        let dominated = tr
+                            .tool_call_id
                             .as_ref()
                             .map_or(true, |id| valid_tool_ids.contains(id));
                         if !dominated {
@@ -147,7 +142,7 @@ fn remove_orphaned_tool_results(
                     ModelRequestPart::BuiltinToolReturn(btr) => {
                         // BuiltinToolReturn has non-optional tool_call_id: String
                         // Empty string is treated as invalid (likely malformed data)
-                        let dominated = !btr.tool_call_id.is_empty() 
+                        let dominated = !btr.tool_call_id.is_empty()
                             && valid_tool_ids.contains(&btr.tool_call_id);
                         if !dominated {
                             debug!(
@@ -160,7 +155,8 @@ fn remove_orphaned_tool_results(
                     }
                     ModelRequestPart::RetryPrompt(rp) => {
                         // INTENTIONAL: Keep if no tool_call_id (None) - same rationale as ToolReturn
-                        let keep = rp.tool_call_id
+                        let keep = rp
+                            .tool_call_id
                             .as_ref()
                             .map_or(true, |id| valid_tool_ids.contains(id));
                         if !keep {
@@ -353,7 +349,7 @@ impl<Deps: Send + Sync> HistoryProcessor<Deps> for TruncateHistory {
         // 2. "tool_use ids found without tool_result" (orphaned uses)
         let valid_tool_use_ids = collect_all_tool_use_ids(&result);
         let result = remove_orphaned_tool_results(result, &valid_tool_use_ids);
-        
+
         let valid_tool_result_ids = collect_all_tool_result_ids(&result);
         remove_orphaned_tool_uses(result, &valid_tool_result_ids)
     }
@@ -515,7 +511,7 @@ impl<Deps: Send + Sync> HistoryProcessor<Deps> for TruncateByTokens {
         // 2. "tool_use ids found without tool_result" (orphaned uses)
         let valid_tool_use_ids = collect_all_tool_use_ids(&result);
         let result = remove_orphaned_tool_results(result, &valid_tool_use_ids);
-        
+
         let valid_tool_result_ids = collect_all_tool_result_ids(&result);
         remove_orphaned_tool_uses(result, &valid_tool_result_ids)
     }
@@ -906,10 +902,7 @@ mod tests {
     // ========================================================================
 
     use serdes_ai_core::{
-        messages::tool_return::ToolReturnContent,
-        ModelResponse,
-        ToolCallPart,
-        ToolReturnPart,
+        messages::tool_return::ToolReturnContent, ModelResponse, ToolCallPart, ToolReturnPart,
     };
 
     /// Create a message with a tool call (ModelResponse containing ToolCallPart)
@@ -918,20 +911,16 @@ mod tests {
         let tool_call = ToolCallPart::new("test_tool", serde_json::json!({"arg": "value"}))
             .with_tool_call_id(tool_call_id);
         response.add_part(ModelResponsePart::ToolCall(tool_call));
-        
-        ModelRequest::with_parts(vec![
-            ModelRequestPart::ModelResponse(Box::new(response)),
-        ])
+
+        ModelRequest::with_parts(vec![ModelRequestPart::ModelResponse(Box::new(response))])
     }
 
     /// Create a message with a tool return (ToolReturnPart)
     fn make_tool_return_message(tool_call_id: &str) -> ModelRequest {
         let tool_return = ToolReturnPart::new("test_tool", ToolReturnContent::text("result"))
             .with_tool_call_id(tool_call_id);
-        
-        ModelRequest::with_parts(vec![
-            ModelRequestPart::ToolReturn(tool_return),
-        ])
+
+        ModelRequest::with_parts(vec![ModelRequestPart::ToolReturn(tool_return)])
     }
 
     #[test]
@@ -971,13 +960,13 @@ mod tests {
 
         let messages = vec![tool_call_msg, tool_return_msg, orphan_return_msg];
         let valid_ids = collect_all_tool_use_ids(&messages);
-        
+
         // valid_ids should only contain "call_abc"
         assert!(valid_ids.contains("call_abc"));
         assert!(!valid_ids.contains("call_orphan"));
 
         let result = remove_orphaned_tool_results(messages, &valid_ids);
-        
+
         // Should have 2 messages: tool_call and matching tool_return
         // The orphan_return_msg should be removed entirely (it only had the orphan part)
         assert_eq!(result.len(), 2);
@@ -988,20 +977,24 @@ mod tests {
         // Create a message that has both a user prompt AND an orphaned tool return
         let mut mixed_msg = ModelRequest::new();
         mixed_msg.add_user_prompt("This is a user message");
-        let orphan_return = ToolReturnPart::new("test_tool", ToolReturnContent::text("orphan result"))
-            .with_tool_call_id("orphan_id");
+        let orphan_return =
+            ToolReturnPart::new("test_tool", ToolReturnContent::text("orphan result"))
+                .with_tool_call_id("orphan_id");
         mixed_msg.add_part(ModelRequestPart::ToolReturn(orphan_return));
 
         let messages = vec![mixed_msg];
         let valid_ids: HashSet<String> = HashSet::new(); // No valid IDs
-        
+
         let result = remove_orphaned_tool_results(messages, &valid_ids);
-        
+
         // Message should still exist because it has a user prompt
         assert_eq!(result.len(), 1);
         // But it should only have 1 part (the user prompt, not the orphan return)
         assert_eq!(result[0].parts.len(), 1);
-        assert!(matches!(result[0].parts[0], ModelRequestPart::UserPrompt(_)));
+        assert!(matches!(
+            result[0].parts[0],
+            ModelRequestPart::UserPrompt(_)
+        ));
     }
 
     #[tokio::test]
@@ -1013,11 +1006,11 @@ mod tests {
         // Message 3: Tool call (call_2)
         // Message 4: Tool return (call_2)
         let mut messages = Vec::new();
-        
+
         let mut user_msg = ModelRequest::new();
         user_msg.add_user_prompt("Hello");
         messages.push(user_msg);
-        
+
         messages.push(make_tool_call_message("call_1"));
         messages.push(make_tool_return_message("call_1"));
         messages.push(make_tool_call_message("call_2"));
@@ -1028,20 +1021,24 @@ mod tests {
         // But tool_return(call_1) is orphaned because tool_call(call_1) was truncated
         let processor = TruncateHistory::new(3).keep_first(false);
         let ctx = make_test_context();
-        
+
         let result = processor.process(&ctx, messages).await;
-        
+
         // The orphaned tool_return(call_1) should be removed
         // So we should have: tool_call(call_2), tool_return(call_2)
         assert_eq!(result.len(), 2);
-        
+
         // Verify no orphaned tool results
         let tool_use_ids = collect_all_tool_use_ids(&result);
         let tool_result_ids = collect_all_tool_result_ids(&result);
-        
+
         // All tool_result_ids should have matching tool_use_ids
         for id in &tool_result_ids {
-            assert!(tool_use_ids.contains(id), "Orphaned tool_result found: {}", id);
+            assert!(
+                tool_use_ids.contains(id),
+                "Orphaned tool_result found: {}",
+                id
+            );
         }
     }
 
@@ -1049,11 +1046,11 @@ mod tests {
     async fn test_truncate_by_tokens_removes_orphaned_tool_results() {
         // Similar test but for TruncateByTokens
         let mut messages = Vec::new();
-        
+
         let mut user_msg = ModelRequest::new();
         user_msg.add_user_prompt("Hello");
         messages.push(user_msg);
-        
+
         messages.push(make_tool_call_message("call_a"));
         messages.push(make_tool_return_message("call_a"));
         messages.push(make_tool_call_message("call_b"));
@@ -1062,15 +1059,19 @@ mod tests {
         // Use a small token limit to force truncation
         let processor = TruncateByTokens::new(200).keep_first_n(0);
         let ctx = make_test_context();
-        
+
         let result = processor.process(&ctx, messages).await;
-        
+
         // Verify no orphaned tool results
         let tool_use_ids = collect_all_tool_use_ids(&result);
         let tool_result_ids = collect_all_tool_result_ids(&result);
-        
+
         for id in &tool_result_ids {
-            assert!(tool_use_ids.contains(id), "Orphaned tool_result found: {}", id);
+            assert!(
+                tool_use_ids.contains(id),
+                "Orphaned tool_result found: {}",
+                id
+            );
         }
     }
 
@@ -1078,21 +1079,21 @@ mod tests {
     async fn test_tool_pair_aware_truncation_keeps_complete_pairs() {
         // Test that when we have complete pairs, they're preserved
         let mut messages = Vec::new();
-        
+
         messages.push(make_tool_call_message("call_x"));
         messages.push(make_tool_return_message("call_x"));
 
         let processor = TruncateByTokens::new(10000).keep_first_n(0);
         let ctx = make_test_context();
-        
+
         let result = processor.process(&ctx, messages).await;
-        
+
         // Both should be preserved (no truncation needed)
         assert_eq!(result.len(), 2);
-        
+
         let tool_use_ids = collect_all_tool_use_ids(&result);
         let tool_result_ids = collect_all_tool_result_ids(&result);
-        
+
         assert_eq!(tool_use_ids.len(), 1);
         assert_eq!(tool_result_ids.len(), 1);
         assert!(tool_use_ids.contains("call_x"));
@@ -1106,9 +1107,9 @@ mod tests {
             make_tool_call_message("id_2"),
             make_tool_return_message("id_1"),
         ];
-        
+
         let ids = collect_all_tool_use_ids(&messages);
-        
+
         assert_eq!(ids.len(), 2);
         assert!(ids.contains("id_1"));
         assert!(ids.contains("id_2"));
@@ -1121,9 +1122,9 @@ mod tests {
             make_tool_return_message("id_1"),
             make_tool_return_message("id_2"),
         ];
-        
+
         let ids = collect_all_tool_result_ids(&messages);
-        
+
         assert_eq!(ids.len(), 2);
         assert!(ids.contains("id_1"));
         assert!(ids.contains("id_2"));
@@ -1134,16 +1135,14 @@ mod tests {
         // ToolReturn with None tool_call_id should be kept (intentional edge case handling)
         let tool_return_no_id = ToolReturnPart::new("test_tool", ToolReturnContent::text("result"));
         // Note: no .with_tool_call_id() - so it's None
-        
-        let msg = ModelRequest::with_parts(vec![
-            ModelRequestPart::ToolReturn(tool_return_no_id),
-        ]);
+
+        let msg = ModelRequest::with_parts(vec![ModelRequestPart::ToolReturn(tool_return_no_id)]);
 
         let messages = vec![msg];
         let valid_ids: HashSet<String> = HashSet::new(); // No valid IDs
-        
+
         let result = remove_orphaned_tool_results(messages, &valid_ids);
-        
+
         // Should be kept because tool_call_id is None
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].parts.len(), 1);
@@ -1152,7 +1151,7 @@ mod tests {
     #[test]
     fn test_builtin_tool_return_with_empty_string_id_is_removed() {
         use serdes_ai_core::messages::parts::{BuiltinToolReturnContent, WebSearchResults};
-        
+
         // BuiltinToolReturn with empty string tool_call_id should be removed
         let empty_results = WebSearchResults::new("query", vec![]);
         let content = BuiltinToolReturnContent::web_search(empty_results);
@@ -1162,17 +1161,16 @@ mod tests {
             content,
             "", // Empty string!
         );
-        
-        let msg = ModelRequest::with_parts(vec![
-            ModelRequestPart::BuiltinToolReturn(builtin_return),
-        ]);
+
+        let msg =
+            ModelRequest::with_parts(vec![ModelRequestPart::BuiltinToolReturn(builtin_return)]);
 
         let messages = vec![msg];
         // Even with an empty valid_ids set, empty string should be treated as invalid
         let valid_ids: HashSet<String> = HashSet::new();
-        
+
         let result = remove_orphaned_tool_results(messages, &valid_ids);
-        
+
         // Should be removed because empty string ID is invalid
         assert_eq!(result.len(), 0);
     }
@@ -1180,26 +1178,22 @@ mod tests {
     #[test]
     fn test_builtin_tool_return_with_valid_id_is_kept() {
         use serdes_ai_core::messages::parts::{BuiltinToolReturnContent, WebSearchResults};
-        
+
         // BuiltinToolReturn with matching ID should be kept
         let empty_results = WebSearchResults::new("query", vec![]);
         let content = BuiltinToolReturnContent::web_search(empty_results);
-        let builtin_return = serdes_ai_core::BuiltinToolReturnPart::new(
-            "web_search",
-            content,
-            "valid_call_id",
-        );
-        
-        let msg = ModelRequest::with_parts(vec![
-            ModelRequestPart::BuiltinToolReturn(builtin_return),
-        ]);
+        let builtin_return =
+            serdes_ai_core::BuiltinToolReturnPart::new("web_search", content, "valid_call_id");
+
+        let msg =
+            ModelRequest::with_parts(vec![ModelRequestPart::BuiltinToolReturn(builtin_return)]);
 
         let messages = vec![msg];
         let mut valid_ids: HashSet<String> = HashSet::new();
         valid_ids.insert("valid_call_id".to_string());
-        
+
         let result = remove_orphaned_tool_results(messages, &valid_ids);
-        
+
         // Should be kept because ID matches
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].parts.len(), 1);
@@ -1213,12 +1207,12 @@ mod tests {
     fn test_remove_orphaned_tool_uses_basic() {
         // Create a tool call without matching tool result
         let orphan_call_msg = make_tool_call_message("orphan_call");
-        
+
         let messages = vec![orphan_call_msg];
         let valid_result_ids: HashSet<String> = HashSet::new(); // No matching results
-        
+
         let result = remove_orphaned_tool_uses(messages, &valid_result_ids);
-        
+
         // The message should be removed because the ModelResponse becomes empty
         assert_eq!(result.len(), 0);
     }
@@ -1227,13 +1221,13 @@ mod tests {
     fn test_remove_orphaned_tool_uses_keeps_matched() {
         // Create a tool call with matching tool result ID
         let tool_call_msg = make_tool_call_message("matched_call");
-        
+
         let messages = vec![tool_call_msg];
         let mut valid_result_ids: HashSet<String> = HashSet::new();
         valid_result_ids.insert("matched_call".to_string());
-        
+
         let result = remove_orphaned_tool_uses(messages, &valid_result_ids);
-        
+
         // Should be kept because there's a matching result
         assert_eq!(result.len(), 1);
     }
@@ -1242,23 +1236,24 @@ mod tests {
     fn test_remove_orphaned_tool_uses_preserves_text() {
         // Create a ModelResponse with both text and an orphaned tool call
         let mut response = ModelResponse::new();
-        response.add_part(ModelResponsePart::Text(serdes_ai_core::TextPart::new("Some text")));
+        response.add_part(ModelResponsePart::Text(serdes_ai_core::TextPart::new(
+            "Some text",
+        )));
         let tool_call = ToolCallPart::new("test_tool", serde_json::json!({"arg": "value"}))
             .with_tool_call_id("orphan_id");
         response.add_part(ModelResponsePart::ToolCall(tool_call));
-        
-        let msg = ModelRequest::with_parts(vec![
-            ModelRequestPart::ModelResponse(Box::new(response)),
-        ]);
+
+        let msg =
+            ModelRequest::with_parts(vec![ModelRequestPart::ModelResponse(Box::new(response))]);
 
         let messages = vec![msg];
         let valid_result_ids: HashSet<String> = HashSet::new(); // No matching results
-        
+
         let result = remove_orphaned_tool_uses(messages, &valid_result_ids);
-        
+
         // Message should be kept because it still has the Text part
         assert_eq!(result.len(), 1);
-        
+
         // Check that the ModelResponse only has the Text part now
         if let ModelRequestPart::ModelResponse(ref resp) = result[0].parts[0] {
             assert_eq!(resp.parts.len(), 1);
@@ -1275,16 +1270,15 @@ mod tests {
         let tool_call = ToolCallPart::new("test_tool", serde_json::json!({"arg": "value"}));
         // Note: no .with_tool_call_id() - so it's None
         response.add_part(ModelResponsePart::ToolCall(tool_call));
-        
-        let msg = ModelRequest::with_parts(vec![
-            ModelRequestPart::ModelResponse(Box::new(response)),
-        ]);
+
+        let msg =
+            ModelRequest::with_parts(vec![ModelRequestPart::ModelResponse(Box::new(response))]);
 
         let messages = vec![msg];
         let valid_result_ids: HashSet<String> = HashSet::new(); // No valid IDs
-        
+
         let result = remove_orphaned_tool_uses(messages, &valid_result_ids);
-        
+
         // Should be kept because tool_call_id is None
         assert_eq!(result.len(), 1);
     }
@@ -1294,16 +1288,16 @@ mod tests {
         // Test that truncation removes orphans in BOTH directions:
         // - Orphaned tool_results (tool_use was truncated)
         // - Orphaned tool_uses (tool_result was truncated)
-        
+
         // Message 0: Tool call (call_1) - will be kept
         // Message 1: Tool return (call_1) - will be truncated
-        // Message 2: Tool call (call_2) - will be truncated  
+        // Message 2: Tool call (call_2) - will be truncated
         // Message 3: Tool return (call_2) - will be kept
         let mut messages = Vec::new();
-        
-        messages.push(make_tool_call_message("call_1"));   // Index 0
+
+        messages.push(make_tool_call_message("call_1")); // Index 0
         messages.push(make_tool_return_message("call_1")); // Index 1
-        messages.push(make_tool_call_message("call_2"));   // Index 2
+        messages.push(make_tool_call_message("call_2")); // Index 2
         messages.push(make_tool_return_message("call_2")); // Index 3
 
         // Truncate to 2 messages, keeping first (keep_first=true, max=2)
@@ -1311,22 +1305,30 @@ mod tests {
         // Both are orphaned!
         let processor = TruncateHistory::new(2).keep_first(true);
         let ctx = make_test_context();
-        
+
         let result = processor.process(&ctx, messages).await;
-        
+
         // Both orphans should be removed
         // The result should have no tool calls or returns with mismatched IDs
         let tool_use_ids = collect_all_tool_use_ids(&result);
         let tool_result_ids = collect_all_tool_result_ids(&result);
-        
+
         // All remaining tool_results should have matching tool_uses
         for id in &tool_result_ids {
-            assert!(tool_use_ids.contains(id), "Orphaned tool_result found: {}", id);
+            assert!(
+                tool_use_ids.contains(id),
+                "Orphaned tool_result found: {}",
+                id
+            );
         }
-        
+
         // All remaining tool_uses should have matching tool_results
         for id in &tool_use_ids {
-            assert!(tool_result_ids.contains(id), "Orphaned tool_use found: {}", id);
+            assert!(
+                tool_result_ids.contains(id),
+                "Orphaned tool_use found: {}",
+                id
+            );
         }
     }
 
@@ -1334,7 +1336,7 @@ mod tests {
     async fn test_truncate_by_tokens_removes_both_orphaned_directions() {
         // Same test but for TruncateByTokens
         let mut messages = Vec::new();
-        
+
         messages.push(make_tool_call_message("call_a"));
         messages.push(make_tool_return_message("call_a"));
         messages.push(make_tool_call_message("call_b"));
@@ -1342,19 +1344,27 @@ mod tests {
 
         let processor = TruncateByTokens::new(50).keep_first_n(0); // Very low to force truncation
         let ctx = make_test_context();
-        
+
         let result = processor.process(&ctx, messages).await;
-        
+
         // Verify bidirectional consistency
         let tool_use_ids = collect_all_tool_use_ids(&result);
         let tool_result_ids = collect_all_tool_result_ids(&result);
-        
+
         for id in &tool_result_ids {
-            assert!(tool_use_ids.contains(id), "Orphaned tool_result found: {}", id);
+            assert!(
+                tool_use_ids.contains(id),
+                "Orphaned tool_result found: {}",
+                id
+            );
         }
-        
+
         for id in &tool_use_ids {
-            assert!(tool_result_ids.contains(id), "Orphaned tool_use found: {}", id);
+            assert!(
+                tool_result_ids.contains(id),
+                "Orphaned tool_use found: {}",
+                id
+            );
         }
     }
 }
