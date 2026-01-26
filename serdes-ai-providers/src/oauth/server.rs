@@ -129,10 +129,20 @@ impl CallbackServer {
     fn success_response() -> String {
         let body = r#"<!DOCTYPE html>
 <html>
-<head><title>Authentication Successful</title></head>
-<body style="font-family: system-ui; text-align: center; padding: 50px;">
-<h1>🎉 Authentication Successful!</h1>
-<p>You can close this window and return to the CLI.</p>
+<head>
+<title>Authentication Successful</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 60px 20px; background: #f5f5f5; }
+.container { background: white; max-width: 400px; margin: 0 auto; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+h1 { color: #22c55e; margin: 0 0 16px 0; font-size: 24px; }
+p { color: #666; margin: 0; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Authentication Successful</h1>
+<p>You can close this window and return to the application.</p>
+</div>
 </body>
 </html>"#;
         format!(
@@ -146,10 +156,20 @@ impl CallbackServer {
         let body = format!(
             r#"<!DOCTYPE html>
 <html>
-<head><title>Authentication Failed</title></head>
-<body style="font-family: system-ui; text-align: center; padding: 50px;">
-<h1>❌ Authentication Failed</h1>
+<head>
+<title>Authentication Failed</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 60px 20px; background: #f5f5f5; }}
+.container {{ background: white; max-width: 400px; margin: 0 auto; padding: 40px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
+h1 {{ color: #ef4444; margin: 0 0 16px 0; font-size: 24px; }}
+p {{ color: #666; margin: 0; }}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Authentication Failed</h1>
 <p>{}</p>
+</div>
 </body>
 </html>"#,
             message
