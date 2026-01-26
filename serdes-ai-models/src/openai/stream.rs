@@ -151,6 +151,7 @@ where
 }
 
 /// Parse a single SSE line into an event.
+#[allow(clippy::too_many_arguments)]
 fn parse_sse_line(
     line: &str,
     tool_calls: &mut HashMap<u32, ToolCallState>,

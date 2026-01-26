@@ -172,7 +172,7 @@ impl HuggingFaceModel {
             params.stop = Some(stop.clone());
         }
         if let Some(seed) = settings.seed {
-            params.seed = Some(seed as u64);
+            params.seed = Some(seed);
         }
 
         // Don't return the prompt in the output

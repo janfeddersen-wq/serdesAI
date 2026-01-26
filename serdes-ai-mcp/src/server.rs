@@ -176,7 +176,7 @@ impl McpServer {
                     let response = self.handle_message(trimmed).await;
 
                     if let Some(resp) = response {
-                        let json = serde_json::to_string(&resp).map_err(|e| McpError::Json(e))?;
+                        let json = serde_json::to_string(&resp).map_err(McpError::Json)?;
                         stdout.write_all(json.as_bytes()).await?;
                         stdout.write_all(b"\n").await?;
                         stdout.flush().await?;

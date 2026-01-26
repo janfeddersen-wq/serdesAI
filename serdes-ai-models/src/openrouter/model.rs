@@ -114,9 +114,9 @@ impl OpenRouterModel {
         requests
             .iter()
             .flat_map(|req| {
-                req.parts.iter().filter_map(|part| match part {
-                    ModelRequestPart::SystemPrompt(sys) => Some(ChatMessage::system(&sys.content)),
-                    ModelRequestPart::UserPrompt(user) => Some(ChatMessage {
+                req.parts.iter().map(|part| match part {
+                    ModelRequestPart::SystemPrompt(sys) => ChatMessage::system(&sys.content),
+                    ModelRequestPart::UserPrompt(user) => ChatMessage {
                         role: "user".into(),
                         name: None,
                         tool_calls: None,
@@ -135,18 +135,18 @@ impl OpenRouterModel {
                                     .collect(),
                             ),
                         }),
-                    }),
-                    ModelRequestPart::ToolReturn(ret) => Some(ChatMessage::tool(
+                    },
+                    ModelRequestPart::ToolReturn(ret) => ChatMessage::tool(
                         ret.tool_call_id.clone().unwrap_or_default(),
                         ret.content.to_string_content(),
-                    )),
+                    ),
                     ModelRequestPart::RetryPrompt(retry) => {
-                        Some(ChatMessage::user(retry.content.message()))
+                        ChatMessage::user(retry.content.message())
                     }
                     ModelRequestPart::BuiltinToolReturn(builtin) => {
                         let content_str = serde_json::to_string(&builtin.content)
                             .unwrap_or_else(|_| builtin.content_type().to_string());
-                        Some(ChatMessage::tool(builtin.tool_call_id.clone(), content_str))
+                        ChatMessage::tool(builtin.tool_call_id.clone(), content_str)
                     }
                     ModelRequestPart::ModelResponse(response) => {
                         // Add assistant response for proper alternation
@@ -170,7 +170,7 @@ impl OpenRouterModel {
                                 _ => {}
                             }
                         }
-                        Some(ChatMessage {
+                        ChatMessage {
                             role: "assistant".into(),
                             content: if text_content.is_empty() {
                                 None
@@ -184,7 +184,7 @@ impl OpenRouterModel {
                                 Some(tool_calls)
                             },
                             tool_call_id: None,
-                        })
+                        }
                     }
                 })
             })

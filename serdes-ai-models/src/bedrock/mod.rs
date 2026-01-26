@@ -348,20 +348,20 @@ impl BedrockModel {
                     UserContentPart::Text { text } => {
                         Some(types::Content::Text { text: text.clone() })
                     }
-                    UserContentPart::Image { image } => match image {
-                        serdes_ai_core::messages::ImageContent::Binary(binary) => {
-                            use base64::Engine;
-                            let encoded =
-                                base64::engine::general_purpose::STANDARD.encode(&binary.data);
-                            Some(types::Content::Image {
-                                image: types::ImageBlock {
-                                    format: binary.media_type.extension().to_string(),
-                                    source: types::ImageSource::Bytes { bytes: encoded },
-                                },
-                            })
-                        }
-                        _ => None,
-                    },
+                    UserContentPart::Image {
+                        image: serdes_ai_core::messages::ImageContent::Binary(binary),
+                    } => {
+                        use base64::Engine;
+                        let encoded =
+                            base64::engine::general_purpose::STANDARD.encode(&binary.data);
+                        Some(types::Content::Image {
+                            image: types::ImageBlock {
+                                format: binary.media_type.extension().to_string(),
+                                source: types::ImageSource::Bytes { bytes: encoded },
+                            },
+                        })
+                    }
+                    UserContentPart::Image { .. } => None,
                     _ => None,
                 })
                 .collect(),

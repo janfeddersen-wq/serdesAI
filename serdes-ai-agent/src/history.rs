@@ -1078,10 +1078,10 @@ mod tests {
     #[tokio::test]
     async fn test_tool_pair_aware_truncation_keeps_complete_pairs() {
         // Test that when we have complete pairs, they're preserved
-        let mut messages = Vec::new();
-
-        messages.push(make_tool_call_message("call_x"));
-        messages.push(make_tool_return_message("call_x"));
+        let messages = vec![
+            make_tool_call_message("call_x"),
+            make_tool_return_message("call_x"),
+        ];
 
         let processor = TruncateByTokens::new(10000).keep_first_n(0);
         let ctx = make_test_context();
@@ -1293,12 +1293,12 @@ mod tests {
         // Message 1: Tool return (call_1) - will be truncated
         // Message 2: Tool call (call_2) - will be truncated
         // Message 3: Tool return (call_2) - will be kept
-        let mut messages = Vec::new();
-
-        messages.push(make_tool_call_message("call_1")); // Index 0
-        messages.push(make_tool_return_message("call_1")); // Index 1
-        messages.push(make_tool_call_message("call_2")); // Index 2
-        messages.push(make_tool_return_message("call_2")); // Index 3
+        let messages = vec![
+            make_tool_call_message("call_1"),   // Index 0
+            make_tool_return_message("call_1"), // Index 1
+            make_tool_call_message("call_2"),   // Index 2
+            make_tool_return_message("call_2"), // Index 3
+        ];
 
         // Truncate to 2 messages, keeping first (keep_first=true, max=2)
         // This keeps message 0 and 3: tool_call(1) and tool_return(2)
@@ -1335,12 +1335,12 @@ mod tests {
     #[tokio::test]
     async fn test_truncate_by_tokens_removes_both_orphaned_directions() {
         // Same test but for TruncateByTokens
-        let mut messages = Vec::new();
-
-        messages.push(make_tool_call_message("call_a"));
-        messages.push(make_tool_return_message("call_a"));
-        messages.push(make_tool_call_message("call_b"));
-        messages.push(make_tool_return_message("call_b"));
+        let messages = vec![
+            make_tool_call_message("call_a"),
+            make_tool_return_message("call_a"),
+            make_tool_call_message("call_b"),
+            make_tool_return_message("call_b"),
+        ];
 
         let processor = TruncateByTokens::new(50).keep_first_n(0); // Very low to force truncation
         let ctx = make_test_context();

@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn test_version() {
-        assert_eq!(version(), "0.1.1");
+        assert_eq!(version(), "0.1.2");
     }
 
     #[test]
@@ -515,7 +515,7 @@ mod tests {
         let (major, minor, patch) = version_tuple();
         assert_eq!(major, 0);
         assert_eq!(minor, 1);
-        assert_eq!(patch, 0);
+        assert_eq!(patch, 2);
     }
 
     #[test]

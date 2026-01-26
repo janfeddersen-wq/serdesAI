@@ -15,6 +15,37 @@ use serdes_ai_models::ModelRequestParameters;
 use serdes_ai_tools::{ToolError, ToolReturn};
 use std::sync::Arc;
 
+/// Context compression strategy.
+#[derive(Debug, Clone, Default)]
+pub enum CompressionStrategy {
+    /// Keep only the last ~30k tokens worth of messages.
+    #[default]
+    Truncate,
+    /// Use LLM to summarize older messages into condensed form.
+    Summarize,
+}
+
+/// Context compression configuration.
+#[derive(Debug, Clone)]
+pub struct ContextCompression {
+    /// Compression strategy to use.
+    pub strategy: CompressionStrategy,
+    /// Trigger threshold (0.0-1.0). Default: 0.75
+    pub threshold: f64,
+    /// Target token count for truncation/summarization. Default: 30_000
+    pub target_tokens: usize,
+}
+
+impl Default for ContextCompression {
+    fn default() -> Self {
+        Self {
+            strategy: CompressionStrategy::Truncate,
+            threshold: 0.75,
+            target_tokens: 30_000,
+        }
+    }
+}
+
 /// Options for a run.
 #[derive(Debug, Clone, Default)]
 pub struct RunOptions {
@@ -26,6 +57,8 @@ pub struct RunOptions {
     pub usage_limits: Option<crate::context::UsageLimits>,
     /// Custom metadata.
     pub metadata: Option<JsonValue>,
+    /// Context compression configuration.
+    pub compression: Option<ContextCompression>,
 }
 
 impl RunOptions {
@@ -49,6 +82,12 @@ impl RunOptions {
     /// Set metadata.
     pub fn metadata(mut self, metadata: JsonValue) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    /// Set context compression configuration.
+    pub fn with_compression(mut self, config: ContextCompression) -> Self {
+        self.compression = Some(config);
         self
     }
 }

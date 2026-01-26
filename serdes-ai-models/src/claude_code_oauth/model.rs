@@ -280,10 +280,8 @@ impl ClaudeCodeOAuthModel {
         // This matches the Python ClaudeCacheAsyncClient behavior
         if let Some(last_msg) = api_messages.last_mut() {
             if let ClaudeContent::Blocks(ref mut blocks) = last_msg.content {
-                if let Some(last_block) = blocks.last_mut() {
-                    if let ContentBlock::Text { cache_control, .. } = last_block {
-                        *cache_control = Some(CacheControl::ephemeral());
-                    }
+                if let Some(ContentBlock::Text { cache_control, .. }) = blocks.last_mut() {
+                    *cache_control = Some(CacheControl::ephemeral());
                 }
             }
         }

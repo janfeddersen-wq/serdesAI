@@ -84,10 +84,7 @@ impl CohereModel {
             .with_native_structured_output(false);
 
         // Command-R models have good context windows
-        if model.contains("command-r-plus") {
-            profile.context_window = Some(128_000);
-            profile.max_tokens = Some(4096);
-        } else if model.contains("command-r") {
+        if model.contains("command-r") {
             profile.context_window = Some(128_000);
             profile.max_tokens = Some(4096);
         }

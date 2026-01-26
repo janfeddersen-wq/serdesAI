@@ -567,18 +567,16 @@ impl ChatGptOAuthModel {
         let (model_name, vendor_id, usage) = if let Some(ref resp) = final_response {
             let model = resp.get("model").and_then(|v| v.as_str()).map(String::from);
             let id = resp.get("id").and_then(|v| v.as_str()).map(String::from);
-            let usage = resp.get("usage").and_then(|u| {
-                Some(RequestUsage {
-                    request_tokens: u.get("input_tokens").and_then(|v| v.as_u64()),
-                    response_tokens: u.get("output_tokens").and_then(|v| v.as_u64()),
-                    total_tokens: Some(
-                        u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
-                            + u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                    ),
-                    cache_creation_tokens: None,
-                    cache_read_tokens: None,
-                    details: None,
-                })
+            let usage = resp.get("usage").map(|u| RequestUsage {
+                request_tokens: u.get("input_tokens").and_then(|v| v.as_u64()),
+                response_tokens: u.get("output_tokens").and_then(|v| v.as_u64()),
+                total_tokens: Some(
+                    u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+                        + u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                ),
+                cache_creation_tokens: None,
+                cache_read_tokens: None,
+                details: None,
             });
             (model, id, usage)
         } else {

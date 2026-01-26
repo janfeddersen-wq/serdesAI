@@ -102,15 +102,18 @@ pub use output::{
     NonEmptyValidator, OutputMode, OutputSchema, OutputValidator, SyncValidator, TextOutputSchema,
     ToolOutputSchema,
 };
-pub use run::{AgentRun, AgentRunResult, RunOptions, StepResult};
+pub use run::{
+    AgentRun, AgentRunResult, CompressionStrategy, ContextCompression, RunOptions, StepResult,
+};
 pub use stream::{AgentStream, AgentStreamEvent};
 
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::{
         agent, agent_with_deps, Agent, AgentBuilder, AgentRun, AgentRunError, AgentRunResult,
-        AgentStream, AgentStreamEvent, EndStrategy, OutputMode, OutputSchema, OutputValidator,
-        RunContext, RunOptions, RunUsage, StepResult, UsageLimits,
+        AgentStream, AgentStreamEvent, CompressionStrategy, ContextCompression, EndStrategy,
+        OutputMode, OutputSchema, OutputValidator, RunContext, RunOptions, RunUsage, StepResult,
+        UsageLimits,
     };
 }
 

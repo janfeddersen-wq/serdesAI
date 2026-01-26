@@ -152,10 +152,10 @@ fn parse_next_event(buffer: &mut String) -> Option<Result<(String, String), Mode
     let mut found_event = false;
 
     for (i, line) in buffer.lines().enumerate() {
-        if line.starts_with("event: ") {
-            event_type = Some(line[7..].to_string());
-        } else if line.starts_with("data: ") {
-            data = Some(line[6..].to_string());
+        if let Some(stripped) = line.strip_prefix("event: ") {
+            event_type = Some(stripped.to_string());
+        } else if let Some(stripped) = line.strip_prefix("data: ") {
+            data = Some(stripped.to_string());
         } else if line.is_empty() && (event_type.is_some() || data.is_some()) {
             // Calculate position after this empty line
             end_pos = buffer
@@ -258,9 +258,7 @@ fn process_event(
         }
 
         StreamEvent::ContentBlockDelta { index, delta } => {
-            let Some(state) = blocks.get_mut(&index) else {
-                return None;
-            };
+            let state = blocks.get_mut(&index)?;
 
             match delta {
                 ContentBlockDelta::TextDelta { text } => {

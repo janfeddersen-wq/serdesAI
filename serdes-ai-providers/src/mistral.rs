@@ -67,10 +67,12 @@ impl Provider for MistralProvider {
     }
 
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
-        let mut profile = ModelProfile::default();
-        profile.supports_tools = true;
-        profile.supports_system_messages = true;
-        profile.supports_streaming = true;
+        let mut profile = ModelProfile {
+            supports_tools: true,
+            supports_system_messages: true,
+            supports_streaming: true,
+            ..Default::default()
+        };
 
         match model_name {
             "mistral-large-latest" | "mistral-large-2411" => {

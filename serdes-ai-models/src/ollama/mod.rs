@@ -136,8 +136,8 @@ impl OllamaModel {
             .map(|choice| self.convert_tool_choice(choice));
 
         let options = types::Options {
-            temperature: settings.temperature.map(|t| t as f64),
-            top_p: settings.top_p.map(|t| t as f64),
+            temperature: settings.temperature,
+            top_p: settings.top_p,
             top_k: None,
             num_predict: settings.max_tokens.map(|n| n as i32),
             stop: settings.stop.clone(),

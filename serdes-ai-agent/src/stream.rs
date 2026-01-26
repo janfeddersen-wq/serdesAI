@@ -6,7 +6,7 @@
 use crate::agent::{Agent, RegisteredTool};
 use crate::context::{generate_run_id, RunContext, RunUsage};
 use crate::errors::AgentRunError;
-use crate::run::RunOptions;
+use crate::run::{CompressionStrategy, RunOptions};
 use chrono::Utc;
 use futures::{Stream, StreamExt};
 use serdes_ai_core::messages::{ModelResponseStreamEvent, ToolReturnPart, UserContent};
@@ -45,6 +45,28 @@ macro_rules! warn {
 pub enum AgentStreamEvent {
     /// Run started.
     RunStart { run_id: String },
+    /// Context size information (emitted before each model request).
+    ContextInfo {
+        /// Estimated token count (~request_bytes / 4).
+        estimated_tokens: usize,
+        /// Raw request size in bytes (serialized messages + tools).
+        request_bytes: usize,
+        /// Model's context window limit (if known).
+        context_limit: Option<u64>,
+    },
+    /// Context was compressed to fit within limits.
+    ContextCompressed {
+        /// Token count before compression.
+        original_tokens: usize,
+        /// Token count after compression.
+        compressed_tokens: usize,
+        /// Strategy used: "truncate" or "summarize".
+        strategy: String,
+        /// Number of messages before compression.
+        messages_before: usize,
+        /// Number of messages after compression.
+        messages_after: usize,
+    },
     /// Model request started.
     RequestStart { step: u32 },
     /// Text delta.
@@ -134,6 +156,7 @@ impl AgentStream {
 
         let initial_history = options.message_history.clone();
         let _metadata = options.metadata.clone();
+        let compression_config = options.compression.clone();
         let run_id_clone = run_id.clone();
 
         debug!(run_id = %run_id, "AgentStream: spawning streaming task");
@@ -212,6 +235,209 @@ impl AgentStream {
                 let params = ModelRequestParameters::new()
                     .with_tools_arc(tool_definitions.clone())
                     .with_allow_text(true);
+
+                // === Context Size Calculation & Compression ===
+
+                // Calculate context size by serializing (this is the actual request size)
+                let (request_bytes, estimated_tokens) = {
+                    let messages_json = serde_json::to_string(&messages).unwrap_or_default();
+                    let tools_json = serde_json::to_string(&*tool_definitions).unwrap_or_default();
+                    let bytes = messages_json.len() + tools_json.len();
+                    (bytes, bytes / 4)
+                };
+
+                // Get context limit from model profile
+                let context_limit = model.profile().context_window;
+
+                // Emit ContextInfo event
+                let _ = tx
+                    .send(Ok(AgentStreamEvent::ContextInfo {
+                        estimated_tokens,
+                        request_bytes,
+                        context_limit,
+                    }))
+                    .await;
+
+                // Check if compression is needed
+                if let Some(ref compression) = compression_config {
+                    if let Some(limit) = context_limit {
+                        let threshold_tokens = (limit as f64 * compression.threshold) as usize;
+
+                        if estimated_tokens > threshold_tokens {
+                            let messages_before = messages.len();
+                            let original_tokens = estimated_tokens;
+
+                            // Apply compression based on strategy
+                            let strategy_name = match compression.strategy {
+                                CompressionStrategy::Truncate => {
+                                    // Use TruncateByTokens with keep_first_n=2 (system + first user)
+                                    use crate::history::{HistoryProcessor, TruncateByTokens};
+                                    let truncator =
+                                        TruncateByTokens::new(compression.target_tokens as u64)
+                                            .keep_first_n(2);
+
+                                    // Create a minimal context for the processor
+                                    let temp_ctx = RunContext::new((), &model_name);
+                                    messages = truncator.process(&temp_ctx, messages).await;
+                                    "truncate"
+                                }
+                                CompressionStrategy::Summarize => {
+                                    // Use the same model to summarize the conversation history
+                                    // Keep first 2 messages (system + first user) and last few messages
+                                    // Summarize everything in between
+
+                                    if messages.len() <= 4 {
+                                        // Too few messages to summarize, just truncate
+                                        use crate::history::{HistoryProcessor, TruncateByTokens};
+                                        let truncator =
+                                            TruncateByTokens::new(compression.target_tokens as u64)
+                                                .keep_first_n(2);
+                                        let temp_ctx = RunContext::new((), &model_name);
+                                        messages = truncator.process(&temp_ctx, messages).await;
+                                        "truncate (too few messages)"
+                                    } else {
+                                        // Split messages: first 2 (keep), middle (summarize), last 2 (keep)
+                                        let first_two: Vec<_> =
+                                            messages.iter().take(2).cloned().collect();
+                                        let last_two: Vec<_> = messages
+                                            .iter()
+                                            .rev()
+                                            .take(2)
+                                            .cloned()
+                                            .collect::<Vec<_>>()
+                                            .into_iter()
+                                            .rev()
+                                            .collect();
+                                        let middle: Vec<_> = messages
+                                            .iter()
+                                            .skip(2)
+                                            .take(messages.len().saturating_sub(4))
+                                            .cloned()
+                                            .collect();
+
+                                        if middle.is_empty() {
+                                            // Nothing to summarize
+                                            "summarize (nothing to compress)"
+                                        } else {
+                                            // Build summarization prompt
+                                            let middle_json = serde_json::to_string_pretty(&middle)
+                                                .unwrap_or_default();
+                                            let summary_prompt = format!(
+                                                "Condense this conversation history into a brief summary while preserving:\n\
+                                                - Key decisions and conclusions\n\
+                                                - Important information discovered\n\
+                                                - Tool calls made and their essential results\n\
+                                                - Any errors or issues encountered\n\n\
+                                                Keep the summary concise but complete enough to continue the conversation.\n\n\
+                                                Conversation to summarize:\n{}\n\n\
+                                                Respond with ONLY the summary, no preamble.",
+                                                middle_json
+                                            );
+
+                                            // Create a minimal request for summarization
+                                            let mut summary_req = ModelRequest::new();
+                                            summary_req.add_user_prompt(summary_prompt);
+
+                                            // Call the model (non-streaming for simplicity)
+                                            let summary_params = ModelRequestParameters::new();
+                                            match model
+                                                .request(
+                                                    &[summary_req],
+                                                    &model_settings,
+                                                    &summary_params,
+                                                )
+                                                .await
+                                            {
+                                                Ok(response) => {
+                                                    // Extract text from response
+                                                    let summary_text = response
+                                                        .parts
+                                                        .iter()
+                                                        .filter_map(|p| match p {
+                                                            ModelResponsePart::Text(t) => {
+                                                                Some(t.content.clone())
+                                                            }
+                                                            _ => None,
+                                                        })
+                                                        .collect::<Vec<_>>()
+                                                        .join("\n");
+
+                                                    if !summary_text.is_empty() {
+                                                        // Build new message list: first 2 + summary + last 2
+                                                        let mut new_messages = first_two;
+
+                                                        // Add summary as a "previous context" message
+                                                        let mut summary_msg = ModelRequest::new();
+                                                        summary_msg.add_user_prompt(format!(
+                                                            "[Previous conversation summary]\n{}\n[End of summary - continuing conversation]",
+                                                            summary_text
+                                                        ));
+                                                        new_messages.push(summary_msg);
+
+                                                        new_messages.extend(last_two);
+                                                        messages = new_messages;
+                                                        "summarize"
+                                                    } else {
+                                                        // Fallback to truncate if summary failed
+                                                        use crate::history::{
+                                                            HistoryProcessor, TruncateByTokens,
+                                                        };
+                                                        let truncator = TruncateByTokens::new(
+                                                            compression.target_tokens as u64,
+                                                        )
+                                                        .keep_first_n(2);
+                                                        let temp_ctx =
+                                                            RunContext::new((), &model_name);
+                                                        messages = truncator
+                                                            .process(&temp_ctx, messages)
+                                                            .await;
+                                                        "truncate (summary empty)"
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    warn!(
+                                                        "Summarization failed, falling back to truncate: {}",
+                                                        e
+                                                    );
+                                                    use crate::history::{
+                                                        HistoryProcessor, TruncateByTokens,
+                                                    };
+                                                    let truncator = TruncateByTokens::new(
+                                                        compression.target_tokens as u64,
+                                                    )
+                                                    .keep_first_n(2);
+                                                    let temp_ctx = RunContext::new((), &model_name);
+                                                    messages = truncator
+                                                        .process(&temp_ctx, messages)
+                                                        .await;
+                                                    "truncate (summary failed)"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            };
+
+                            // Calculate new size
+                            let new_bytes = serde_json::to_string(&messages)
+                                .map(|s| s.len())
+                                .unwrap_or(0);
+                            let compressed_tokens = new_bytes / 4;
+
+                            // Emit compression event
+                            let _ = tx
+                                .send(Ok(AgentStreamEvent::ContextCompressed {
+                                    original_tokens,
+                                    compressed_tokens,
+                                    strategy: strategy_name.to_string(),
+                                    messages_before,
+                                    messages_after: messages.len(),
+                                }))
+                                .await;
+                        }
+                    }
+                }
+                // === End Context Compression ===
 
                 // Make streaming request
                 info!(

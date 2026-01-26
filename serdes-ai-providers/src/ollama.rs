@@ -76,9 +76,11 @@ impl Provider for OllamaProvider {
 
     fn model_profile(&self, model_name: &str) -> Option<ModelProfile> {
         // Ollama can run any model, so we provide sensible defaults
-        let mut profile = ModelProfile::default();
-        profile.supports_system_messages = true;
-        profile.supports_streaming = true;
+        let mut profile = ModelProfile {
+            supports_system_messages: true,
+            supports_streaming: true,
+            ..Default::default()
+        };
 
         // Enable tools for models that support it
         let model_lower = model_name.to_lowercase();
@@ -101,9 +103,7 @@ impl Provider for OllamaProvider {
             profile.context_window = Some(131072);
         } else if model_lower.contains("llama3") || model_lower.contains("llama-3") {
             profile.context_window = Some(8192);
-        } else if model_lower.contains("mistral") {
-            profile.context_window = Some(32768);
-        } else if model_lower.contains("mixtral") {
+        } else if model_lower.contains("mistral") || model_lower.contains("mixtral") {
             profile.context_window = Some(32768);
         } else if model_lower.contains("deepseek") {
             profile.context_window = Some(65536);

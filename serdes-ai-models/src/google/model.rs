@@ -145,12 +145,14 @@ impl GoogleModel {
 
     /// Get the appropriate profile for a model name.
     fn profile_for_model(model: &str) -> ModelProfile {
-        let mut profile = ModelProfile::default();
-        profile.supports_tools = true;
-        profile.supports_parallel_tools = true;
-        profile.supports_system_messages = true;
-        profile.supports_images = true;
-        profile.supports_streaming = true;
+        let mut profile = ModelProfile {
+            supports_tools: true,
+            supports_parallel_tools: true,
+            supports_system_messages: true,
+            supports_images: true,
+            supports_streaming: true,
+            ..Default::default()
+        };
 
         // Model-specific settings
         if model.contains("flash") {
