@@ -14,6 +14,7 @@ use serdes_ai_core::{
 use serdes_ai_models::ModelRequestParameters;
 use serdes_ai_tools::{ToolError, ToolReturn};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// Context compression strategy.
 #[derive(Debug, Clone, Default)]
@@ -124,6 +125,12 @@ impl<Output> AgentRunResult<Output> {
 }
 
 /// Active agent run that can be iterated.
+///
+/// # Cancellation
+///
+/// Use [`AgentRun::new_with_cancel`] to create a run with cancellation support.
+/// The run will check for cancellation at the start of each step and before
+/// each tool execution.
 pub struct AgentRun<'a, Deps, Output> {
     agent: &'a Agent<Deps, Output>,
     #[allow(dead_code)]
@@ -131,6 +138,8 @@ pub struct AgentRun<'a, Deps, Output> {
     state: AgentRunState<Output>,
     ctx: RunContext<Deps>,
     run_usage_limits: Option<UsageLimits>,
+    /// Cancellation token for this run (if cancellation is enabled).
+    cancel_token: Option<CancellationToken>,
 }
 
 struct AgentRunState<Output> {
@@ -223,6 +232,93 @@ where
             },
             ctx,
             run_usage_limits: options.usage_limits,
+            cancel_token: None,
+        })
+    }
+
+    /// Create a new agent run with cancellation support.
+    ///
+    /// The provided `CancellationToken` can be used to cancel the agent run
+    /// mid-execution. When cancelled:
+    /// - The current step will complete (model request or tool execution)
+    /// - The next step will return `AgentRunError::Cancelled`
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tokio_util::sync::CancellationToken;
+    ///
+    /// let cancel_token = CancellationToken::new();
+    /// let mut run = AgentRun::new_with_cancel(
+    ///     &agent,
+    ///     "Hello!".into(),
+    ///     deps,
+    ///     RunOptions::default(),
+    ///     cancel_token.clone(),
+    /// ).await?;
+    ///
+    /// // Cancel from another task
+    /// cancel_token.cancel();
+    /// ```
+    pub async fn new_with_cancel(
+        agent: &'a Agent<Deps, Output>,
+        prompt: UserContent,
+        deps: Deps,
+        options: RunOptions,
+        cancel_token: CancellationToken,
+    ) -> Result<Self, AgentRunError> {
+        let run_id = generate_run_id();
+        let deps = Arc::new(deps);
+
+        let model_settings = options
+            .model_settings
+            .unwrap_or_else(|| agent.model_settings.clone());
+
+        let ctx = RunContext {
+            deps: deps.clone(),
+            run_id: run_id.clone(),
+            start_time: Utc::now(),
+            model_name: agent.model().name().to_string(),
+            model_settings: model_settings.clone(),
+            tool_name: None,
+            tool_call_id: None,
+            retry_count: 0,
+            metadata: options.metadata.clone(),
+        };
+
+        // Build initial messages
+        let mut messages = options.message_history.unwrap_or_default();
+
+        // Build system prompt
+        let system_prompt = agent.build_system_prompt(&ctx).await;
+        if !system_prompt.is_empty() {
+            let mut req = ModelRequest::new();
+            req.add_system_prompt(system_prompt);
+            messages.push(req);
+        }
+
+        // Add user prompt
+        let mut user_req = ModelRequest::new();
+        user_req.add_user_prompt(prompt);
+        messages.push(user_req);
+
+        Ok(Self {
+            agent,
+            deps,
+            state: AgentRunState {
+                messages,
+                responses: Vec::new(),
+                usage: RunUsage::new(),
+                run_id,
+                step: 0,
+                output_retries: 0,
+                final_output: None,
+                finished: false,
+                finish_reason: None,
+            },
+            ctx,
+            run_usage_limits: options.usage_limits,
+            cancel_token: Some(cancel_token),
         })
     }
 
@@ -235,9 +331,19 @@ where
     }
 
     /// Execute one step.
+    ///
+    /// If cancellation is enabled and the token has been triggered,
+    /// this will return `AgentRunError::Cancelled`.
     pub async fn step(&mut self) -> Result<StepResult, AgentRunError> {
         if self.state.finished {
             return Ok(StepResult::Finished);
+        }
+
+        // Check for cancellation at the start of each step
+        if let Some(ref token) = self.cancel_token {
+            if token.is_cancelled() {
+                return Err(AgentRunError::Cancelled);
+            }
         }
 
         self.state.step += 1;
@@ -427,6 +533,8 @@ where
     }
 
     /// Execute tool calls sequentially (original behavior).
+    ///
+    /// Checks for cancellation before each tool execution.
     async fn execute_tools_sequential(
         &mut self,
         calls: Vec<serdes_ai_core::messages::ToolCallPart>,
@@ -434,6 +542,18 @@ where
         let mut returns = Vec::new();
 
         for tc in calls {
+            // Check for cancellation before each tool
+            if let Some(ref token) = self.cancel_token {
+                if token.is_cancelled() {
+                    returns.push((
+                        tc.tool_name.clone(),
+                        tc.tool_call_id.clone(),
+                        Err(ToolError::Cancelled),
+                    ));
+                    continue;
+                }
+            }
+
             self.state.usage.record_tool_call();
 
             let tool = match self.agent.find_tool(&tc.tool_name) {
@@ -667,6 +787,39 @@ where
     /// Get current step number.
     pub fn step_number(&self) -> u32 {
         self.state.step
+    }
+
+    /// Cancel the running agent.
+    ///
+    /// If this run was created with cancellation support via
+    /// [`AgentRun::new_with_cancel`], this will trigger cancellation.
+    /// The next call to `step()` will return `AgentRunError::Cancelled`.
+    ///
+    /// If this run was created without cancellation support (via `new`),
+    /// this method does nothing.
+    pub fn cancel(&self) {
+        if let Some(ref token) = self.cancel_token {
+            token.cancel();
+        }
+    }
+
+    /// Check if this run was cancelled.
+    ///
+    /// Returns `true` if a cancellation token was provided and it has been
+    /// triggered, `false` otherwise.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel_token
+            .as_ref()
+            .map(|t| t.is_cancelled())
+            .unwrap_or(false)
+    }
+
+    /// Get the cancellation token if one was provided.
+    ///
+    /// This can be used to share the token with other tasks that need
+    /// to coordinate cancellation.
+    pub fn cancellation_token(&self) -> Option<&CancellationToken> {
+        self.cancel_token.as_ref()
     }
 }
 

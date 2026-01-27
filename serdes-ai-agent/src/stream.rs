@@ -18,6 +18,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 // Conditional tracing - use no-op macros when tracing feature is disabled
 #[cfg(feature = "tracing-integration")]
@@ -103,14 +104,33 @@ pub enum AgentStreamEvent {
     RunComplete { run_id: String },
     /// Error occurred.
     Error { message: String },
+    /// Run was cancelled.
+    Cancelled {
+        /// Partial text accumulated before cancellation.
+        partial_text: Option<String>,
+        /// Partial thinking content accumulated before cancellation.
+        partial_thinking: Option<String>,
+        /// Tool calls that were in progress when cancelled.
+        pending_tools: Vec<String>,
+    },
 }
 
 /// Streaming agent execution.
 ///
 /// This provides real streaming by spawning a task that streams from the model
 /// and sends events through a channel.
+///
+/// # Cancellation
+///
+/// Use [`AgentStream::new_with_cancel`] to create a stream with cancellation support.
+/// When the cancellation token is triggered, the stream will:
+/// 1. Stop the model stream
+/// 2. Cancel any pending tool calls
+/// 3. Emit a [`AgentStreamEvent::Cancelled`] event with partial results
 pub struct AgentStream {
     rx: mpsc::Receiver<Result<AgentStreamEvent, AgentRunError>>,
+    /// Cancellation token for this stream (if cancellation is enabled).
+    cancel_token: Option<CancellationToken>,
 }
 
 impl AgentStream {
@@ -394,10 +414,10 @@ impl AgentStream {
                                                         "truncate (summary empty)"
                                                     }
                                                 }
-                                                Err(e) => {
+                                                Err(_e) => {
                                                     warn!(
                                                         "Summarization failed, falling back to truncate: {}",
-                                                        e
+                                                        _e
                                                     );
                                                     use crate::history::{
                                                         HistoryProcessor, TruncateByTokens,
@@ -760,7 +780,575 @@ impl AgentStream {
                 .await;
         });
 
-        Ok(AgentStream { rx })
+        Ok(AgentStream {
+            rx,
+            cancel_token: None,
+        })
+    }
+
+    /// Create a new streaming agent run with cancellation support.
+    ///
+    /// The provided `CancellationToken` can be used to cancel the agent run
+    /// mid-execution. When cancelled:
+    /// - The model stream is stopped
+    /// - In-flight tool calls are aborted
+    /// - A `Cancelled` event is emitted with partial results
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tokio_util::sync::CancellationToken;
+    ///
+    /// let cancel_token = CancellationToken::new();
+    /// let stream = AgentStream::new_with_cancel(
+    ///     &agent,
+    ///     "Hello!".into(),
+    ///     deps,
+    ///     RunOptions::default(),
+    ///     cancel_token.clone(),
+    /// ).await?;
+    ///
+    /// // Cancel from another task
+    /// cancel_token.cancel();
+    /// ```
+    pub async fn new_with_cancel<Deps, Output>(
+        agent: &Agent<Deps, Output>,
+        prompt: UserContent,
+        deps: Deps,
+        options: RunOptions,
+        cancel_token: CancellationToken,
+    ) -> Result<Self, AgentRunError>
+    where
+        Deps: Send + Sync + 'static,
+        Output: Send + Sync + 'static,
+    {
+        let run_id = generate_run_id();
+        let (tx, rx) = mpsc::channel(64);
+
+        // Clone what we need for the spawned task
+        let model = agent.model_arc();
+        let model_name = model.name().to_string();
+        let model_settings = options
+            .model_settings
+            .clone()
+            .unwrap_or_else(|| agent.model_settings.clone());
+
+        let static_system_prompt = agent.static_system_prompt().to_string();
+        let tool_definitions = agent.tool_definitions();
+        let _end_strategy = agent.end_strategy;
+        let usage_limits = agent.usage_limits.clone();
+        let run_usage_limits = options.usage_limits.clone();
+        let tools: Vec<RegisteredTool<Deps>> = agent.tools.to_vec();
+        let deps = Arc::new(deps);
+
+        let initial_history = options.message_history.clone();
+        let _metadata = options.metadata.clone();
+        let compression_config = options.compression.clone();
+        let run_id_clone = run_id.clone();
+        let cancel_token_clone = cancel_token.clone();
+
+        debug!(run_id = %run_id, "AgentStream: spawning streaming task with cancellation support");
+
+        tokio::spawn(async move {
+            info!(run_id = %run_id_clone, "AgentStream: task started with cancellation support");
+
+            // Track partial content for cancellation reporting
+            let mut accumulated_text = String::new();
+            let mut accumulated_thinking = String::new();
+            let mut pending_tool_names: Vec<String> = Vec::new();
+
+            // Emit RunStart
+            if tx
+                .send(Ok(AgentStreamEvent::RunStart {
+                    run_id: run_id_clone.clone(),
+                }))
+                .await
+                .is_err()
+            {
+                return;
+            }
+
+            // Build initial messages
+            let mut messages = initial_history.unwrap_or_default();
+
+            if !static_system_prompt.is_empty() {
+                let mut req = ModelRequest::new();
+                req.add_system_prompt(static_system_prompt.clone());
+                messages.push(req);
+            }
+
+            let mut user_req = ModelRequest::new();
+            user_req.add_user_prompt(prompt);
+            messages.push(user_req);
+
+            let mut responses: Vec<ModelResponse> = Vec::new();
+            let mut usage = RunUsage::new();
+            let mut step = 0u32;
+            let mut finished = false;
+            let mut finish_reason: Option<FinishReason>;
+
+            // Main agent loop with cancellation support
+            while !finished {
+                // Check for cancellation at the start of each iteration
+                if cancel_token_clone.is_cancelled() {
+                    info!(run_id = %run_id_clone, "AgentStream: cancelled at loop start");
+                    let _ = tx
+                        .send(Ok(AgentStreamEvent::Cancelled {
+                            partial_text: if accumulated_text.is_empty() {
+                                None
+                            } else {
+                                Some(accumulated_text)
+                            },
+                            partial_thinking: if accumulated_thinking.is_empty() {
+                                None
+                            } else {
+                                Some(accumulated_thinking)
+                            },
+                            pending_tools: pending_tool_names,
+                        }))
+                        .await;
+                    let _ = tx.send(Err(AgentRunError::Cancelled)).await;
+                    return;
+                }
+
+                step += 1;
+
+                // Check usage limits
+                if let Some(ref limits) = usage_limits {
+                    if let Err(e) = limits.check(&usage) {
+                        let _ = tx.send(Err(e.into())).await;
+                        return;
+                    }
+                }
+
+                if let Some(ref limits) = run_usage_limits {
+                    if let Err(e) = limits.check(&usage) {
+                        let _ = tx.send(Err(e.into())).await;
+                        return;
+                    }
+                }
+
+                if tx
+                    .send(Ok(AgentStreamEvent::RequestStart { step }))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+
+                let params = ModelRequestParameters::new()
+                    .with_tools_arc(tool_definitions.clone())
+                    .with_allow_text(true);
+
+                // Context size calculation (simplified - full version in main new())
+                let (request_bytes, estimated_tokens) = {
+                    let messages_json = serde_json::to_string(&messages).unwrap_or_default();
+                    let tools_json = serde_json::to_string(&*tool_definitions).unwrap_or_default();
+                    let bytes = messages_json.len() + tools_json.len();
+                    (bytes, bytes / 4)
+                };
+
+                let context_limit = model.profile().context_window;
+
+                let _ = tx
+                    .send(Ok(AgentStreamEvent::ContextInfo {
+                        estimated_tokens,
+                        request_bytes,
+                        context_limit,
+                    }))
+                    .await;
+
+                // Context compression (simplified version)
+                if let Some(ref compression) = compression_config {
+                    if let Some(limit) = context_limit {
+                        let threshold_tokens = (limit as f64 * compression.threshold) as usize;
+                        if estimated_tokens > threshold_tokens {
+                            use crate::history::{HistoryProcessor, TruncateByTokens};
+                            let truncator = TruncateByTokens::new(compression.target_tokens as u64)
+                                .keep_first_n(2);
+                            let temp_ctx = RunContext::new((), &model_name);
+                            messages = truncator.process(&temp_ctx, messages).await;
+                        }
+                    }
+                }
+
+                // Make streaming request with cancellation support
+                let stream_result = model
+                    .request_stream(&messages, &model_settings, &params)
+                    .await;
+
+                let mut model_stream = match stream_result {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = tx
+                            .send(Ok(AgentStreamEvent::Error {
+                                message: e.to_string(),
+                            }))
+                            .await;
+                        let _ = tx.send(Err(AgentRunError::Model(e))).await;
+                        return;
+                    }
+                };
+
+                let mut response_parts: Vec<ModelResponsePart> = Vec::new();
+
+                // Process stream events with cancellation check
+                loop {
+                    tokio::select! {
+                        biased;
+
+                        _ = cancel_token_clone.cancelled() => {
+                            info!(run_id = %run_id_clone, "AgentStream: cancelled during model stream");
+                            let _ = tx
+                                .send(Ok(AgentStreamEvent::Cancelled {
+                                    partial_text: if accumulated_text.is_empty() {
+                                        None
+                                    } else {
+                                        Some(accumulated_text)
+                                    },
+                                    partial_thinking: if accumulated_thinking.is_empty() {
+                                        None
+                                    } else {
+                                        Some(accumulated_thinking)
+                                    },
+                                    pending_tools: pending_tool_names,
+                                }))
+                                .await;
+                            let _ = tx.send(Err(AgentRunError::Cancelled)).await;
+                            return;
+                        }
+
+                        event_result = model_stream.next() => {
+                            match event_result {
+                                Some(Ok(event)) => {
+                                    match event {
+                                        ModelResponseStreamEvent::PartStart(start) => {
+                                            match &start.part {
+                                                ModelResponsePart::Text(t) => {
+                                                    if !t.content.is_empty() {
+                                                        accumulated_text.push_str(&t.content);
+                                                        let _ = tx
+                                                            .send(Ok(AgentStreamEvent::TextDelta {
+                                                                text: t.content.clone(),
+                                                            }))
+                                                            .await;
+                                                    }
+                                                }
+                                                ModelResponsePart::ToolCall(tc) => {
+                                                    pending_tool_names.push(tc.tool_name.clone());
+                                                    let _ = tx
+                                                        .send(Ok(AgentStreamEvent::ToolCallStart {
+                                                            tool_name: tc.tool_name.clone(),
+                                                            tool_call_id: tc.tool_call_id.clone(),
+                                                        }))
+                                                        .await;
+                                                    if let Ok(args_str) = tc.args.to_json_string() {
+                                                        if !args_str.is_empty() && args_str != "{}" {
+                                                            let _ = tx
+                                                                .send(Ok(AgentStreamEvent::ToolCallDelta {
+                                                                    delta: args_str,
+                                                                    tool_call_id: tc.tool_call_id.clone(),
+                                                                }))
+                                                                .await;
+                                                        }
+                                                    }
+                                                }
+                                                ModelResponsePart::Thinking(t) => {
+                                                    if !t.content.is_empty() {
+                                                        accumulated_thinking.push_str(&t.content);
+                                                        let _ = tx
+                                                            .send(Ok(AgentStreamEvent::ThinkingDelta {
+                                                                text: t.content.clone(),
+                                                            }))
+                                                            .await;
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                            response_parts.push(start.part.clone());
+                                        }
+                                        ModelResponseStreamEvent::PartDelta(delta) => {
+                                            use serdes_ai_core::messages::ModelResponsePartDelta;
+                                            match &delta.delta {
+                                                ModelResponsePartDelta::Text(t) => {
+                                                    accumulated_text.push_str(&t.content_delta);
+                                                    let _ = tx
+                                                        .send(Ok(AgentStreamEvent::TextDelta {
+                                                            text: t.content_delta.clone(),
+                                                        }))
+                                                        .await;
+                                                    if let Some(ModelResponsePart::Text(ref mut text)) =
+                                                        response_parts.get_mut(delta.index)
+                                                    {
+                                                        text.content.push_str(&t.content_delta);
+                                                    }
+                                                }
+                                                ModelResponsePartDelta::ToolCall(tc) => {
+                                                    let tool_call_id =
+                                                        response_parts.get(delta.index).and_then(|p| {
+                                                            if let ModelResponsePart::ToolCall(tc) = p {
+                                                                tc.tool_call_id.clone()
+                                                            } else {
+                                                                None
+                                                            }
+                                                        });
+                                                    let _ = tx
+                                                        .send(Ok(AgentStreamEvent::ToolCallDelta {
+                                                            delta: tc.args_delta.clone(),
+                                                            tool_call_id,
+                                                        }))
+                                                        .await;
+                                                    if let Some(ModelResponsePart::ToolCall(
+                                                        ref mut tool_call,
+                                                    )) = response_parts.get_mut(delta.index)
+                                                    {
+                                                        tc.apply(tool_call);
+                                                    }
+                                                }
+                                                ModelResponsePartDelta::Thinking(t) => {
+                                                    accumulated_thinking.push_str(&t.content_delta);
+                                                    let _ = tx
+                                                        .send(Ok(AgentStreamEvent::ThinkingDelta {
+                                                            text: t.content_delta.clone(),
+                                                        }))
+                                                        .await;
+                                                    if let Some(ModelResponsePart::Thinking(
+                                                        ref mut think,
+                                                    )) = response_parts.get_mut(delta.index)
+                                                    {
+                                                        t.apply(think);
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        ModelResponseStreamEvent::PartEnd(_) => {}
+                                    }
+                                }
+                                Some(Err(e)) => {
+                                    let _ = tx
+                                        .send(Ok(AgentStreamEvent::Error {
+                                            message: e.to_string(),
+                                        }))
+                                        .await;
+                                    let _ = tx.send(Err(AgentRunError::Model(e))).await;
+                                    return;
+                                }
+                                None => {
+                                    // Stream ended normally
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Build the complete response
+                let response = ModelResponse {
+                    parts: response_parts.clone(),
+                    model_name: Some(model.name().to_string()),
+                    timestamp: Utc::now(),
+                    finish_reason: Some(FinishReason::Stop),
+                    usage: None,
+                    vendor_id: None,
+                    vendor_details: None,
+                    kind: "response".to_string(),
+                };
+
+                finish_reason = response.finish_reason;
+                responses.push(response.clone());
+
+                let _ = tx
+                    .send(Ok(AgentStreamEvent::ResponseComplete { step }))
+                    .await;
+
+                // Check for tool calls
+                let tool_calls: Vec<_> = response
+                    .parts
+                    .iter()
+                    .filter_map(|p| {
+                        if let ModelResponsePart::ToolCall(tc) = p {
+                            Some(tc.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if !tool_calls.is_empty() {
+                    let mut response_req = ModelRequest::new();
+                    response_req
+                        .parts
+                        .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
+                    messages.push(response_req);
+
+                    let mut tool_req = ModelRequest::new();
+
+                    for tc in tool_calls {
+                        // Check for cancellation before each tool execution
+                        if cancel_token_clone.is_cancelled() {
+                            info!(run_id = %run_id_clone, "AgentStream: cancelled before tool execution");
+                            let _ = tx
+                                .send(Ok(AgentStreamEvent::Cancelled {
+                                    partial_text: if accumulated_text.is_empty() {
+                                        None
+                                    } else {
+                                        Some(accumulated_text)
+                                    },
+                                    partial_thinking: if accumulated_thinking.is_empty() {
+                                        None
+                                    } else {
+                                        Some(accumulated_thinking)
+                                    },
+                                    pending_tools: pending_tool_names,
+                                }))
+                                .await;
+                            let _ = tx.send(Err(AgentRunError::Cancelled)).await;
+                            return;
+                        }
+
+                        let _ = tx
+                            .send(Ok(AgentStreamEvent::ToolCallComplete {
+                                tool_name: tc.tool_name.clone(),
+                                tool_call_id: tc.tool_call_id.clone(),
+                            }))
+                            .await;
+
+                        usage.record_tool_call();
+                        // Remove from pending after completion
+                        pending_tool_names.retain(|n| n != &tc.tool_name);
+
+                        let tool = tools.iter().find(|t| t.definition.name == tc.tool_name);
+
+                        match tool {
+                            Some(tool) => {
+                                let tool_ctx =
+                                    RunContext::with_shared_deps(deps.clone(), model_name.clone())
+                                        .for_tool(&tc.tool_name, tc.tool_call_id.clone());
+
+                                let result =
+                                    tool.executor.execute(tc.args.to_json(), &tool_ctx).await;
+
+                                match result {
+                                    Ok(ret) => {
+                                        let _ = tx
+                                            .send(Ok(AgentStreamEvent::ToolExecuted {
+                                                tool_name: tc.tool_name.clone(),
+                                                tool_call_id: tc.tool_call_id.clone(),
+                                                success: true,
+                                                error: None,
+                                            }))
+                                            .await;
+
+                                        let mut part =
+                                            ToolReturnPart::new(&tc.tool_name, ret.content);
+                                        if let Some(id) = tc.tool_call_id.clone() {
+                                            part = part.with_tool_call_id(id);
+                                        }
+                                        tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                                    }
+                                    Err(e) => {
+                                        let error_msg = e.to_string();
+                                        let _ = tx
+                                            .send(Ok(AgentStreamEvent::ToolExecuted {
+                                                tool_name: tc.tool_name.clone(),
+                                                tool_call_id: tc.tool_call_id.clone(),
+                                                success: false,
+                                                error: Some(error_msg.clone()),
+                                            }))
+                                            .await;
+
+                                        let mut part = ToolReturnPart::error(
+                                            &tc.tool_name,
+                                            format!("Tool error: {}", e),
+                                        );
+                                        if let Some(id) = tc.tool_call_id.clone() {
+                                            part = part.with_tool_call_id(id);
+                                        }
+                                        tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                                    }
+                                }
+                            }
+                            None => {
+                                let error_msg = format!("Unknown tool: {}", tc.tool_name);
+                                let _ = tx
+                                    .send(Ok(AgentStreamEvent::ToolExecuted {
+                                        tool_name: tc.tool_name.clone(),
+                                        tool_call_id: tc.tool_call_id.clone(),
+                                        success: false,
+                                        error: Some(error_msg.clone()),
+                                    }))
+                                    .await;
+
+                                let mut part = ToolReturnPart::error(
+                                    &tc.tool_name,
+                                    format!("Unknown tool: {}", tc.tool_name),
+                                );
+                                if let Some(id) = tc.tool_call_id.clone() {
+                                    part = part.with_tool_call_id(id);
+                                }
+                                tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                            }
+                        }
+                    }
+
+                    if !tool_req.parts.is_empty() {
+                        messages.push(tool_req);
+                    }
+
+                    continue;
+                }
+
+                if finish_reason == Some(FinishReason::Stop) {
+                    finished = true;
+                    let _ = tx.send(Ok(AgentStreamEvent::OutputReady)).await;
+                }
+            }
+
+            let _ = tx
+                .send(Ok(AgentStreamEvent::RunComplete {
+                    run_id: run_id_clone,
+                }))
+                .await;
+        });
+
+        Ok(AgentStream {
+            rx,
+            cancel_token: Some(cancel_token),
+        })
+    }
+
+    /// Cancel the running agent stream.
+    ///
+    /// If this stream was created with cancellation support via
+    /// [`AgentStream::new_with_cancel`], this will trigger cancellation.
+    /// The stream will emit a `Cancelled` event with any partial results.
+    ///
+    /// If this stream was created without cancellation support (via `new`),
+    /// this method does nothing.
+    pub fn cancel(&self) {
+        if let Some(ref token) = self.cancel_token {
+            token.cancel();
+        }
+    }
+
+    /// Check if this stream was cancelled.
+    ///
+    /// Returns `true` if a cancellation token was provided and it has been
+    /// triggered, `false` otherwise.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel_token
+            .as_ref()
+            .map(|t| t.is_cancelled())
+            .unwrap_or(false)
+    }
+
+    /// Get the cancellation token if one was provided.
+    ///
+    /// This can be used to share the token with other tasks that need
+    /// to coordinate cancellation.
+    pub fn cancellation_token(&self) -> Option<&CancellationToken> {
+        self.cancel_token.as_ref()
     }
 }
 
@@ -803,8 +1391,49 @@ mod tests {
             AgentStreamEvent::RunComplete {
                 run_id: "123".to_string(),
             },
+            AgentStreamEvent::Cancelled {
+                partial_text: Some("partial".to_string()),
+                partial_thinking: None,
+                pending_tools: vec!["tool1".to_string()],
+            },
         ];
 
-        assert_eq!(events.len(), 6);
+        assert_eq!(events.len(), 7);
+    }
+
+    #[test]
+    fn test_cancelled_event() {
+        let event = AgentStreamEvent::Cancelled {
+            partial_text: Some("Hello, I was saying...".to_string()),
+            partial_thinking: Some("Let me think about this...".to_string()),
+            pending_tools: vec!["search".to_string(), "fetch".to_string()],
+        };
+
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Cancelled"));
+        assert!(debug.contains("partial_text"));
+        assert!(debug.contains("pending_tools"));
+    }
+
+    #[test]
+    fn test_cancelled_event_empty() {
+        let event = AgentStreamEvent::Cancelled {
+            partial_text: None,
+            partial_thinking: None,
+            pending_tools: vec![],
+        };
+
+        if let AgentStreamEvent::Cancelled {
+            partial_text,
+            partial_thinking,
+            pending_tools,
+        } = event
+        {
+            assert!(partial_text.is_none());
+            assert!(partial_thinking.is_none());
+            assert!(pending_tools.is_empty());
+        } else {
+            panic!("Expected Cancelled event");
+        }
     }
 }

@@ -107,13 +107,16 @@ pub use run::{
 };
 pub use stream::{AgentStream, AgentStreamEvent};
 
+// Re-export CancellationToken for convenience
+pub use tokio_util::sync::CancellationToken;
+
 /// Prelude for common imports.
 pub mod prelude {
     pub use crate::{
         agent, agent_with_deps, Agent, AgentBuilder, AgentRun, AgentRunError, AgentRunResult,
-        AgentStream, AgentStreamEvent, CompressionStrategy, ContextCompression, EndStrategy,
-        OutputMode, OutputSchema, OutputValidator, RunContext, RunOptions, RunUsage, StepResult,
-        UsageLimits,
+        AgentStream, AgentStreamEvent, CancellationToken, CompressionStrategy, ContextCompression,
+        EndStrategy, OutputMode, OutputSchema, OutputValidator, RunContext, RunOptions, RunUsage,
+        StepResult, UsageLimits,
     };
 }
 
