@@ -101,7 +101,12 @@ pub enum AgentStreamEvent {
     /// Output ready.
     OutputReady,
     /// Run completed.
-    RunComplete { run_id: String },
+    RunComplete {
+        run_id: String,
+        /// Complete message history from this run (system prompt, user prompts,
+        /// assistant responses, tool calls and returns).
+        messages: Vec<ModelRequest>,
+    },
     /// Error occurred.
     Error { message: String },
     /// Run was cancelled.
@@ -767,6 +772,13 @@ impl AgentStream {
 
                 // No tool calls - check finish condition
                 if finish_reason == Some(FinishReason::Stop) {
+                    // Add final response to messages for complete history
+                    let mut response_req = ModelRequest::new();
+                    response_req
+                        .parts
+                        .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
+                    messages.push(response_req);
+
                     finished = true;
                     let _ = tx.send(Ok(AgentStreamEvent::OutputReady)).await;
                 }
@@ -776,6 +788,7 @@ impl AgentStream {
             let _ = tx
                 .send(Ok(AgentStreamEvent::RunComplete {
                     run_id: run_id_clone,
+                    messages,
                 }))
                 .await;
         });
@@ -1300,6 +1313,13 @@ impl AgentStream {
                 }
 
                 if finish_reason == Some(FinishReason::Stop) {
+                    // Add final response to messages for complete history
+                    let mut response_req = ModelRequest::new();
+                    response_req
+                        .parts
+                        .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
+                    messages.push(response_req);
+
                     finished = true;
                     let _ = tx.send(Ok(AgentStreamEvent::OutputReady)).await;
                 }
@@ -1308,6 +1328,7 @@ impl AgentStream {
             let _ = tx
                 .send(Ok(AgentStreamEvent::RunComplete {
                     run_id: run_id_clone,
+                    messages,
                 }))
                 .await;
         });
@@ -1390,6 +1411,7 @@ mod tests {
             AgentStreamEvent::OutputReady,
             AgentStreamEvent::RunComplete {
                 run_id: "123".to_string(),
+                messages: vec![],
             },
             AgentStreamEvent::Cancelled {
                 partial_text: Some("partial".to_string()),

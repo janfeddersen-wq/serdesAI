@@ -122,6 +122,8 @@ pub enum ContentBlock {
     },
     #[serde(rename = "image")]
     Image { source: ImageSource },
+    #[serde(rename = "document")]
+    Document { source: DocumentSource },
     #[serde(rename = "tool_use")]
     ToolUse {
         id: String,
@@ -147,6 +149,15 @@ pub enum ContentBlock {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ImageSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
+    pub media_type: String,
+    pub data: String,
+}
+
+/// Source for document content (e.g. PDF).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DocumentSource {
     #[serde(rename = "type")]
     pub source_type: String,
     pub media_type: String,

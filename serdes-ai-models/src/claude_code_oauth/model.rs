@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use base64::Engine;
 use reqwest::Client;
 use serdes_ai_core::messages::{
-    ImageContent, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart, UserContent, UserContentPart,
-    UserPromptPart,
+    DocumentContent, ImageContent, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart, UserContent,
+    UserContentPart, UserPromptPart,
 };
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
@@ -248,6 +248,17 @@ impl ClaudeCodeOAuthModel {
                                 }
                             }
                         }
+                        UserContentPart::Document { document } => match document {
+                            DocumentContent::Binary(b) => Some(ContentBlock::Document {
+                                source: DocumentSource {
+                                    source_type: "base64".to_string(),
+                                    media_type: b.media_type.mime_type().to_string(),
+                                    data: base64::engine::general_purpose::STANDARD
+                                        .encode(&b.data),
+                                },
+                            }),
+                            DocumentContent::Url(_) => None,
+                        },
                         _ => None,
                     })
                     .collect();
