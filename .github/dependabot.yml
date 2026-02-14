@@ -9,9 +9,17 @@ updates:
       time: "09:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 5
+    # IMPORTANT: For a library, only bump version requirements when the current
+    # range doesn't include the new version. Prevents unnecessary narrowing
+    # like bytes "1.0" → "1.11" (which raises MSRV for downstream users).
+    versioning-strategy: increase-if-necessary
     labels:
       - dependencies
       - rust
+    # Don't try to update getrandom across major versions
+    ignore:
+      - dependency-name: "getrandom"
+        update-types: ["version-update:semver-major"]
     groups:
       # Async runtime ecosystem
       tokio:
