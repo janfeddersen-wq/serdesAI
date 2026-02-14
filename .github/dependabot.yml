@@ -1,0 +1,63 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    # Workspace root — Dependabot auto-discovers all 17 member Cargo.toml files
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+    groups:
+      # Async runtime ecosystem
+      tokio:
+        patterns:
+          - "tokio*"
+          - "futures"
+          - "async-trait"
+          - "pin-project-lite"
+        update-types:
+          - minor
+          - patch
+      # Serialization ecosystem
+      serde:
+        patterns:
+          - "serde*"
+        update-types:
+          - minor
+          - patch
+      # Observability ecosystem
+      observability:
+        patterns:
+          - "tracing*"
+          - "opentelemetry*"
+        update-types:
+          - minor
+          - patch
+      # Testing & dev dependencies
+      dev-dependencies:
+        patterns:
+          - "criterion*"
+          - "rstest*"
+          - "mockall"
+          - "wiremock"
+          - "pretty_assertions"
+          - "tokio-test"
+        update-types:
+          - minor
+          - patch
+      # Catch-all: group remaining patch updates together
+      patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+    commit-message:
+      prefix: "deps:"
+      prefix-development: "deps(dev):"
+      include: scope
+    rebase-strategy: auto
