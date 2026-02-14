@@ -55,7 +55,7 @@ pin-project-lite = { workspace = true }
 tokio-stream = "0.1"
 
 # Optional AWS dependencies for Bedrock
-aws-config = { version = "1.1", optional = true }
+aws-config = { version = "1.8", optional = true }
 aws-sdk-bedrockruntime = { version = "1.15", optional = true }
 
 # Optional UUID for Antigravity
