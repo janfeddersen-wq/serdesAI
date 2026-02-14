@@ -253,8 +253,7 @@ impl ClaudeCodeOAuthModel {
                                 source: DocumentSource {
                                     source_type: "base64".to_string(),
                                     media_type: b.media_type.mime_type().to_string(),
-                                    data: base64::engine::general_purpose::STANDARD
-                                        .encode(&b.data),
+                                    data: base64::engine::general_purpose::STANDARD.encode(&b.data),
                                 },
                             }),
                             DocumentContent::Url(_) => None,
