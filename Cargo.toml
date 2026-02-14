@@ -67,7 +67,7 @@ chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 url = { version = "2.5", features = ["serde"] }
 mime = "0.3"
-indexmap = { version = "2.0", features = ["serde"] }
+indexmap = { version = "2.13", features = ["serde"] }
 
 # Code Generation & Builders
 derive_builder = "0.20"
