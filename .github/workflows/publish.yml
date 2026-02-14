@@ -1,0 +1,145 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (don't actually publish)"
+        required: false
+        default: "false"
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+jobs:
+  # Run full CI first
+  ci:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-features -- -D warnings
+      - run: cargo test --workspace --all-features
+
+  publish:
+    name: Publish
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify tag matches Cargo.toml version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "❌ Tag version (v$TAG_VERSION) doesn't match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+          echo "✅ Tag v$TAG_VERSION matches Cargo.toml version $CARGO_VERSION"
+
+      - name: Set publish flags
+        id: flags
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "flags=--dry-run" >> $GITHUB_OUTPUT
+            echo "🏜️ DRY RUN MODE"
+          else
+            echo "flags=" >> $GITHUB_OUTPUT
+            echo "🚀 LIVE PUBLISH MODE"
+          fi
+
+      # ── Tier 0: Leaf crates (no internal dependencies) ──
+      - name: "Tier 0: serdes-ai-core"
+        run: cargo publish -p serdes-ai-core ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 0: serdes-ai-macros"
+        run: cargo publish -p serdes-ai-macros ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 0: serdes-ai-retries"
+        run: cargo publish -p serdes-ai-retries ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 0: serdes-ai-graph"
+        run: cargo publish -p serdes-ai-graph ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 0: serdes-ai-embeddings"
+        run: cargo publish -p serdes-ai-embeddings ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 0: serdes-ai-evals"
+        run: cargo publish -p serdes-ai-evals ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: Wait for crates.io to index Tier 0
+        run: sleep 60
+
+      # ── Tier 1: Depends on Tier 0 ──
+      - name: "Tier 1: serdes-ai-tools"
+        run: cargo publish -p serdes-ai-tools ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 1: serdes-ai-streaming"
+        run: cargo publish -p serdes-ai-streaming ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: Wait for crates.io to index Tier 1
+        run: sleep 60
+
+      # ── Tier 2: Depends on Tier 1 ──
+      - name: "Tier 2: serdes-ai-toolsets"
+        run: cargo publish -p serdes-ai-toolsets ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: Wait for crates.io to index serdes-ai-toolsets
+        run: sleep 60
+
+      - name: "Tier 2: serdes-ai-output"
+        run: cargo publish -p serdes-ai-output ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 2: serdes-ai-mcp"
+        run: cargo publish -p serdes-ai-mcp ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 2: serdes-ai-ui"
+        run: cargo publish -p serdes-ai-ui ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: Wait for crates.io to index Tier 2
+        run: sleep 60
+
+      # ── Tier 3: Depends on Tier 2 ──
+      - name: "Tier 3: serdes-ai-models"
+        run: cargo publish -p serdes-ai-models ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: Wait for crates.io to index Tier 3
+        run: sleep 60
+
+      # ── Tier 4: Depends on Tier 3 ──
+      - name: "Tier 4: serdes-ai-providers"
+        run: cargo publish -p serdes-ai-providers ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "Tier 4: serdes-ai-agent"
+        run: cargo publish -p serdes-ai-agent ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: Wait for crates.io to index Tier 4
+        run: sleep 60
+
+      # ── Tier 5: Depends on Tier 4 ──
+      - name: "Tier 5: serdes-ai-a2a"
+        run: cargo publish -p serdes-ai-a2a ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: Wait for crates.io to index Tier 5
+        run: sleep 60
+
+      # ── Tier 6: Umbrella crate ──
+      - name: "Tier 6: serdes-ai (umbrella)"
+        run: cargo publish -p serdes-ai ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+
+      - name: "✅ All crates published!"
+        run: echo "Successfully published all serdes-ai workspace crates to crates.io"

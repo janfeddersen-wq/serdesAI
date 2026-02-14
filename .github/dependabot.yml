@@ -61,3 +61,18 @@ updates:
       prefix-development: "deps(dev):"
       include: scope
     rebase-strategy: auto
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Etc/UTC
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "ci:"
+      include: scope
+    rebase-strategy: auto
