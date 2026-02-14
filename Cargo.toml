@@ -90,7 +90,7 @@ rstest = "0.18"
 pretty_assertions = "1.4"
 
 # Regex
-regex = "1.10"
+regex = "1.12"
 
 # Internal crates
 serdes-ai-core = { path = "serdes-ai-core", version = "0.1.2" }

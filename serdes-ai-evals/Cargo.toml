@@ -27,7 +27,7 @@ futures = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
-regex = "1.10"
+regex = "1.12"
 
 [dev-dependencies]
 tokio-test = { workspace = true }
