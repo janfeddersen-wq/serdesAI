@@ -1514,11 +1514,8 @@ mod tests {
                         Ok(ModelResponseStreamEvent::part_start(
                             0,
                             ModelResponsePart::ToolCall(
-                                ToolCallPart::new(
-                                    "demo_tool",
-                                    ToolCallArgs::string("{foo: bar,}"),
-                                )
-                                .with_tool_call_id("call_1"),
+                                ToolCallPart::new("demo_tool", ToolCallArgs::string("{foo: bar,}"))
+                                    .with_tool_call_id("call_1"),
                             ),
                         )),
                         Ok(ModelResponseStreamEvent::part_end(0)),
@@ -1538,14 +1535,10 @@ mod tests {
         };
 
         let agent = agent(model)
-            .tool_fn(
-                "demo_tool",
-                "Demo tool",
-                |_ctx, args: serde_json::Value| {
-                    assert!(args.is_object());
-                    Ok(serdes_ai_tools::ToolReturn::text("ok"))
-                },
-            )
+            .tool_fn("demo_tool", "Demo tool", |_ctx, args: serde_json::Value| {
+                assert!(args.is_object());
+                Ok(serdes_ai_tools::ToolReturn::text("ok"))
+            })
             .build();
 
         let mut stream = agent
