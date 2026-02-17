@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-02-17
+
+### Fixed
+- Fixed release-breakage in `serdes-ai` version tests:
+  - Replaced hard-coded version assertions with dynamic checks based on `CARGO_PKG_VERSION`.
+  - Prevents future patch/minor release bumps from failing tests.
+
+### Changed
+- Version bump to `0.2.5` across workspace crates.
+
 ## [0.2.4] - 2026-02-17
 
 ### Fixed
