@@ -44,7 +44,7 @@ tracing = { workspace = true }
 parking_lot = { workspace = true }
 sha2 = "0.10"
 base64 = { workspace = true }
-getrandom = "0.3"
+getrandom = "0.4"
 urlencoding = "2.1"
 
 [dev-dependencies]
