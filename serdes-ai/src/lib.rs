@@ -507,15 +507,20 @@ mod tests {
 
     #[test]
     fn test_version() {
-        assert_eq!(version(), "0.2.2");
+        assert_eq!(version(), env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
     fn test_version_tuple() {
         let (major, minor, patch) = version_tuple();
-        assert_eq!(major, 0);
-        assert_eq!(minor, 2);
-        assert_eq!(patch, 2);
+        let expected: Vec<u32> = env!("CARGO_PKG_VERSION")
+            .split('.')
+            .map(|s| s.parse::<u32>().unwrap_or(0))
+            .collect();
+
+        assert_eq!(major, *expected.first().unwrap_or(&0));
+        assert_eq!(minor, *expected.get(1).unwrap_or(&0));
+        assert_eq!(patch, *expected.get(2).unwrap_or(&0));
     }
 
     #[test]
