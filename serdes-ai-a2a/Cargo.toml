@@ -30,7 +30,7 @@ thiserror = { workspace = true }
 futures = { workspace = true }
 
 # HTTP server (optional)
-axum = { version = "0.7", optional = true }
+axum = { version = "0.8", optional = true }
 tower = { version = "0.5", optional = true }
 
 [dev-dependencies]
