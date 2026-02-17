@@ -7,7 +7,7 @@ use crate::context::{generate_run_id, RunContext, RunUsage, UsageLimits};
 use crate::errors::{AgentRunError, OutputParseError, OutputValidationError};
 use chrono::Utc;
 use serde_json::Value as JsonValue;
-use serdes_ai_core::messages::{RetryPromptPart, ToolReturnPart, UserContent};
+use serdes_ai_core::messages::{RetryPromptPart, ToolCallArgs, ToolReturnPart, UserContent};
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
 };
@@ -152,6 +152,20 @@ struct AgentRunState<Output> {
     final_output: Option<Output>,
     finished: bool,
     finish_reason: Option<FinishReason>,
+}
+
+/// Canonicalize tool-call arguments in a model response before persisting it.
+///
+/// Models can emit malformed JSON-ish strings in tool call args. We execute tools
+/// with `to_json()` (which repairs/falls back), and we must persist that canonical
+/// form into history so subsequent provider requests don't carry raw malformed args.
+fn canonicalize_tool_call_args_in_response(response: &mut ModelResponse) {
+    for part in &mut response.parts {
+        if let ModelResponsePart::ToolCall(tc) = part {
+            let repaired = tc.args.to_json();
+            tc.args = ToolCallArgs::Json(repaired);
+        }
+    }
 }
 
 /// Result of a single step.
@@ -371,11 +385,14 @@ where
         let messages = self.process_history().await;
 
         // Make model request
-        let response = self
+        let mut response = self
             .agent
             .model()
             .request(&messages, &self.ctx.model_settings, &params)
             .await?;
+
+        // Persist canonical tool args to avoid carrying malformed raw args in history.
+        canonicalize_tool_call_args_in_response(&mut response);
 
         // Update usage
         if let Some(usage) = &response.usage {
@@ -849,5 +866,26 @@ mod tests {
         assert_eq!(StepResult::Continue, StepResult::Continue);
         assert_eq!(StepResult::ToolsExecuted(2), StepResult::ToolsExecuted(2));
         assert_ne!(StepResult::ToolsExecuted(1), StepResult::ToolsExecuted(2));
+    }
+
+    #[test]
+    fn test_canonicalize_tool_call_args_in_response_converts_string_args_to_json() {
+        let mut response = ModelResponse::new();
+        response.add_part(ModelResponsePart::ToolCall(
+            serdes_ai_core::messages::ToolCallPart::new(
+                "demo_tool",
+                ToolCallArgs::string("{foo: bar,}"),
+            )
+            .with_tool_call_id("call_1"),
+        ));
+
+        canonicalize_tool_call_args_in_response(&mut response);
+
+        match &response.parts[0] {
+            ModelResponsePart::ToolCall(tc) => {
+                assert!(matches!(tc.args, ToolCallArgs::Json(_)));
+            }
+            _ => panic!("expected tool call part"),
+        }
     }
 }

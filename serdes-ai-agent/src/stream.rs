@@ -9,7 +9,9 @@ use crate::errors::AgentRunError;
 use crate::run::{CompressionStrategy, RunOptions};
 use chrono::Utc;
 use futures::{Stream, StreamExt};
-use serdes_ai_core::messages::{ModelResponseStreamEvent, ToolReturnPart, UserContent};
+use serdes_ai_core::messages::{
+    ModelResponseStreamEvent, ToolCallArgs, ToolReturnPart, UserContent,
+};
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart,
 };
@@ -136,6 +138,16 @@ pub struct AgentStream {
     rx: mpsc::Receiver<Result<AgentStreamEvent, AgentRunError>>,
     /// Cancellation token for this stream (if cancellation is enabled).
     cancel_token: Option<CancellationToken>,
+}
+
+/// Canonicalize tool-call arguments in a model response before persisting it.
+fn canonicalize_tool_call_args_in_response(response: &mut ModelResponse) {
+    for part in &mut response.parts {
+        if let ModelResponsePart::ToolCall(tc) = part {
+            let repaired = tc.args.to_json();
+            tc.args = ToolCallArgs::Json(repaired);
+        }
+    }
 }
 
 impl AgentStream {
@@ -630,7 +642,7 @@ impl AgentStream {
                 );
 
                 // Build the complete response
-                let response = ModelResponse {
+                let mut response = ModelResponse {
                     parts: response_parts.clone(),
                     model_name: Some(model.name().to_string()),
                     timestamp: Utc::now(),
@@ -640,6 +652,7 @@ impl AgentStream {
                     vendor_details: None,
                     kind: "response".to_string(),
                 };
+                canonicalize_tool_call_args_in_response(&mut response);
 
                 finish_reason = response.finish_reason;
                 responses.push(response.clone());
@@ -1157,7 +1170,7 @@ impl AgentStream {
                 }
 
                 // Build the complete response
-                let response = ModelResponse {
+                let mut response = ModelResponse {
                     parts: response_parts.clone(),
                     model_name: Some(model.name().to_string()),
                     timestamp: Utc::now(),
@@ -1167,6 +1180,7 @@ impl AgentStream {
                     vendor_details: None,
                     kind: "response".to_string(),
                 };
+                canonicalize_tool_call_args_in_response(&mut response);
 
                 finish_reason = response.finish_reason;
                 responses.push(response.clone());
@@ -1384,6 +1398,14 @@ impl Stream for AgentStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builder::agent;
+    use futures::{stream, StreamExt};
+    use serdes_ai_core::messages::{ModelRequestPart, TextPart, ToolCallPart};
+    use serdes_ai_models::FunctionModel;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
     #[test]
     fn test_stream_event_debug() {
@@ -1457,5 +1479,111 @@ mod tests {
         } else {
             panic!("Expected Cancelled event");
         }
+    }
+
+    #[test]
+    fn test_canonicalize_tool_call_args_in_response_converts_string_args_to_json() {
+        let mut response = ModelResponse::new();
+        response.add_part(ModelResponsePart::ToolCall(
+            serdes_ai_core::messages::ToolCallPart::new(
+                "demo_tool",
+                ToolCallArgs::string("{foo: bar,}"),
+            )
+            .with_tool_call_id("call_1"),
+        ));
+
+        canonicalize_tool_call_args_in_response(&mut response);
+
+        match &response.parts[0] {
+            ModelResponsePart::ToolCall(tc) => {
+                assert!(matches!(tc.args, ToolCallArgs::Json(_)));
+            }
+            _ => panic!("expected tool call part"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_complete_messages_persist_canonical_tool_call_args() {
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let model = {
+            let call_count = Arc::clone(&call_count);
+            FunctionModel::with_stream(move |_messages, _settings| {
+                let step = call_count.fetch_add(1, Ordering::SeqCst);
+                let events = if step == 0 {
+                    vec![
+                        Ok(ModelResponseStreamEvent::part_start(
+                            0,
+                            ModelResponsePart::ToolCall(
+                                ToolCallPart::new(
+                                    "demo_tool",
+                                    ToolCallArgs::string("{foo: bar,}"),
+                                )
+                                .with_tool_call_id("call_1"),
+                            ),
+                        )),
+                        Ok(ModelResponseStreamEvent::part_end(0)),
+                    ]
+                } else {
+                    vec![
+                        Ok(ModelResponseStreamEvent::part_start(
+                            0,
+                            ModelResponsePart::Text(TextPart::new("done")),
+                        )),
+                        Ok(ModelResponseStreamEvent::part_end(0)),
+                    ]
+                };
+
+                Box::pin(stream::iter(events))
+            })
+        };
+
+        let agent = agent(model)
+            .tool_fn(
+                "demo_tool",
+                "Demo tool",
+                |_ctx, args: serde_json::Value| {
+                    assert!(args.is_object());
+                    Ok(serdes_ai_tools::ToolReturn::text("ok"))
+                },
+            )
+            .build();
+
+        let mut stream = agent
+            .run_stream("trigger tool then finish", ())
+            .await
+            .expect("stream should start");
+
+        let mut run_complete_messages = None;
+        while let Some(event) = stream.next().await {
+            let event = event.expect("stream event should be ok");
+            if let AgentStreamEvent::RunComplete { messages, .. } = event {
+                run_complete_messages = Some(messages);
+                break;
+            }
+        }
+
+        let messages = run_complete_messages.expect("expected RunComplete event");
+
+        let mut saw_tool_call = false;
+        for request in &messages {
+            for request_part in &request.parts {
+                if let ModelRequestPart::ModelResponse(response) = request_part {
+                    for response_part in &response.parts {
+                        if let ModelResponsePart::ToolCall(tc) = response_part {
+                            saw_tool_call = true;
+                            assert!(
+                                matches!(tc.args, ToolCallArgs::Json(_)),
+                                "tool call args should be canonical JSON in persisted RunComplete messages"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            saw_tool_call,
+            "expected at least one tool call in persisted RunComplete messages"
+        );
     }
 }
