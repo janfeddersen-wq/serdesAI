@@ -41,7 +41,7 @@ impl OAuthContext {
     fn generate_random_string(bytes: usize) -> String {
         use std::fmt::Write;
         let mut rng_bytes = vec![0u8; bytes];
-        getrandom::getrandom(&mut rng_bytes).expect("Failed to generate random bytes");
+        getrandom::fill(&mut rng_bytes).expect("Failed to generate random bytes");
         let mut s = String::with_capacity(bytes * 2);
         for b in rng_bytes {
             write!(s, "{:02x}", b).unwrap();
