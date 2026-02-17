@@ -21,7 +21,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 authors = ["serdes-ai contributors"]
@@ -93,7 +93,7 @@ pretty_assertions = "1.4"
 regex = "1.12"
 
 # Internal crates
-serdes-ai-core = { path = "serdes-ai-core", version = "0.2.1" }
+serdes-ai-core = { path = "serdes-ai-core", version = "0.2.2" }
 serdes-ai-agent = { path = "serdes-ai-agent", version = "0.2.1" }
 serdes-ai-models = { path = "serdes-ai-models", version = "0.2.1" }
 serdes-ai-providers = { path = "serdes-ai-providers", version = "0.2.1" }

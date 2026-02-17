@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-02-17
+
+### Fixed
+- Fixed crates.io publish pipeline reliability:
+  - Removed `|| echo "Already published, skipping"` from publish steps in `.github/workflows/publish.yml` so real publish failures fail the job.
+- Fixed publish ordering/dependency deadlock by removing stale `dev-dependencies` from `serdes-ai-macros` that pulled `serdes-ai-tools` during publish validation.
+
+### Changed
+- Version bump to `0.2.2` across workspace crates.
+
 ## [0.2.1] - 2026-02-17
 
 ### Changed

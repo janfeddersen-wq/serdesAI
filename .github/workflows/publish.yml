@@ -64,7 +64,7 @@ jobs:
 
       # ── Tier 0: Leaf crates (no internal dependencies) ──
       - name: "Tier 0: serdes-ai-core"
-        run: cargo publish -p serdes-ai-core ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"
+        run: cargo publish -p serdes-ai-core ${{ steps.flags.outputs.flags }}
 
       - name: "Tier 0: serdes-ai-macros"
         run: cargo publish -p serdes-ai-macros ${{ steps.flags.outputs.flags }} || echo "Already published, skipping"

@@ -22,8 +22,3 @@ syn = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
 darling = { workspace = true }
-
-[dev-dependencies]
-serdes-ai-core = { workspace = true }
-serdes-ai-tools = { workspace = true }
-trybuild = "1.0"
