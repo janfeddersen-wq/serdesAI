@@ -21,7 +21,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 license = "MIT"
 authors = ["serdes-ai contributors"]
@@ -93,21 +93,21 @@ pretty_assertions = "1.4"
 regex = "1.12"
 
 # Internal crates
-serdes-ai-core = { path = "serdes-ai-core", version = "0.2.3" }
-serdes-ai-agent = { path = "serdes-ai-agent", version = "0.2.3" }
-serdes-ai-models = { path = "serdes-ai-models", version = "0.2.3" }
-serdes-ai-providers = { path = "serdes-ai-providers", version = "0.2.3" }
-serdes-ai-tools = { path = "serdes-ai-tools", version = "0.2.3" }
-serdes-ai-toolsets = { path = "serdes-ai-toolsets", version = "0.2.3" }
-serdes-ai-output = { path = "serdes-ai-output", version = "0.2.3" }
-serdes-ai-streaming = { path = "serdes-ai-streaming", version = "0.2.3" }
-serdes-ai-mcp = { path = "serdes-ai-mcp", version = "0.2.3" }
-serdes-ai-embeddings = { path = "serdes-ai-embeddings", version = "0.2.3" }
-serdes-ai-retries = { path = "serdes-ai-retries", version = "0.2.3" }
-serdes-ai-graph = { path = "serdes-ai-graph", version = "0.2.3" }
-serdes-ai-evals = { path = "serdes-ai-evals", version = "0.2.3" }
-serdes-ai-macros = { path = "serdes-ai-macros", version = "0.2.3" }
-serdes-ai-a2a = { path = "serdes-ai-a2a", version = "0.2.3" }
+serdes-ai-core = { path = "serdes-ai-core", version = "0.2.4" }
+serdes-ai-agent = { path = "serdes-ai-agent", version = "0.2.4" }
+serdes-ai-models = { path = "serdes-ai-models", version = "0.2.4" }
+serdes-ai-providers = { path = "serdes-ai-providers", version = "0.2.4" }
+serdes-ai-tools = { path = "serdes-ai-tools", version = "0.2.4" }
+serdes-ai-toolsets = { path = "serdes-ai-toolsets", version = "0.2.4" }
+serdes-ai-output = { path = "serdes-ai-output", version = "0.2.4" }
+serdes-ai-streaming = { path = "serdes-ai-streaming", version = "0.2.4" }
+serdes-ai-mcp = { path = "serdes-ai-mcp", version = "0.2.4" }
+serdes-ai-embeddings = { path = "serdes-ai-embeddings", version = "0.2.4" }
+serdes-ai-retries = { path = "serdes-ai-retries", version = "0.2.4" }
+serdes-ai-graph = { path = "serdes-ai-graph", version = "0.2.4" }
+serdes-ai-evals = { path = "serdes-ai-evals", version = "0.2.4" }
+serdes-ai-macros = { path = "serdes-ai-macros", version = "0.2.4" }
+serdes-ai-a2a = { path = "serdes-ai-a2a", version = "0.2.4" }
 
 [profile.dev]
 split-debuginfo = "unpacked"

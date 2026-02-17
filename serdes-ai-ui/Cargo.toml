@@ -1,6 +1,6 @@
 [package]
 name = "serdes-ai-ui"
-version = "0.2.2"
+version.workspace = true
 edition = "2021"
 description = "UI protocol adapters for serdesAI (Vercel AI SDK, AG-UI)"
 license = "MIT"
