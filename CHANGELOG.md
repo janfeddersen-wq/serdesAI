@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-02-17
+
+### Changed
+- Merged dependency update PRs #18, #19, #20, #21, and #22 into `main`.
+- Updated lockfile and workspace dependency set accordingly.
+
+### Fixed
+- OAuth PKCE random generation compatibility in `serdes-ai-providers`:
+  - Replaced `getrandom::getrandom(...)` with `getrandom::fill(...)` for `getrandom 0.4` API compatibility.
+- Ensured workspace passes CI gates after merges:
+  - `cargo fmt --all -- --check`
+  - `cargo clippy --workspace --all-features -- -D warnings`
+  - `cargo test --workspace --all-features`
+
 ## [0.1.5] - 2025-01-28
 
 ### Added
