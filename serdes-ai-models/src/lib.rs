@@ -547,6 +547,8 @@ pub struct ExtendedModelConfig {
     pub base_url: Option<String>,
     /// Request timeout
     pub timeout: Option<std::time::Duration>,
+    /// Custom HTTP client (overrides default reqwest::Client)
+    pub client: Option<reqwest::Client>,
     /// Enable extended thinking (Anthropic Claude)
     pub enable_thinking: bool,
     /// Budget for thinking tokens (Anthropic Claude)
@@ -576,6 +578,12 @@ impl ExtendedModelConfig {
     /// Set timeout
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.timeout = Some(timeout);
+        self
+    }
+
+    /// Set a custom HTTP client
+    pub fn with_client(mut self, client: reqwest::Client) -> Self {
+        self.client = Some(client);
         self
     }
 
@@ -646,6 +654,12 @@ pub fn build_model_extended(
 
                 // TODO: Add reasoning_effort support when available in OpenAIChatModel
 
+                let model = if let Some(ref client) = config.client {
+                    model.with_client(client.clone())
+                } else {
+                    model
+                };
+
                 Ok(Arc::new(model))
             }
             #[cfg(not(feature = "openai"))]
@@ -684,6 +698,12 @@ pub fn build_model_extended(
                     model
                 };
 
+                let model = if let Some(ref client) = config.client {
+                    model.with_client(client.clone())
+                } else {
+                    model
+                };
+
                 Ok(Arc::new(model))
             }
             #[cfg(not(feature = "anthropic"))]
@@ -700,6 +720,12 @@ pub fn build_model_extended(
                 GroqModel::new(model_name, key)
             } else {
                 GroqModel::from_env(model_name)?
+            };
+
+            let model = if let Some(ref client) = config.client {
+                model.with_client(client.clone())
+            } else {
+                model
             };
 
             Ok(Arc::new(model))
@@ -724,6 +750,12 @@ pub fn build_model_extended(
                 model
             };
 
+            let model = if let Some(ref client) = config.client {
+                model.with_client(client.clone())
+            } else {
+                model
+            };
+
             Ok(Arc::new(model))
         }
         #[cfg(feature = "ollama")]
@@ -732,6 +764,12 @@ pub fn build_model_extended(
 
             let model = if let Some(ref url) = config.base_url {
                 model.with_base_url(url)
+            } else {
+                model
+            };
+
+            let model = if let Some(ref client) = config.client {
+                model.with_client(client.clone())
             } else {
                 model
             };
@@ -754,6 +792,12 @@ pub fn build_model_extended(
 
             let model = if let Some(ref url) = config.base_url {
                 model.with_base_url(url)
+            } else {
+                model
+            };
+
+            let model = if let Some(ref client) = config.client {
+                model.with_client(client.clone())
             } else {
                 model
             };

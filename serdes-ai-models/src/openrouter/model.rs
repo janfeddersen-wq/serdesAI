@@ -83,6 +83,13 @@ impl OpenRouterModel {
         self
     }
 
+    /// Set a custom HTTP client.
+    #[must_use]
+    pub fn with_client(mut self, client: Client) -> Self {
+        self.client = client;
+        self
+    }
+
     /// Determine profile based on model name.
     fn profile_for_model(model: &str) -> ModelProfile {
         // Check for reasoning models

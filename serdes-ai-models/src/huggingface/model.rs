@@ -64,6 +64,13 @@ impl HuggingFaceModel {
         self
     }
 
+    /// Set a custom HTTP client.
+    #[must_use]
+    pub fn with_client(mut self, client: Client) -> Self {
+        self.client = client;
+        self
+    }
+
     /// Set a custom profile.
     #[must_use]
     pub fn with_profile(mut self, profile: ModelProfile) -> Self {

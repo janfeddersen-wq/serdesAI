@@ -24,6 +24,7 @@
 //! - `gemma2-9b-it` - Gemma 2 9B instruction-tuned
 
 use async_trait::async_trait;
+use reqwest::Client;
 
 use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse};
@@ -56,6 +57,13 @@ impl GroqModel {
         let api_key = std::env::var("GROQ_API_KEY")
             .map_err(|_| ModelError::configuration("GROQ_API_KEY not set"))?;
         Ok(Self::new(model_name, api_key))
+    }
+
+    /// Set a custom HTTP client.
+    #[must_use]
+    pub fn with_client(mut self, client: Client) -> Self {
+        self.inner = self.inner.with_client(client);
+        self
     }
 
     /// Create a Llama 3.1 70B Versatile model.
