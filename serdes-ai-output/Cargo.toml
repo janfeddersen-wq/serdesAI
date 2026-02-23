@@ -32,7 +32,7 @@ regex = "1.12"
 parking_lot = { workspace = true }
 
 # Optional strict validation
-jsonschema = { version = "0.18", optional = true }
+jsonschema = { version = "0.42", optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
