@@ -31,7 +31,7 @@ chrono = { workspace = true }
 parking_lot = { workspace = true }
 
 # Optional WebSocket support
-tokio-tungstenite = { version = "0.21", optional = true }
+tokio-tungstenite = { version = "0.30", optional = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
