@@ -332,6 +332,25 @@ usage, and the agent surfaces that usage through `AgentStreamEvent`.
 
 ## [Unreleased]
 
+### Added
+- `OpenAIResponsesModel` in `serdes-ai-models` gains a WebSocket transport behind the `responses-ws` feature and opt-in conversation-keyed session chaining on both transports (#65, #66):
+  - WebSocket turns send the flat `{"type":"response.create","model":...}` frame the codex CLI and [Open Responses](https://openresponses.org) servers speak and map the event stream (`output_item.added`, `output_text.delta`, `reasoning_summary_text.delta`, `function_call_arguments.delta`, ...) onto `ModelResponseStreamEvent`s, ending with exactly one terminal `StreamComplete` carrying finish reason and usage.
+  - Session chaining (`with_session_chaining(true)`) keeps per-conversation state (`previous_response_id` plus the requests already delivered) and sends only each turn's new input items: the websocket holds a live socket per conversation with `store: false`, HTTP persists every turn with `store: true` and streams SSE. Stale continuations replay the full input; connection-limit and dead-socket failures reconnect. Recovery applies only before any event has reached the caller, so partial output is never duplicated.
+  - Request building is wire-accurate: history maps to `instructions` plus wire `InputItems` (tool calls and returns as `function_call` / `function_call_output` items, reasoning with `encrypted_content` round-trip), and SSE streaming enforces the terminal-event contract: exactly one terminal event, always last.
+  - Model errors from response envelopes map to `ModelError::Provider { code }` on both transports.
+  - The wire-accurate Open Responses server that exercised the client now ships as serdes-ai-models test support (`tests/rig`, not a product surface), exercising both transports, chaining, and connection-lifetime enforcement.
+  - The `codex_haiku` example moved to `serdes-ai-providers/examples` and now defaults to `wss://api.openai.com/v1/responses` with `OPENAI_API_KEY`; the codex backend (PKCE OAuth, codex headers) activates behind `--codex` or `CODEX=1`.
+- `WebSocketStream::connect` in `serdes-ai-streaming` now applies configured headers to the HTTP upgrade request (auth previously silently dropped) and bounds the handshake by the configured timeout.
+
+### Breaking
+- The `serdes-ai-responses` crate is removed; the client is the `openai::responses` module of `serdes-ai-models` (`OpenAIResponsesModel`), with the WebSocket transport behind the `responses-ws` feature (#65, #66).
+- The `serdes-ai` facade feature `open-responses` is replaced by `openai-responses-ws = ["serdes-ai-models/responses-ws"]`, also part of `full`; the `serdes_ai::responses` re-export is gone (#66).
+- `ResponsesApiRequest.input` is now the wire `InputItems` type; the bespoke `ResponseInput` / `ResponseInputContent` / `ResponseInputPart` types are removed (#66).
+- Tool returns serialize as `function_call_output` items instead of bespoke messages (#66).
+- Multiple system prompts join into `instructions` instead of last-wins (#66).
+- Unsupported media parts fail the request instead of being silently skipped (#66).
+- Model errors from response envelopes map to `Provider { code }` on both transports (#66).
+
 ### Planned
 - OpenAI Realtime API support
 - Cohere provider

@@ -13,10 +13,11 @@ readme = "README.md"
 
 [features]
 default = ["openai"]
-full = ["openai", "anthropic", "google", "mistral", "groq", "ollama", "bedrock", "azure", "openrouter", "huggingface", "cohere", "chatgpt-oauth", "claude-code-oauth", "antigravity"]
+full = ["openai", "anthropic", "google", "mistral", "groq", "ollama", "bedrock", "azure", "openrouter", "huggingface", "cohere", "chatgpt-oauth", "claude-code-oauth", "antigravity", "responses-ws"]
 
 # Provider implementations
 openai = []
+responses-ws = ["serdes-ai-streaming/websocket"]
 anthropic = []
 google = []
 gemini = ["google"]  # Alias
@@ -68,3 +69,11 @@ tokio-test = { workspace = true }
 wiremock = { workspace = true }
 mockall = { workspace = true }
 rstest = { workspace = true }
+tokio-tungstenite = { workspace = true }
+# Open Responses test rig (tests/rig): local axum server, engine, store.
+axum = { workspace = true }
+tower = { workspace = true }
+http-body = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }

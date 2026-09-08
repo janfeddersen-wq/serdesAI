@@ -41,6 +41,39 @@ let response = model.request(&messages, &settings, &params).await?;
 
 Retries are opt-in. `RetryPolicy::disabled()` performs exactly one attempt. The
 policy retries the same model; `FallbackModel` remains responsible for selecting
+a different model. Streaming requests may be retried only while acquiring the
+stream and before the first caller-visible event. Once an event is returned, later
+stream errors pass through without replaying or concatenating another response.
+
+## Responses API (OpenAI and Open Responses)
+
+`OpenAIResponsesModel` speaks the Responses API over two transports. HTTP
+(`POST {base_url}/responses`) is the default. The WebSocket transport dials the
+base URL verbatim as the responses endpoint and requires the `responses-ws`
+feature:
+
+```rust,ignore
+use serdes_ai_models::model::{Model, ModelRequestParameters};
+use serdes_ai_models::openai::OpenAIResponsesModel;
+use serdes_ai_models::openai::responses::Transport;
+
+let model = OpenAIResponsesModel::new("gpt-5.1", api_key)
+    .with_base_url("wss://api.openai.com/v1/responses")
+    .with_transport(Transport::WebSocket)
+    .with_header("Authorization", format!("Bearer {api_key}"))
+    .with_session_chaining(true);
+```
+
+Session chaining (`with_session_chaining(true)`) keeps per-conversation state on
+both transports: the websocket holds one socket per conversation and sends only
+each turn's new input items with `store: false`; HTTP persists every turn with
+`store: true` plus `previous_response_id` and streams SSE. Stale continuations
+replay the full input, and connection failures reconnect before any
+caller-visible event, so partial output is never duplicated.
+
+The codex backend smoke test, including the ChatGPT OAuth PKCE flow, lives in
+`serdes-ai-providers/examples/codex_haiku.rs`.
+
 ## Streaming fallback boundary
 
 `FallbackModel` can select another model for acquisition errors or retryable
@@ -73,10 +106,6 @@ Migration guidance:
 - `serdes-ai-retries::RetryableError` remains limited to the legacy standalone
   HTTP retry client. Tool, user, cancellation, and output-validation failures
   retain their distinct semantics.
-
-a different model. Streaming requests may be retried only while acquiring the
-stream and before the first caller-visible event. Once an event is returned, later
-stream errors pass through without replaying or concatenating another response.
 
 ## Part of SerdesAI
 

@@ -32,6 +32,7 @@ full = [
     "chatgpt-oauth",
     "claude-code-oauth",
     "antigravity",
+    "openai-responses-ws",
     "mcp",
     "embeddings",
     "graph",
@@ -63,6 +64,7 @@ embeddings = ["dep:serdes-ai-embeddings"]
 graph = ["dep:serdes-ai-graph"]
 evals = ["dep:serdes-ai-evals"]
 macros = ["dep:serdes-ai-macros"]
+openai-responses-ws = ["serdes-ai-models/responses-ws"]
 
 # Observability
 tracing-integration = [

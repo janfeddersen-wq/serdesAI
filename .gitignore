@@ -68,3 +68,6 @@ logs/
 
 # Test artifacts
 test-output/
+
+# Local scratch output
+tmp/

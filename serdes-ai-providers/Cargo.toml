@@ -50,3 +50,11 @@ urlencoding = "2.1"
 [dev-dependencies]
 tokio-test = { workspace = true }
 rstest = { workspace = true }
+# codex_haiku example: the websocket transport lives behind the models
+# feature, and the example walks a ToolDefinition round trip. These
+# dev-deps resolve at providers' publish time because models (and with it
+# serdes-ai-tools) always publishes first.
+serdes-ai-models = { workspace = true, features = ["responses-ws"] }
+serdes-ai-tools = { workspace = true }
+futures = { workspace = true }
+tracing-subscriber = { workspace = true }
