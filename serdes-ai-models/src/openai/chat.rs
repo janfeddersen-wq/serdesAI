@@ -31,6 +31,8 @@ pub struct OpenAIChatModel {
     project: Option<String>,
     profile: ModelProfile,
     default_timeout: Duration,
+    completion_token_limit: Option<bool>,
+    finish_is_terminal: bool,
 }
 
 impl OpenAIChatModel {
@@ -48,6 +50,8 @@ impl OpenAIChatModel {
             project: None,
             profile,
             default_timeout: Duration::from_secs(120),
+            completion_token_limit: None,
+            finish_is_terminal: false,
         }
     }
 
@@ -63,6 +67,22 @@ impl OpenAIChatModel {
     #[must_use]
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
+        self
+    }
+
+    /// Override token-limit wire key selection for custom model aliases/endpoints.
+    /// `true` selects `max_completion_tokens`; `false` selects legacy `max_tokens`.
+    #[must_use]
+    pub fn with_max_completion_tokens(mut self, enabled: bool) -> Self {
+        self.completion_token_limit = Some(enabled);
+        self
+    }
+
+    /// Opt into compatible endpoints that terminate with a finish frame and clean EOF.
+    /// OpenAI's default contract still requires `[DONE]` and consumes usage-only frames.
+    #[must_use]
+    pub fn with_finish_reason_terminal(mut self, enabled: bool) -> Self {
+        self.finish_is_terminal = enabled;
         self
     }
 
@@ -338,13 +358,26 @@ impl OpenAIChatModel {
             ResponseFormat::json_schema("output", schema_value, true)
         });
 
+        let completion_limit = self.completion_token_limit.unwrap_or(
+            self.profile.supports_reasoning
+                || self.model_name.starts_with("o4")
+                || self.model_name.starts_with("gpt-5"),
+        );
         ChatCompletionRequest {
             model: self.model_name.clone(),
             messages,
             temperature: settings.temperature,
             top_p: settings.top_p,
-            max_tokens: settings.max_tokens,
-            max_completion_tokens: None,
+            max_tokens: if completion_limit {
+                None
+            } else {
+                settings.max_tokens
+            },
+            max_completion_tokens: if completion_limit {
+                settings.max_tokens
+            } else {
+                None
+            },
             stop: settings.stop.clone(),
             presence_penalty: settings.presence_penalty,
             frequency_penalty: settings.frequency_penalty,
@@ -357,7 +390,7 @@ impl OpenAIChatModel {
             stream: if stream { Some(true) } else { None },
             stream_options: if stream {
                 Some(StreamOptions {
-                    include_usage: true,
+                    include_usage: params.stream_usage,
                 })
             } else {
                 None
@@ -565,7 +598,8 @@ impl Model for OpenAIChatModel {
 
         // Create stream parser
         let byte_stream = response.bytes_stream();
-        let parser = OpenAIStreamParser::new(byte_stream);
+        let parser = OpenAIStreamParser::new(byte_stream)
+            .with_finish_reason_terminal(self.finish_is_terminal);
 
         Ok(Box::pin(parser))
     }

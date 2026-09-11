@@ -10,6 +10,12 @@ use thiserror::Error;
 /// Errors that can occur during agent run execution.
 #[derive(Debug, Error)]
 pub enum AgentRunError {
+    /// Context preparation failed before a model request.
+    #[error("Context policy failed: {0}")]
+    ContextPolicy(String),
+    /// Durable observer rejected a boundary. No retry is automatic.
+    #[error("Checkpoint failed: {0}")]
+    Checkpoint(String),
     /// Model returned an error.
     #[error("Model error: {0}")]
     Model(#[from] ModelError),

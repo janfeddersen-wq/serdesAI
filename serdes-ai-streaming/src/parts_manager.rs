@@ -272,6 +272,7 @@ struct ThinkingTagState {
 /// ```
 #[derive(Debug, Default)]
 pub struct ModelResponsePartsManager {
+    terminal: Option<serdes_ai_core::messages::StreamCompleteEvent>,
     /// The managed parts.
     parts: Vec<ManagedPart>,
     /// Map from vendor ID to part index.
@@ -285,6 +286,24 @@ impl ModelResponsePartsManager {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Retain the provider's final usage and metadata alongside accumulated parts.
+    pub fn handle_stream_complete(&mut self, event: serdes_ai_core::messages::StreamCompleteEvent) {
+        self.terminal = Some(event);
+    }
+
+    /// Build a response without discarding terminal metadata (including empty output).
+    pub fn get_response(&self) -> serdes_ai_core::ModelResponse {
+        let mut response = serdes_ai_core::ModelResponse::with_parts(self.get_parts());
+        if let Some(event) = &self.terminal {
+            response.finish_reason = Some(event.finish_reason);
+            response.usage = event.request_usage();
+            if let Some(metadata) = &event.metadata {
+                metadata.apply(&mut response);
+            }
+        }
+        response
     }
 
     /// Get the number of parts.
@@ -908,6 +927,7 @@ impl ModelResponsePartsManager {
 
     /// Clear all parts and reset state.
     pub fn clear(&mut self) {
+        self.terminal = None;
         self.parts.clear();
         self.vendor_id_to_index.clear();
         self.thinking_state = ThinkingTagState::default();

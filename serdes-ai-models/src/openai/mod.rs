@@ -32,6 +32,7 @@
 
 pub mod chat;
 pub mod responses;
+pub mod responses_stream;
 pub mod stream;
 pub mod types;
 
@@ -114,3 +115,5 @@ pub mod models {
     /// gpt-5 (future) - use Responses API
     pub const GPT_5: &str = "gpt-5";
 }
+
+mod responses_metadata;

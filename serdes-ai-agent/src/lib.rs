@@ -77,9 +77,19 @@ pub mod context;
 pub mod errors;
 pub mod history;
 pub mod instructions;
+pub mod lifecycle;
+pub use lifecycle::{
+    AgentCheckpoint, CheckpointBoundary, CheckpointSink, ContextFailurePolicy, ContextPolicy,
+    ContextPolicyInput,
+};
 pub mod output;
 pub mod run;
 pub mod stream;
+mod stream_lifecycle;
+mod stream_output;
+mod stream_tools;
+mod typed_stream;
+pub use typed_stream::TypedAgentStream;
 
 // Re-exports
 pub use agent::{Agent, EndStrategy, InstrumentationSettings, RegisteredTool, ToolExecutor};

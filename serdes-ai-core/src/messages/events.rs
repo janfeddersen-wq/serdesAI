@@ -330,7 +330,7 @@ impl ModelResponsePartDelta {
 }
 
 /// Delta for text content.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextPartDelta {
     /// The text content delta.
     pub content_delta: String,
@@ -339,6 +339,11 @@ pub struct TextPartDelta {
     pub provider_details: Option<Map<String, Value>>,
 }
 
+impl std::fmt::Debug for TextPartDelta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TextPartDelta(<redacted>)")
+    }
+}
 impl TextPartDelta {
     /// Create a new text delta.
     #[must_use]
@@ -473,7 +478,7 @@ impl Default for ToolCallPartDelta {
 }
 
 /// Delta for thinking content.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ThinkingPartDelta {
     /// The thinking content delta.
     pub content_delta: String,
@@ -486,6 +491,12 @@ pub struct ThinkingPartDelta {
     /// Provider-specific details/metadata delta.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_details: Option<Map<String, Value>>,
+}
+
+impl std::fmt::Debug for ThinkingPartDelta {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ThinkingPartDelta(<redacted>)")
+    }
 }
 
 impl ThinkingPartDelta {
@@ -667,11 +678,41 @@ impl PartEndEvent {
     }
 }
 
+/// Optional provider-native terminal metadata. Opaque output records are archival,
+/// never authorization to execute tools or replay arbitrary provider payloads.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct TerminalMetadata {
+    /// Provider response identifier, including for empty output.
+    pub response_id: Option<String>,
+    /// Actual provider model identifier.
+    pub model: Option<String>,
+    /// Provider-native metadata, including status, usage details and output records.
+    pub details: Option<serde_json::Value>,
+}
+impl std::fmt::Debug for TerminalMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TerminalMetadata(<redacted>)")
+    }
+}
+impl TerminalMetadata {
+    /// Apply metadata to existing response fields without changing message schema.
+    pub fn apply(&self, response: &mut super::response::ModelResponse) {
+        response.vendor_id = self.response_id.clone();
+        if self.model.is_some() {
+            response.model_name = self.model.clone();
+        }
+        response.vendor_details = self.details.clone();
+    }
+}
+
 /// Event indicating the stream completed successfully with provider terminal metadata.
 ///
 /// Only emitted when the provider confirms successful completion.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StreamCompleteEvent {
+    /// Optional native terminal metadata, absent for older producers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<TerminalMetadata>,
     /// Provider-reported finish reason (mapped to [`FinishReason`]).
     pub finish_reason: FinishReason,
     /// Input tokens reported by the provider (if any).
@@ -692,11 +733,41 @@ impl StreamCompleteEvent {
     pub fn new(finish_reason: FinishReason) -> Self {
         Self {
             finish_reason,
+            metadata: None,
             input_tokens: None,
             output_tokens: None,
             cache_creation_tokens: None,
             cache_read_tokens: None,
         }
+    }
+
+    /// Provider usage with optional detailed native counters, without fabricating
+    /// zeroes when a provider omitted counts.
+    pub fn request_usage(&self) -> Option<crate::RequestUsage> {
+        if self.input_tokens.is_none()
+            && self.output_tokens.is_none()
+            && self.cache_read_tokens.is_none()
+            && self.cache_creation_tokens.is_none()
+        {
+            return None;
+        }
+        let mut usage = crate::RequestUsage::new();
+        usage.request_tokens = self.input_tokens;
+        usage.response_tokens = self.output_tokens;
+        usage.total_tokens = self
+            .input_tokens
+            .zip(self.output_tokens)
+            .map(|(a, b)| a.saturating_add(b));
+        usage.cache_read_tokens = self.cache_read_tokens;
+        usage.cache_creation_tokens = self.cache_creation_tokens;
+        usage.details = self
+            .metadata
+            .as_ref()
+            .and_then(|m| m.details.as_ref())
+            .and_then(|d| d.get("usage"))
+            .filter(|u| !u.is_null())
+            .cloned();
+        Some(usage)
     }
 
     /// Set input tokens.

@@ -42,3 +42,4 @@ tokio-test = { workspace = true }
 mockall = { workspace = true }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
+wiremock = { workspace = true }

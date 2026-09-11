@@ -24,6 +24,8 @@ pub enum CompressionStrategy {
     Truncate,
     /// Use LLM to summarize older messages into condensed form.
     Summarize,
+    /// Legacy summary with explicitly permitted truncation fallback.
+    SummarizeOrTruncate,
 }
 
 /// Context compression configuration.
@@ -352,6 +354,50 @@ where
         if self.state.finished {
             return Ok(StepResult::Finished);
         }
+        let token = self.cancel_token.clone().unwrap_or_default();
+        let saving = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let result = {
+            let work = crate::lifecycle::SAVE_SCOPE
+                .scope((saving.clone(), token.clone()), self.step_inner());
+            tokio::pin!(work);
+            tokio::select! {
+                biased;
+                result = &mut work => result,
+                _ = token.cancelled() => {
+                    if saving.load(std::sync::atomic::Ordering::SeqCst) { work.await }
+                    else { Err(AgentRunError::Cancelled) }
+                }
+            }
+        };
+        if let Err(error) = &result {
+            self.state.finished = true;
+            self.state.final_output = None;
+            let boundary = if matches!(error, AgentRunError::Cancelled) {
+                crate::lifecycle::CheckpointBoundary::Cancelled
+            } else {
+                crate::lifecycle::CheckpointBoundary::Failed
+            };
+            // Do not recursively retry an already-failed sink.
+            if !matches!(error, AgentRunError::Checkpoint(_)) {
+                crate::lifecycle::save(
+                    self.agent.checkpoint_sink.as_ref(),
+                    &self.ctx.run_id,
+                    self.state.step,
+                    boundary,
+                    &self.state.messages,
+                    self.state.responses.last(),
+                    &self.state.usage,
+                )
+                .await?;
+            }
+        }
+        result
+    }
+
+    async fn step_inner(&mut self) -> Result<StepResult, AgentRunError> {
+        if self.state.finished {
+            return Ok(StepResult::Finished);
+        }
 
         // Check for cancellation at the start of each step
         if let Some(ref token) = self.cancel_token {
@@ -387,14 +433,35 @@ where
             params = params.with_output_schema(schema);
         }
 
-        // Process message history
-        let messages = self.process_history().await;
+        crate::lifecycle::prepare(
+            &self.agent.history_processors,
+            self.agent.context_policy.as_ref(),
+            self.agent.context_failure,
+            crate::lifecycle::ContextPolicyInput {
+                context: &self.ctx,
+                settings: &self.ctx.model_settings,
+                parameters: &params,
+                model: self.agent.model(),
+            },
+            &mut self.state.messages,
+        )
+        .await?;
+        crate::lifecycle::save(
+            self.agent.checkpoint_sink.as_ref(),
+            &self.ctx.run_id,
+            self.state.step,
+            crate::lifecycle::CheckpointBoundary::BeforeRequest,
+            &self.state.messages,
+            None,
+            &self.state.usage,
+        )
+        .await?;
 
         // Make model request
         let mut response = self
             .agent
             .model()
-            .request(&messages, &self.ctx.model_settings, &params)
+            .request(&self.state.messages, &self.ctx.model_settings, &params)
             .await?;
 
         // Persist canonical tool args to avoid carrying malformed raw args in history.
@@ -413,19 +480,32 @@ where
         }
         self.state.responses.push(response.clone());
 
-        // Process response
-        self.process_response(response).await
-    }
-
-    async fn process_history(&self) -> Vec<ModelRequest> {
-        let mut messages = self.state.messages.clone();
-
-        // Apply history processors
-        for processor in &self.agent.history_processors {
-            messages = processor.process(&self.ctx, messages).await;
-        }
-
-        messages
+        crate::lifecycle::save(
+            self.agent.checkpoint_sink.as_ref(),
+            &self.ctx.run_id,
+            self.state.step,
+            crate::lifecycle::CheckpointBoundary::AfterResponse,
+            &self.state.messages,
+            Some(&response),
+            &self.state.usage,
+        )
+        .await?;
+        let result = self.process_response(response).await?;
+        crate::lifecycle::save(
+            self.agent.checkpoint_sink.as_ref(),
+            &self.ctx.run_id,
+            self.state.step,
+            if self.state.finished {
+                crate::lifecycle::CheckpointBoundary::Terminal
+            } else {
+                crate::lifecycle::CheckpointBoundary::AfterTools
+            },
+            &self.state.messages,
+            self.state.responses.last(),
+            &self.state.usage,
+        )
+        .await?;
+        Ok(result)
     }
 
     async fn process_response(
@@ -457,8 +537,8 @@ where
                             .parse_tool_call(&tc.tool_name, &args)
                         {
                             found_output = Some(output);
-                            continue;
                         }
+                        continue;
                     }
 
                     // Regular tool call
@@ -472,6 +552,77 @@ where
                 }
                 ModelResponsePart::BuiltinToolCall(_) => {
                     // Builtin tool calls are handled by the provider
+                }
+            }
+        }
+
+        // A native final-output tool is explicit final-output evidence. Text
+        // alongside regular tools remains explanatory, preserving legacy behavior.
+        let explicit_output = response.parts.iter().any(|part| {
+            matches!(part,
+            ModelResponsePart::ToolCall(call) if self.agent.is_output_tool(&call.tool_name))
+        });
+        if explicit_output && !tool_calls.is_empty() {
+            let validation = crate::stream_output::validate(
+                self.agent.output_schema.as_ref(),
+                &self.agent.output_validators,
+                &response,
+                &self.ctx,
+            )
+            .await;
+            match validation {
+                Ok(output) => {
+                    let mut returns = if self.agent.end_strategy == EndStrategy::Exhaustive {
+                        self.execute_tool_calls(tool_calls).await
+                    } else {
+                        tool_calls
+                            .into_iter()
+                            .map(|call| {
+                                (
+                                    call.tool_name,
+                                    call.tool_call_id,
+                                    Ok(ToolReturn::text("Skipped: final output accepted")),
+                                )
+                            })
+                            .collect()
+                    };
+                    for part in &response.parts {
+                        if let ModelResponsePart::ToolCall(call) = part {
+                            if self.agent.is_output_tool(&call.tool_name) {
+                                returns.push((
+                                    call.tool_name.clone(),
+                                    call.tool_call_id.clone(),
+                                    Ok(ToolReturn::text("Final output accepted")),
+                                ));
+                            }
+                        }
+                    }
+                    self.add_tool_returns(returns)?;
+                    self.state.final_output = Some(output);
+                    self.state.finished = true;
+                    return Ok(StepResult::OutputReady);
+                }
+                Err(error) => {
+                    self.state.output_retries += 1;
+                    if self.state.output_retries > self.agent.max_output_retries {
+                        return Err(AgentRunError::OutputValidationFailed(error));
+                    }
+                    let returns = response
+                        .parts
+                        .iter()
+                        .filter_map(|part| match part {
+                            ModelResponsePart::ToolCall(call) => Some((
+                                call.tool_name.clone(),
+                                call.tool_call_id.clone(),
+                                Ok(ToolReturn::text(
+                                    "Not executed: final output rejected; retry",
+                                )),
+                            )),
+                            _ => None,
+                        })
+                        .collect();
+                    self.add_tool_returns(returns)?;
+                    return Ok(StepResult::RetryingOutput);
                 }
             }
         }
@@ -694,7 +845,7 @@ where
         use std::sync::Arc;
         use tokio::sync::Semaphore;
 
-        let semaphore = Arc::new(Semaphore::new(max_concurrent));
+        let semaphore = Arc::new(Semaphore::new(max_concurrent.max(1)));
 
         let wrapped_futures: Vec<_> = futures
             .into_iter()

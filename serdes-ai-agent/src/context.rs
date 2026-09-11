@@ -169,8 +169,13 @@ pub fn generate_run_id() -> String {
 }
 
 /// Usage tracking for a run.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct RunUsage {
+    /// Whether all recorded requests reported both input/output token counts.
+    /// None denotes older serialized state or no requests yet; false means totals
+    /// are known lower bounds, not complete billing totals.
+    #[serde(default)]
+    pub token_totals_complete: Option<bool>,
     /// Total request tokens.
     pub request_tokens: u64,
     /// Total response tokens.
@@ -195,6 +200,11 @@ impl RunUsage {
 
     /// Add usage from a model request.
     pub fn add_request(&mut self, usage: serdes_ai_core::RequestUsage) {
+        let prior = self
+            .token_totals_complete
+            .unwrap_or(self.request_count == 0);
+        self.token_totals_complete =
+            Some(prior && usage.request_tokens.is_some() && usage.response_tokens.is_some());
         if let Some(req) = usage.request_tokens {
             self.request_tokens += req;
         }
@@ -221,6 +231,7 @@ impl RunUsage {
     /// a runaway agent loop, and a provider that omits usage would otherwise
     /// leave it permanently inert.
     pub fn record_request(&mut self) {
+        self.token_totals_complete = Some(false);
         self.request_count += 1;
     }
 

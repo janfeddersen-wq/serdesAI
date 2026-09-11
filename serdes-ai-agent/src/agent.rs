@@ -62,17 +62,17 @@ pub struct Agent<Deps = (), Output = String> {
     /// This avoids cloning on every run.
     pub(crate) static_system_prompt: Arc<str>,
     /// Dynamic instruction functions.
-    pub(crate) instruction_fns: Vec<Box<dyn InstructionFn<Deps>>>,
+    pub(crate) instruction_fns: Vec<Arc<dyn InstructionFn<Deps>>>,
     /// Dynamic system prompt functions.
-    pub(crate) system_prompt_fns: Vec<Box<dyn SystemPromptFn<Deps>>>,
+    pub(crate) system_prompt_fns: Vec<Arc<dyn SystemPromptFn<Deps>>>,
     /// Registered tool definitions.
     pub(crate) tools: Vec<RegisteredTool<Deps>>,
     /// Cached tool definitions - pre-computed to avoid cloning on every step.
     pub(crate) cached_tool_defs: Arc<Vec<ToolDefinition>>,
     /// Output schema.
-    pub(crate) output_schema: Box<dyn OutputSchema<Output>>,
+    pub(crate) output_schema: Arc<dyn OutputSchema<Output>>,
     /// Output validators.
-    pub(crate) output_validators: Vec<Box<dyn OutputValidator<Output, Deps>>>,
+    pub(crate) output_validators: Vec<Arc<dyn OutputValidator<Output, Deps>>>,
     /// End strategy for tool calls.
     pub(crate) end_strategy: EndStrategy,
     /// Maximum retries for output validation.
@@ -83,7 +83,10 @@ pub struct Agent<Deps = (), Output = String> {
     /// Usage limits.
     pub(crate) usage_limits: Option<UsageLimits>,
     /// History processors.
-    pub(crate) history_processors: Vec<Box<dyn HistoryProcessor<Deps>>>,
+    pub(crate) history_processors: Vec<Arc<dyn HistoryProcessor<Deps>>>,
+    pub(crate) context_policy: Option<Arc<dyn crate::lifecycle::ContextPolicy<Deps>>>,
+    pub(crate) context_failure: crate::lifecycle::ContextFailurePolicy,
+    pub(crate) checkpoint_sink: Option<Arc<dyn crate::lifecycle::CheckpointSink>>,
     /// Instrumentation settings.
     #[allow(dead_code)]
     pub(crate) instrument: Option<InstrumentationSettings>,
@@ -241,6 +244,19 @@ where
     ) -> Result<AgentStream, AgentRunError> {
         self.run_stream_with_options(prompt, deps, RunOptions::default())
             .await
+    }
+
+    /// Stream events and recover the exact output after schema/validator transforms.
+    pub async fn run_stream_typed(
+        &self,
+        prompt: impl Into<UserContent>,
+        deps: Deps,
+        options: RunOptions,
+    ) -> Result<crate::TypedAgentStream<Output>, AgentRunError> {
+        Ok(crate::TypedAgentStream {
+            stream: self.run_stream_with_options(prompt, deps, options).await?,
+            marker: std::marker::PhantomData,
+        })
     }
 
     /// Run stream with options.

@@ -6,9 +6,11 @@
 use crate::agent::{Agent, RegisteredTool};
 use crate::context::{RunContext, RunUsage, generate_run_id};
 use crate::errors::AgentRunError;
+use crate::lifecycle::{self, CheckpointBoundary, ContextPolicyInput};
 use crate::run::{CompressionStrategy, RunOptions};
 use chrono::Utc;
 use futures::{Stream, StreamExt};
+use serdes_ai_core::ClassifyModelFailure;
 use serdes_ai_core::messages::{
     ModelResponseStreamEvent, StreamCompleteEvent, ToolCallArgs, ToolReturnPart, UserContent,
 };
@@ -21,6 +23,26 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+// Await durability before allowing the caller to advance to another side effect.
+macro_rules! checkpoint {
+    ($sink:expr, $id:expr, $step:expr, $boundary:expr, $messages:expr, $response:expr, $usage:expr, $tx:expr) => {
+        if let Err(error) = lifecycle::save(
+            $sink.as_ref(),
+            &$id,
+            $step,
+            $boundary,
+            &$messages,
+            $response,
+            &$usage,
+        )
+        .await
+        {
+            let _ = $tx.try_send(Err(error));
+            return;
+        }
+    };
+}
 
 // Conditional tracing - use no-op macros when tracing feature is disabled
 #[cfg(feature = "tracing-integration")]
@@ -152,6 +174,7 @@ pub enum AgentStreamEvent {
 /// 2. Cancel any pending tool calls
 /// 3. Emit a [`AgentStreamEvent::Cancelled`] event with partial results
 pub struct AgentStream {
+    output: Arc<std::sync::Mutex<Option<Box<dyn std::any::Any + Send + Sync>>>>,
     rx: mpsc::Receiver<Result<AgentStreamEvent, AgentRunError>>,
     /// Cancellation token for this stream (if cancellation is enabled).
     cancel_token: Option<CancellationToken>,
@@ -168,31 +191,20 @@ fn canonicalize_tool_call_args_in_response(response: &mut ModelResponse) {
 }
 
 fn usage_from_stream_complete(event: &StreamCompleteEvent) -> Option<RequestUsage> {
-    if event.input_tokens.is_none()
-        && event.output_tokens.is_none()
-        && event.cache_creation_tokens.is_none()
-        && event.cache_read_tokens.is_none()
-    {
-        return None;
-    }
-
-    let mut usage = RequestUsage::new();
-    if let Some(tokens) = event.input_tokens {
-        usage = usage.request_tokens(tokens);
-    }
-    if let Some(tokens) = event.output_tokens {
-        usage = usage.response_tokens(tokens);
-    }
-    if let Some(tokens) = event.cache_creation_tokens {
-        usage = usage.cache_creation_tokens(tokens);
-    }
-    if let Some(tokens) = event.cache_read_tokens {
-        usage = usage.cache_read_tokens(tokens);
-    }
-    Some(usage)
+    event.request_usage()
 }
 
 impl AgentStream {
+    pub(crate) fn take_typed_output<O: Send + Sync + 'static>(&mut self) -> Option<O> {
+        self.output
+            .lock()
+            .unwrap()
+            .take()?
+            .downcast::<O>()
+            .ok()
+            .map(|value| *value)
+    }
+
     /// Create a new streaming agent run.
     ///
     /// This spawns a background task that handles the actual streaming
@@ -207,718 +219,7 @@ impl AgentStream {
         Deps: Send + Sync + 'static,
         Output: Send + Sync + 'static,
     {
-        let run_id = generate_run_id();
-        let (tx, rx) = mpsc::channel(64);
-
-        // Clone what we need for the spawned task
-        let model = agent.model_arc();
-        let model_name = model.name().to_string();
-        let model_settings = options
-            .model_settings
-            .clone()
-            .unwrap_or_else(|| agent.model_settings.clone());
-
-        // Get the static system prompt - for streaming we use just the static part
-        // Dynamic prompts are not supported in streaming mode for simplicity
-        let static_system_prompt = agent.static_system_prompt().to_string();
-
-        let tool_definitions = agent.tool_definitions();
-        let native_output_schema = agent.native_output_schema();
-        let _end_strategy = agent.end_strategy;
-        let usage_limits = agent.usage_limits.clone();
-        let run_usage_limits = options.usage_limits.clone();
-
-        // Clone tool executors - now possible because RegisteredTool implements Clone!
-        let tools: Vec<RegisteredTool<Deps>> = agent.tools.to_vec();
-
-        // Wrap deps in Arc for shared access in tool execution
-        let deps = Arc::new(deps);
-
-        let initial_history = options.message_history.clone();
-        let _metadata = options.metadata.clone();
-        let compression_config = options.compression.clone();
-        let run_id_clone = run_id.clone();
-
-        debug!(run_id = %run_id, "AgentStream: spawning streaming task");
-
-        // Spawn the streaming task
-        tokio::spawn(async move {
-            info!(run_id = %run_id_clone, "AgentStream: task started");
-
-            // Emit RunStart
-            debug!("AgentStream: emitting RunStart");
-            if tx
-                .send(Ok(AgentStreamEvent::RunStart {
-                    run_id: run_id_clone.clone(),
-                }))
-                .await
-                .is_err()
-            {
-                warn!("AgentStream: receiver dropped before RunStart");
-                return;
-            }
-
-            // Build initial messages
-            let mut messages = initial_history.unwrap_or_default();
-            debug!(
-                initial_messages = messages.len(),
-                "AgentStream: building messages"
-            );
-
-            // Add system prompt if non-empty
-            if !static_system_prompt.is_empty() {
-                let mut req = ModelRequest::new();
-                req.add_system_prompt(static_system_prompt.clone());
-                messages.push(req);
-            }
-
-            // Add user prompt
-            let mut user_req = ModelRequest::new();
-            user_req.add_user_prompt(prompt);
-            messages.push(user_req);
-
-            let mut responses: Vec<ModelResponse> = Vec::new();
-            let mut usage = RunUsage::new();
-            let mut step = 0u32;
-            let mut finished = false;
-            let mut finish_reason: Option<FinishReason>;
-
-            // Main agent loop
-            while !finished {
-                step += 1;
-
-                // Check usage limits
-                if let Some(ref limits) = usage_limits {
-                    if let Err(e) = limits.check(&usage) {
-                        let _ = tx.send(Err(e.into())).await;
-                        return;
-                    }
-                }
-
-                if let Some(ref limits) = run_usage_limits {
-                    if let Err(e) = limits.check(&usage) {
-                        let _ = tx.send(Err(e.into())).await;
-                        return;
-                    }
-                }
-
-                // Emit RequestStart
-                if tx
-                    .send(Ok(AgentStreamEvent::RequestStart { step }))
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-
-                // Build request parameters
-                let mut params = ModelRequestParameters::new()
-                    .with_tools_arc(tool_definitions.clone())
-                    .with_allow_text(true);
-
-                // Carry the structured-output request to the provider, as the
-                // blocking path does.
-                if let Some(schema) = native_output_schema.clone() {
-                    params = params.with_output_schema(schema);
-                }
-
-                // === Context Size Calculation & Compression ===
-
-                // Calculate context size by serializing (this is the actual request size)
-                let (request_bytes, estimated_tokens) = {
-                    let messages_json = serde_json::to_string(&messages).unwrap_or_default();
-                    let tools_json = serde_json::to_string(&*tool_definitions).unwrap_or_default();
-                    let bytes = messages_json.len() + tools_json.len();
-                    (bytes, bytes / 4)
-                };
-
-                // Get context limit from model profile
-                let context_limit = model.profile().context_window;
-
-                // Emit ContextInfo event
-                let _ = tx
-                    .send(Ok(AgentStreamEvent::ContextInfo {
-                        estimated_tokens,
-                        request_bytes,
-                        context_limit,
-                    }))
-                    .await;
-
-                // Check if compression is needed
-                if let Some(ref compression) = compression_config {
-                    if let Some(limit) = context_limit {
-                        let threshold_tokens = (limit as f64 * compression.threshold) as usize;
-
-                        if estimated_tokens > threshold_tokens {
-                            let messages_before = messages.len();
-                            let original_tokens = estimated_tokens;
-
-                            // Apply compression based on strategy
-                            let strategy_name = match compression.strategy {
-                                CompressionStrategy::Truncate => {
-                                    // Use TruncateByTokens with keep_first_n=2 (system + first user)
-                                    use crate::history::{HistoryProcessor, TruncateByTokens};
-                                    let truncator =
-                                        TruncateByTokens::new(compression.target_tokens as u64)
-                                            .keep_first_n(2);
-
-                                    // Create a minimal context for the processor
-                                    let temp_ctx = RunContext::new((), &model_name);
-                                    messages = truncator.process(&temp_ctx, messages).await;
-                                    "truncate"
-                                }
-                                CompressionStrategy::Summarize => {
-                                    // Use the same model to summarize the conversation history
-                                    // Keep first 2 messages (system + first user) and last few messages
-                                    // Summarize everything in between
-
-                                    if messages.len() <= 4 {
-                                        // Too few messages to summarize, just truncate
-                                        use crate::history::{HistoryProcessor, TruncateByTokens};
-                                        let truncator =
-                                            TruncateByTokens::new(compression.target_tokens as u64)
-                                                .keep_first_n(2);
-                                        let temp_ctx = RunContext::new((), &model_name);
-                                        messages = truncator.process(&temp_ctx, messages).await;
-                                        "truncate (too few messages)"
-                                    } else {
-                                        // Split messages: first 2 (keep), middle (summarize), last 2 (keep)
-                                        let first_two: Vec<_> =
-                                            messages.iter().take(2).cloned().collect();
-                                        let last_two: Vec<_> = messages
-                                            .iter()
-                                            .rev()
-                                            .take(2)
-                                            .cloned()
-                                            .collect::<Vec<_>>()
-                                            .into_iter()
-                                            .rev()
-                                            .collect();
-                                        let middle: Vec<_> = messages
-                                            .iter()
-                                            .skip(2)
-                                            .take(messages.len().saturating_sub(4))
-                                            .cloned()
-                                            .collect();
-
-                                        if middle.is_empty() {
-                                            // Nothing to summarize
-                                            "summarize (nothing to compress)"
-                                        } else {
-                                            // Build summarization prompt
-                                            let middle_json = serde_json::to_string_pretty(&middle)
-                                                .unwrap_or_default();
-                                            let summary_prompt = format!(
-                                                "Condense this conversation history into a brief summary while preserving:\n\
-                                                - Key decisions and conclusions\n\
-                                                - Important information discovered\n\
-                                                - Tool calls made and their essential results\n\
-                                                - Any errors or issues encountered\n\n\
-                                                Keep the summary concise but complete enough to continue the conversation.\n\n\
-                                                Conversation to summarize:\n{}\n\n\
-                                                Respond with ONLY the summary, no preamble.",
-                                                middle_json
-                                            );
-
-                                            // Create a minimal request for summarization
-                                            let mut summary_req = ModelRequest::new();
-                                            summary_req.add_user_prompt(summary_prompt);
-
-                                            // Call the model (non-streaming for simplicity)
-                                            let summary_params = ModelRequestParameters::new();
-                                            match model
-                                                .request(
-                                                    &[summary_req],
-                                                    &model_settings,
-                                                    &summary_params,
-                                                )
-                                                .await
-                                            {
-                                                Ok(response) => {
-                                                    // Extract text from response
-                                                    let summary_text = response
-                                                        .parts
-                                                        .iter()
-                                                        .filter_map(|p| match p {
-                                                            ModelResponsePart::Text(t) => {
-                                                                Some(t.content.clone())
-                                                            }
-                                                            _ => None,
-                                                        })
-                                                        .collect::<Vec<_>>()
-                                                        .join("\n");
-
-                                                    if !summary_text.is_empty() {
-                                                        // Build new message list: first 2 + summary + last 2
-                                                        let mut new_messages = first_two;
-
-                                                        // Add summary as a "previous context" message
-                                                        let mut summary_msg = ModelRequest::new();
-                                                        summary_msg.add_user_prompt(format!(
-                                                            "[Previous conversation summary]\n{}\n[End of summary - continuing conversation]",
-                                                            summary_text
-                                                        ));
-                                                        new_messages.push(summary_msg);
-
-                                                        new_messages.extend(last_two);
-                                                        messages = new_messages;
-                                                        "summarize"
-                                                    } else {
-                                                        // Fallback to truncate if summary failed
-                                                        use crate::history::{
-                                                            HistoryProcessor, TruncateByTokens,
-                                                        };
-                                                        let truncator = TruncateByTokens::new(
-                                                            compression.target_tokens as u64,
-                                                        )
-                                                        .keep_first_n(2);
-                                                        let temp_ctx =
-                                                            RunContext::new((), &model_name);
-                                                        messages = truncator
-                                                            .process(&temp_ctx, messages)
-                                                            .await;
-                                                        "truncate (summary empty)"
-                                                    }
-                                                }
-                                                Err(_e) => {
-                                                    warn!(
-                                                        "Summarization failed, falling back to truncate: {}",
-                                                        _e
-                                                    );
-                                                    use crate::history::{
-                                                        HistoryProcessor, TruncateByTokens,
-                                                    };
-                                                    let truncator = TruncateByTokens::new(
-                                                        compression.target_tokens as u64,
-                                                    )
-                                                    .keep_first_n(2);
-                                                    let temp_ctx = RunContext::new((), &model_name);
-                                                    messages = truncator
-                                                        .process(&temp_ctx, messages)
-                                                        .await;
-                                                    "truncate (summary failed)"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            };
-
-                            // Calculate new size
-                            let new_bytes = serde_json::to_string(&messages)
-                                .map(|s| s.len())
-                                .unwrap_or(0);
-                            let compressed_tokens = new_bytes / 4;
-
-                            // Emit compression event
-                            let _ = tx
-                                .send(Ok(AgentStreamEvent::ContextCompressed {
-                                    original_tokens,
-                                    compressed_tokens,
-                                    strategy: strategy_name.to_string(),
-                                    messages_before,
-                                    messages_after: messages.len(),
-                                }))
-                                .await;
-                        }
-                    }
-                }
-                // === End Context Compression ===
-
-                // Make streaming request
-                info!(
-                    step = step,
-                    message_count = messages.len(),
-                    "AgentStream: calling model.request_stream"
-                );
-                let stream_result = model
-                    .request_stream(&messages, &model_settings, &params)
-                    .await;
-
-                let mut model_stream = match stream_result {
-                    Ok(s) => {
-                        debug!("AgentStream: model.request_stream succeeded, got stream");
-                        s
-                    }
-                    Err(e) => {
-                        error!(error = %e, "AgentStream: model.request_stream failed");
-                        let _ = tx
-                            .send(Ok(AgentStreamEvent::Error {
-                                message: e.to_string(),
-                            }))
-                            .await;
-                        let _ = tx.send(Err(AgentRunError::Model(e))).await;
-                        return;
-                    }
-                };
-
-                // Collect response parts while streaming
-                let mut response_parts: Vec<ModelResponsePart> = Vec::new();
-                // Track stream events (used by tracing when enabled)
-                let mut stream_event_count = 0u32;
-                // Provider-reported finish reason (set by StreamComplete event)
-                let mut stream_finish_reason: Option<FinishReason> = None;
-                let mut stream_usage: Option<RequestUsage> = None;
-
-                // Process stream events
-                debug!("AgentStream: starting to process model stream events");
-                while let Some(event_result) = model_stream.next().await {
-                    {
-                        stream_event_count += 1;
-                        let _ = stream_event_count;
-                    }
-                    match event_result {
-                        Ok(event) => {
-                            match event {
-                                ModelResponseStreamEvent::PartStart(start) => {
-                                    match &start.part {
-                                        ModelResponsePart::Text(t) => {
-                                            if !t.content.is_empty() {
-                                                let _ = tx
-                                                    .send(Ok(AgentStreamEvent::TextDelta {
-                                                        text: t.content.clone(),
-                                                    }))
-                                                    .await;
-                                            }
-                                        }
-                                        ModelResponsePart::ToolCall(tc) => {
-                                            let _ = tx
-                                                .send(Ok(AgentStreamEvent::ToolCallStart {
-                                                    tool_name: tc.tool_name.clone(),
-                                                    tool_call_id: tc.tool_call_id.clone(),
-                                                }))
-                                                .await;
-                                            // If args are already present (non-streaming models),
-                                            // send them as a delta immediately
-                                            if let Ok(args_str) = tc.args.to_json_string() {
-                                                if !args_str.is_empty() && args_str != "{}" {
-                                                    let _ = tx
-                                                        .send(Ok(AgentStreamEvent::ToolCallDelta {
-                                                            delta: args_str,
-                                                            tool_call_id: tc.tool_call_id.clone(),
-                                                        }))
-                                                        .await;
-                                                }
-                                            }
-                                        }
-                                        ModelResponsePart::Thinking(t) if !t.content.is_empty() => {
-                                            let _ = tx
-                                                .send(Ok(AgentStreamEvent::ThinkingDelta {
-                                                    text: t.content.clone(),
-                                                }))
-                                                .await;
-                                        }
-                                        _ => {}
-                                    }
-                                    response_parts.push(start.part.clone());
-                                }
-                                ModelResponseStreamEvent::PartDelta(delta) => {
-                                    use serdes_ai_core::messages::ModelResponsePartDelta;
-                                    match &delta.delta {
-                                        ModelResponsePartDelta::Text(t) => {
-                                            let _ = tx
-                                                .send(Ok(AgentStreamEvent::TextDelta {
-                                                    text: t.content_delta.clone(),
-                                                }))
-                                                .await;
-                                            // Update the part
-                                            if let Some(ModelResponsePart::Text(text)) =
-                                                response_parts.get_mut(delta.index)
-                                            {
-                                                text.content.push_str(&t.content_delta);
-                                            }
-                                        }
-                                        ModelResponsePartDelta::ToolCall(tc) => {
-                                            // Get tool_call_id from the existing response part
-                                            let tool_call_id =
-                                                response_parts.get(delta.index).and_then(|p| {
-                                                    if let ModelResponsePart::ToolCall(tc) = p {
-                                                        tc.tool_call_id.clone()
-                                                    } else {
-                                                        None
-                                                    }
-                                                });
-                                            let _ = tx
-                                                .send(Ok(AgentStreamEvent::ToolCallDelta {
-                                                    delta: tc.args_delta.clone(),
-                                                    tool_call_id,
-                                                }))
-                                                .await;
-                                            // Update args - accumulate the delta into the tool call
-                                            if let Some(ModelResponsePart::ToolCall(tool_call)) =
-                                                response_parts.get_mut(delta.index)
-                                            {
-                                                tc.apply(tool_call);
-                                            }
-                                        }
-                                        ModelResponsePartDelta::Thinking(t) => {
-                                            let _ = tx
-                                                .send(Ok(AgentStreamEvent::ThinkingDelta {
-                                                    text: t.content_delta.clone(),
-                                                }))
-                                                .await;
-                                            if let Some(ModelResponsePart::Thinking(think)) =
-                                                response_parts.get_mut(delta.index)
-                                            {
-                                                t.apply(think);
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                ModelResponseStreamEvent::PartEnd(_) => {
-                                    // Part finished
-                                }
-                                ModelResponseStreamEvent::StreamComplete(sc) => {
-                                    stream_finish_reason = Some(sc.finish_reason);
-                                    stream_usage = usage_from_stream_complete(&sc);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let _ = tx
-                                .send(Ok(AgentStreamEvent::Error {
-                                    message: e.to_string(),
-                                }))
-                                .await;
-                            let _ = tx.send(Err(AgentRunError::Model(e))).await;
-                            return;
-                        }
-                    }
-                }
-
-                info!(
-                    stream_events = stream_event_count,
-                    parts = response_parts.len(),
-                    "AgentStream: finished processing model stream"
-                );
-
-                // A stream may legitimately end without an explicit terminal StreamComplete
-                // (in-memory/mock streams, and OpenAI/Google/etc. parsers which never emit one).
-                // Anthropic's parser surfaces REAL truncation separately as an explicit Err
-                // (handled above), so a clean end here with content is a successful completion.
-                // Default the finish reason to Stop. (The `response_parts.is_empty()` guard in
-                // the next block still catches a stream that produced nothing.)
-                if stream_finish_reason.is_none() {
-                    debug!(
-                        parts = response_parts.len(),
-                        "stream ended without terminal StreamComplete; defaulting finish_reason=Stop"
-                    );
-                }
-                let stream_finish_reason = stream_finish_reason.unwrap_or(FinishReason::Stop);
-
-                // If the stream produced no parts at all, treat it as an error
-                if response_parts.is_empty() {
-                    let _ = tx
-                        .send(Ok(AgentStreamEvent::Error {
-                            message: "model stream ended without producing any content".to_string(),
-                        }))
-                        .await;
-                    let _ = tx
-                        .send(Err(AgentRunError::Model(
-                            serdes_ai_models::ModelError::incomplete_stream(
-                                "model stream ended without producing any content",
-                            ),
-                        )))
-                        .await;
-                    return;
-                }
-
-                // Build the complete response using the provider-reported finish reason
-                let mut response = ModelResponse {
-                    parts: response_parts.clone(),
-                    model_name: Some(model.name().to_string()),
-                    timestamp: Utc::now(),
-                    finish_reason: Some(stream_finish_reason),
-                    usage: stream_usage,
-                    vendor_id: None,
-                    vendor_details: None,
-                    kind: "response".to_string(),
-                };
-                canonicalize_tool_call_args_in_response(&mut response);
-
-                finish_reason = response.finish_reason;
-                responses.push(response.clone());
-
-                // Accumulate run-wide usage, mirroring the non-streaming run()
-                // path so streaming and non-streaming agree. The request is
-                // counted either way, so max_requests bounds the loop even
-                // against a provider that reports no usage.
-                match &response.usage {
-                    Some(u) => usage.add_request(u.clone()),
-                    None => usage.record_request(),
-                }
-
-                // Emit ResponseComplete
-                let _ = tx
-                    .send(Ok(AgentStreamEvent::ResponseComplete {
-                        step,
-                        usage: response.usage.clone(),
-                    }))
-                    .await;
-
-                // Check for tool calls that need execution
-                let tool_calls: Vec<_> = response
-                    .parts
-                    .iter()
-                    .filter_map(|p| {
-                        if let ModelResponsePart::ToolCall(tc) = p {
-                            Some(tc.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                if !tool_calls.is_empty() {
-                    // Add response to messages for proper alternation
-                    let mut response_req = ModelRequest::new();
-                    response_req
-                        .parts
-                        .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
-                    messages.push(response_req);
-
-                    let mut tool_req = ModelRequest::new();
-
-                    for tc in tool_calls {
-                        let _ = tx
-                            .send(Ok(AgentStreamEvent::ToolCallComplete {
-                                tool_name: tc.tool_name.clone(),
-                                tool_call_id: tc.tool_call_id.clone(),
-                            }))
-                            .await;
-
-                        usage.record_tool_call();
-
-                        // Find the tool by name
-                        let tool = tools.iter().find(|t| t.definition.name == tc.tool_name);
-
-                        match tool {
-                            Some(tool) => {
-                                // Create a RunContext for tool execution
-                                let tool_ctx =
-                                    RunContext::with_shared_deps(deps.clone(), model_name.clone())
-                                        .for_tool(&tc.tool_name, tc.tool_call_id.clone());
-
-                                // Execute the tool
-                                let result =
-                                    tool.executor.execute(tc.args.to_json(), &tool_ctx).await;
-
-                                match result {
-                                    Ok(ret) => {
-                                        let _ = tx
-                                            .send(Ok(AgentStreamEvent::ToolExecuted {
-                                                tool_name: tc.tool_name.clone(),
-                                                tool_call_id: tc.tool_call_id.clone(),
-                                                success: true,
-                                                error: None,
-                                            }))
-                                            .await;
-
-                                        // Use ToolReturnPart for successful execution
-                                        let mut part =
-                                            ToolReturnPart::new(&tc.tool_name, ret.content);
-                                        if let Some(id) = tc.tool_call_id.clone() {
-                                            part = part.with_tool_call_id(id);
-                                        }
-                                        tool_req.parts.push(ModelRequestPart::ToolReturn(part));
-                                    }
-                                    Err(e) => {
-                                        let error_msg = e.to_string();
-                                        let _ = tx
-                                            .send(Ok(AgentStreamEvent::ToolExecuted {
-                                                tool_name: tc.tool_name.clone(),
-                                                tool_call_id: tc.tool_call_id.clone(),
-                                                success: false,
-                                                error: Some(error_msg.clone()),
-                                            }))
-                                            .await;
-
-                                        // Use ToolReturnPart with error content for tool errors
-                                        let mut part = ToolReturnPart::error(
-                                            &tc.tool_name,
-                                            format!("Tool error: {}", e),
-                                        );
-                                        if let Some(id) = tc.tool_call_id.clone() {
-                                            part = part.with_tool_call_id(id);
-                                        }
-                                        tool_req.parts.push(ModelRequestPart::ToolReturn(part));
-                                    }
-                                }
-                            }
-                            None => {
-                                let error_msg = format!("Unknown tool: {}", tc.tool_name);
-                                let _ = tx
-                                    .send(Ok(AgentStreamEvent::ToolExecuted {
-                                        tool_name: tc.tool_name.clone(),
-                                        tool_call_id: tc.tool_call_id.clone(),
-                                        success: false,
-                                        error: Some(error_msg.clone()),
-                                    }))
-                                    .await;
-
-                                // Unknown tool - use ToolReturnPart with error
-                                let mut part = ToolReturnPart::error(
-                                    &tc.tool_name,
-                                    format!("Unknown tool: {}", tc.tool_name),
-                                );
-                                if let Some(id) = tc.tool_call_id.clone() {
-                                    part = part.with_tool_call_id(id);
-                                }
-                                tool_req.parts.push(ModelRequestPart::ToolReturn(part));
-                            }
-                        }
-                    }
-
-                    if !tool_req.parts.is_empty() {
-                        messages.push(tool_req);
-                    }
-
-                    // Continue to let model respond to tool "error"
-                    continue;
-                }
-
-                // No tool calls - check finish condition
-                if finish_reason.is_some_and(|r| r.is_complete()) {
-                    // Add final response to messages for complete history
-                    let mut response_req = ModelRequest::new();
-                    response_req
-                        .parts
-                        .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
-                    messages.push(response_req);
-
-                    finished = true;
-                    let _ = tx.send(Ok(AgentStreamEvent::OutputReady)).await;
-                } else if let Some(r) = finish_reason {
-                    // finish_reason is Some but NOT complete, and there were no
-                    // tool calls (the tool-call path `continue`d before reaching
-                    // here). The loop is about to silently re-issue the same
-                    // request - make that observable. NOT a behavior change:
-                    // termination is unchanged; termination-on-Length/etc. is a
-                    // separate P2 follow-up. `let _ = &r` keeps `r` "used" so the
-                    // no-op `warn!` build (tracing-integration off) stays clean.
-                    let _ = &r;
-                    warn!(
-                        finish_reason = ?r,
-                        "stream completed with a non-terminal finish reason and no tool calls; re-issuing request (this can loop - see follow-up for Length/ContentFilter/Error handling)"
-                    );
-                }
-            }
-
-            // Emit RunComplete
-            let _ = tx
-                .send(Ok(AgentStreamEvent::RunComplete {
-                    run_id: run_id_clone,
-                    messages,
-                    usage,
-                }))
-                .await;
-        });
-
-        Ok(AgentStream {
-            rx,
-            cancel_token: None,
-        })
+        Self::new_with_cancel(agent, prompt, deps, options, CancellationToken::new()).await
     }
 
     /// Create a new streaming agent run with cancellation support.
@@ -957,6 +258,10 @@ impl AgentStream {
         Deps: Send + Sync + 'static,
         Output: Send + Sync + 'static,
     {
+        let output = Arc::new(std::sync::Mutex::new(
+            None::<Box<dyn std::any::Any + Send + Sync>>,
+        ));
+        let output_writer = output.clone();
         let run_id = generate_run_id();
         let (tx, rx) = mpsc::channel(64);
 
@@ -968,570 +273,1088 @@ impl AgentStream {
             .clone()
             .unwrap_or_else(|| agent.model_settings.clone());
 
-        let static_system_prompt = agent.static_system_prompt().to_string();
+        // Share schema, validators and prompt generators with the worker.
+        let mut static_system_prompt = agent.static_system_prompt().to_string();
+        let dynamic_prompts = agent.system_prompt_fns.clone();
+        let dynamic_instructions = agent.instruction_fns.clone();
+        let output_schema = agent.output_schema.clone();
+        let output_validators = agent.output_validators.clone();
+        let max_output_retries = agent.max_output_retries;
+
         let tool_definitions = agent.tool_definitions();
         let native_output_schema = agent.native_output_schema();
         let _end_strategy = agent.end_strategy;
+        let parallel_tools = agent.parallel_tool_calls;
+        let max_concurrent_tools = agent.max_concurrent_tools;
         let usage_limits = agent.usage_limits.clone();
         let run_usage_limits = options.usage_limits.clone();
+
+        // Clone tool executors - now possible because RegisteredTool implements Clone!
         let tools: Vec<RegisteredTool<Deps>> = agent.tools.to_vec();
+
+        // Wrap deps in Arc for shared access in tool execution
         let deps = Arc::new(deps);
 
         let initial_history = options.message_history.clone();
         let _metadata = options.metadata.clone();
-        let compression_config = options.compression.clone();
+        let processors = agent.history_processors.clone();
+        let context_policy = agent.context_policy.clone();
+        let context_failure = agent.context_failure;
+        let supervisor = crate::stream_lifecycle::StreamLifecycle::new(
+            agent.checkpoint_sink.clone(),
+            run_id.clone(),
+        );
+        let checkpoint_sink: Option<Arc<dyn crate::CheckpointSink>> = Some(supervisor.clone());
+        let compression_config = if context_policy.is_some() || !processors.is_empty() {
+            None
+        } else {
+            options.compression.clone()
+        };
         let run_id_clone = run_id.clone();
-        let cancel_token_clone = cancel_token.clone();
 
-        debug!(run_id = %run_id, "AgentStream: spawning streaming task with cancellation support");
+        debug!(run_id = %run_id, "AgentStream: spawning streaming task");
 
+        // Spawn the streaming task
+        let mut initial_snapshot = initial_history.clone().unwrap_or_default();
+        let mut initial_prompt = ModelRequest::new();
+        initial_prompt.add_user_prompt(prompt.clone());
+        initial_snapshot.push(initial_prompt);
+        supervisor.update(&initial_snapshot, None, 0, &RunUsage::new());
+        let supervisor_tx = tx.clone();
+        let supervisor_token = cancel_token.clone();
         tokio::spawn(async move {
-            info!(run_id = %run_id_clone, "AgentStream: task started with cancellation support");
+            let work = async {
+                let mut validated_output = None;
+                info!(run_id = %run_id_clone, "AgentStream: task started");
 
-            // Track partial content for cancellation reporting
-            let mut accumulated_text = String::new();
-            let mut accumulated_thinking = String::new();
-            let mut pending_tool_names: Vec<String> = Vec::new();
-
-            // Emit RunStart
-            if tx
-                .send(Ok(AgentStreamEvent::RunStart {
-                    run_id: run_id_clone.clone(),
-                }))
-                .await
-                .is_err()
-            {
-                return;
-            }
-
-            // Build initial messages
-            let mut messages = initial_history.unwrap_or_default();
-
-            if !static_system_prompt.is_empty() {
-                let mut req = ModelRequest::new();
-                req.add_system_prompt(static_system_prompt.clone());
-                messages.push(req);
-            }
-
-            let mut user_req = ModelRequest::new();
-            user_req.add_user_prompt(prompt);
-            messages.push(user_req);
-
-            let mut responses: Vec<ModelResponse> = Vec::new();
-            let mut usage = RunUsage::new();
-            let mut step = 0u32;
-            let mut finished = false;
-            let mut finish_reason: Option<FinishReason>;
-
-            // Main agent loop with cancellation support
-            while !finished {
-                // Check for cancellation at the start of each iteration
-                if cancel_token_clone.is_cancelled() {
-                    info!(run_id = %run_id_clone, "AgentStream: cancelled at loop start");
-                    let _ = tx
-                        .send(Ok(AgentStreamEvent::Cancelled {
-                            partial_text: if accumulated_text.is_empty() {
-                                None
-                            } else {
-                                Some(accumulated_text)
-                            },
-                            partial_thinking: if accumulated_thinking.is_empty() {
-                                None
-                            } else {
-                                Some(accumulated_thinking)
-                            },
-                            pending_tools: pending_tool_names,
-                            usage: usage.clone(),
-                        }))
-                        .await;
-                    let _ = tx.send(Err(AgentRunError::Cancelled)).await;
-                    return;
-                }
-
-                step += 1;
-
-                // Check usage limits
-                if let Some(ref limits) = usage_limits {
-                    if let Err(e) = limits.check(&usage) {
-                        let _ = tx.send(Err(e.into())).await;
-                        return;
+                let mut policy_context =
+                    RunContext::with_shared_deps(deps.clone(), model_name.clone());
+                policy_context.run_id = run_id_clone.clone();
+                policy_context.model_settings = model_settings.clone();
+                policy_context.metadata = _metadata.clone();
+                for prompt in &dynamic_prompts {
+                    if let Some(text) = prompt.generate(&policy_context).await {
+                        if !text.is_empty() {
+                            static_system_prompt.push_str("\n\n");
+                            static_system_prompt.push_str(&text);
+                        }
                     }
                 }
-
-                if let Some(ref limits) = run_usage_limits {
-                    if let Err(e) = limits.check(&usage) {
-                        let _ = tx.send(Err(e.into())).await;
-                        return;
+                for instruction in &dynamic_instructions {
+                    if let Some(text) = instruction.generate(&policy_context).await {
+                        if !text.is_empty() {
+                            static_system_prompt.push_str("\n\n");
+                            static_system_prompt.push_str(&text);
+                        }
                     }
                 }
-
+                let mut output_retries = 0u32;
+                // Emit RunStart
+                debug!("AgentStream: emitting RunStart");
                 if tx
-                    .send(Ok(AgentStreamEvent::RequestStart { step }))
+                    .send(Ok(AgentStreamEvent::RunStart {
+                        run_id: run_id_clone.clone(),
+                    }))
                     .await
                     .is_err()
                 {
+                    warn!("AgentStream: receiver dropped before RunStart");
                     return;
                 }
 
-                let mut params = ModelRequestParameters::new()
-                    .with_tools_arc(tool_definitions.clone())
-                    .with_allow_text(true);
+                // Build initial messages
+                let mut messages = initial_history.unwrap_or_default();
+                debug!(
+                    initial_messages = messages.len(),
+                    "AgentStream: building messages"
+                );
 
-                // Carry the structured-output request to the provider, as the
-                // blocking path does.
-                if let Some(schema) = native_output_schema.clone() {
-                    params = params.with_output_schema(schema);
+                // Add system prompt if non-empty
+                if !static_system_prompt.is_empty() {
+                    let mut req = ModelRequest::new();
+                    req.add_system_prompt(static_system_prompt.clone());
+                    messages.push(req);
                 }
 
-                // Context size calculation (simplified - full version in main new())
-                let (request_bytes, estimated_tokens) = {
-                    let messages_json = serde_json::to_string(&messages).unwrap_or_default();
-                    let tools_json = serde_json::to_string(&*tool_definitions).unwrap_or_default();
-                    let bytes = messages_json.len() + tools_json.len();
-                    (bytes, bytes / 4)
-                };
+                // Add user prompt
+                let mut user_req = ModelRequest::new();
+                user_req.add_user_prompt(prompt);
+                messages.push(user_req);
+                supervisor.update(&messages, None, 0, &RunUsage::new());
 
-                let context_limit = model.profile().context_window;
+                let mut responses: Vec<ModelResponse> = Vec::new();
+                let mut usage = RunUsage::new();
+                let mut step = 0u32;
+                let mut finished = false;
+                let mut finish_reason: Option<FinishReason>;
 
-                let _ = tx
-                    .send(Ok(AgentStreamEvent::ContextInfo {
-                        estimated_tokens,
-                        request_bytes,
-                        context_limit,
-                    }))
-                    .await;
+                // Main agent loop
+                while !finished {
+                    step += 1;
 
-                // Context compression (simplified version)
-                if let Some(ref compression) = compression_config {
-                    if let Some(limit) = context_limit {
-                        let threshold_tokens = (limit as f64 * compression.threshold) as usize;
-                        if estimated_tokens > threshold_tokens {
-                            use crate::history::{HistoryProcessor, TruncateByTokens};
-                            let truncator = TruncateByTokens::new(compression.target_tokens as u64)
-                                .keep_first_n(2);
-                            let temp_ctx = RunContext::new((), &model_name);
-                            messages = truncator.process(&temp_ctx, messages).await;
-                        }
-                    }
-                }
-
-                // Make streaming request with cancellation support
-                let stream_result = model
-                    .request_stream(&messages, &model_settings, &params)
-                    .await;
-
-                let mut model_stream = match stream_result {
-                    Ok(s) => s,
-                    Err(e) => {
-                        let _ = tx
-                            .send(Ok(AgentStreamEvent::Error {
-                                message: e.to_string(),
-                            }))
-                            .await;
-                        let _ = tx.send(Err(AgentRunError::Model(e))).await;
-                        return;
-                    }
-                };
-
-                let mut response_parts: Vec<ModelResponsePart> = Vec::new();
-
-                // Provider-reported finish reason (set by StreamComplete event)
-                let mut stream_finish_reason: Option<FinishReason> = None;
-                let mut stream_usage: Option<RequestUsage> = None;
-
-                // Process stream events with cancellation check
-                loop {
-                    tokio::select! {
-                        biased;
-
-                        _ = cancel_token_clone.cancelled() => {
-                            info!(run_id = %run_id_clone, "AgentStream: cancelled during model stream");
-                            let _ = tx
-                                .send(Ok(AgentStreamEvent::Cancelled {
-                                    partial_text: if accumulated_text.is_empty() {
-                                        None
-                                    } else {
-                                        Some(accumulated_text)
-                                    },
-                                    partial_thinking: if accumulated_thinking.is_empty() {
-                                        None
-                                    } else {
-                                        Some(accumulated_thinking)
-                                    },
-                                    pending_tools: pending_tool_names,
-                                    usage: usage.clone(),
-                                }))
-                                .await;
-                            let _ = tx.send(Err(AgentRunError::Cancelled)).await;
+                    // Check usage limits
+                    if let Some(ref limits) = usage_limits {
+                        if let Err(e) = limits.check(&usage) {
+                            checkpoint!(
+                                checkpoint_sink,
+                                run_id_clone,
+                                step,
+                                CheckpointBoundary::Failed,
+                                messages,
+                                responses.last(),
+                                usage,
+                                tx
+                            );
+                            let _ = tx.send(Err(e.into())).await;
                             return;
                         }
+                    }
 
-                        event_result = model_stream.next() => {
-                            match event_result {
-                                Some(Ok(event)) => {
-                                    match event {
-                                        ModelResponseStreamEvent::PartStart(start) => {
-                                            match &start.part {
-                                                ModelResponsePart::Text(t) => {
-                                                    if !t.content.is_empty() {
-                                                        accumulated_text.push_str(&t.content);
-                                                        let _ = tx
-                                                            .send(Ok(AgentStreamEvent::TextDelta {
-                                                                text: t.content.clone(),
-                                                            }))
-                                                            .await;
-                                                    }
-                                                }
-                                                ModelResponsePart::ToolCall(tc) => {
-                                                    pending_tool_names.push(tc.tool_name.clone());
-                                                    let _ = tx
-                                                        .send(Ok(AgentStreamEvent::ToolCallStart {
-                                                            tool_name: tc.tool_name.clone(),
-                                                            tool_call_id: tc.tool_call_id.clone(),
-                                                        }))
-                                                        .await;
-                                                    if let Ok(args_str) = tc.args.to_json_string() {
-                                                        if !args_str.is_empty() && args_str != "{}" {
-                                                            let _ = tx
-                                                                .send(Ok(AgentStreamEvent::ToolCallDelta {
-                                                                    delta: args_str,
-                                                                    tool_call_id: tc.tool_call_id.clone(),
-                                                                }))
-                                                                .await;
+                    if let Some(ref limits) = run_usage_limits {
+                        if let Err(e) = limits.check(&usage) {
+                            checkpoint!(
+                                checkpoint_sink,
+                                run_id_clone,
+                                step,
+                                CheckpointBoundary::Failed,
+                                messages,
+                                responses.last(),
+                                usage,
+                                tx
+                            );
+                            let _ = tx.send(Err(e.into())).await;
+                            return;
+                        }
+                    }
+
+                    // Emit RequestStart
+                    if tx
+                        .send(Ok(AgentStreamEvent::RequestStart { step }))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+
+                    // Build request parameters
+                    let mut params = ModelRequestParameters::new()
+                        .with_tools_arc(tool_definitions.clone())
+                        .with_allow_text(true);
+
+                    // Carry the structured-output request to the provider, as the
+                    // blocking path does.
+                    if let Some(schema) = native_output_schema.clone() {
+                        params = params.with_output_schema(schema);
+                    }
+
+                    // === Context Size Calculation & Compression ===
+
+                    // Calculate context size by serializing (this is the actual request size)
+                    let (request_bytes, estimated_tokens) = {
+                        let messages_json = serde_json::to_string(&messages).unwrap_or_default();
+                        let tools_json =
+                            serde_json::to_string(&*tool_definitions).unwrap_or_default();
+                        let bytes = messages_json.len() + tools_json.len();
+                        (bytes, bytes / 4)
+                    };
+
+                    // Get context limit from model profile
+                    let context_limit = model.profile().context_window;
+
+                    // Emit ContextInfo event
+                    let _ = tx
+                        .send(Ok(AgentStreamEvent::ContextInfo {
+                            estimated_tokens,
+                            request_bytes,
+                            context_limit,
+                        }))
+                        .await;
+
+                    // Check if compression is needed
+                    if let Some(ref compression) = compression_config {
+                        if let Some(limit) = context_limit {
+                            let threshold_tokens = (limit as f64 * compression.threshold) as usize;
+
+                            if estimated_tokens > threshold_tokens {
+                                let messages_before = messages.len();
+                                let original_tokens = estimated_tokens;
+
+                                // Apply compression based on strategy
+                                let strategy_name = match compression.strategy {
+                                    CompressionStrategy::Truncate => {
+                                        // Use TruncateByTokens with keep_first_n=2 (system + first user)
+                                        use crate::history::{HistoryProcessor, TruncateByTokens};
+                                        let truncator =
+                                            TruncateByTokens::new(compression.target_tokens as u64)
+                                                .keep_first_n(2);
+
+                                        // Create a minimal context for the processor
+                                        let temp_ctx = RunContext::new((), &model_name);
+                                        messages = truncator.process(&temp_ctx, messages).await;
+                                        "truncate"
+                                    }
+                                    CompressionStrategy::Summarize
+                                    | CompressionStrategy::SummarizeOrTruncate => {
+                                        // Use the same model to summarize the conversation history
+                                        // Keep first 2 messages (system + first user) and last few messages
+                                        // Summarize everything in between
+
+                                        if messages.len() <= 4 {
+                                            // Too few messages to summarize, just truncate
+                                            use crate::history::{
+                                                HistoryProcessor, TruncateByTokens,
+                                            };
+                                            let truncator = TruncateByTokens::new(
+                                                compression.target_tokens as u64,
+                                            )
+                                            .keep_first_n(2);
+                                            let temp_ctx = RunContext::new((), &model_name);
+                                            messages = truncator.process(&temp_ctx, messages).await;
+                                            "truncate (too few messages)"
+                                        } else {
+                                            // Split messages: first 2 (keep), middle (summarize), last 2 (keep)
+                                            let first_two: Vec<_> =
+                                                messages.iter().take(2).cloned().collect();
+                                            let last_two: Vec<_> = messages
+                                                .iter()
+                                                .rev()
+                                                .take(2)
+                                                .cloned()
+                                                .collect::<Vec<_>>()
+                                                .into_iter()
+                                                .rev()
+                                                .collect();
+                                            let middle: Vec<_> = messages
+                                                .iter()
+                                                .skip(2)
+                                                .take(messages.len().saturating_sub(4))
+                                                .cloned()
+                                                .collect();
+
+                                            if middle.is_empty() {
+                                                // Nothing to summarize
+                                                "summarize (nothing to compress)"
+                                            } else {
+                                                // Build summarization prompt
+                                                let middle_json =
+                                                    serde_json::to_string_pretty(&middle)
+                                                        .unwrap_or_default();
+                                                let summary_prompt = format!(
+                                                    "Condense this conversation history into a brief summary while preserving:\n\
+                                                - Key decisions and conclusions\n\
+                                                - Important information discovered\n\
+                                                - Tool calls made and their essential results\n\
+                                                - Any errors or issues encountered\n\n\
+                                                Keep the summary concise but complete enough to continue the conversation.\n\n\
+                                                Conversation to summarize:\n{}\n\n\
+                                                Respond with ONLY the summary, no preamble.",
+                                                    middle_json
+                                                );
+
+                                                // Create a minimal request for summarization
+                                                let mut summary_req = ModelRequest::new();
+                                                summary_req.add_user_prompt(summary_prompt);
+
+                                                // Call the model (non-streaming for simplicity)
+                                                let summary_params = ModelRequestParameters::new();
+                                                match tokio::time::timeout(model_settings.timeout.unwrap_or(std::time::Duration::from_secs(30)), model
+                                                .request(
+                                                    &[summary_req],
+                                                    &model_settings,
+                                                    &summary_params,
+                                                )).await.unwrap_or_else(|_| Err(serdes_ai_models::ModelError::incomplete_stream("summary deadline exceeded")))
+                                            {
+                                                Ok(response) => {
+                                                    if let Some(summary_usage) = &response.usage { usage.add_request(summary_usage.clone()); } else { usage.record_request(); }
+                                                    // Extract text from response
+                                                    let summary_text = response
+                                                        .parts
+                                                        .iter()
+                                                        .filter_map(|p| match p {
+                                                            ModelResponsePart::Text(t) => {
+                                                                Some(t.content.clone())
+                                                            }
+                                                            _ => None,
+                                                        })
+                                                        .collect::<Vec<_>>()
+                                                        .join("\n");
+
+                                                    if !summary_text.is_empty() {
+                                                        // Build new message list: first 2 + summary + last 2
+                                                        let mut new_messages = first_two;
+
+                                                        // Add summary as a "previous context" message
+                                                        let mut summary_msg = ModelRequest::new();
+                                                        summary_msg.add_user_prompt(format!(
+                                                            "[Previous conversation summary]\n{}\n[End of summary - continuing conversation]",
+                                                            summary_text
+                                                        ));
+                                                        new_messages.push(summary_msg);
+
+                                                        new_messages.extend(last_two);
+                                                        messages = new_messages;
+                                                        "summarize"
+                                                    } else {
+                                                        if !matches!(compression.strategy, CompressionStrategy::SummarizeOrTruncate) {
+                                                            checkpoint!(checkpoint_sink, run_id_clone, step, CheckpointBoundary::Failed, messages, responses.last(), usage, tx);
+                                                            let _ = tx.try_send(Err(AgentRunError::ContextPolicy("Summary returned no text".into())));
+                                                            return;
                                                         }
+                                                        // Explicit compatibility fallback
+                                                        use crate::history::{
+                                                            HistoryProcessor, TruncateByTokens,
+                                                        };
+                                                        let truncator = TruncateByTokens::new(
+                                                            compression.target_tokens as u64,
+                                                        )
+                                                        .keep_first_n(2);
+                                                        let temp_ctx =
+                                                            RunContext::new((), &model_name);
+                                                        messages = truncator
+                                                            .process(&temp_ctx, messages)
+                                                            .await;
+                                                        "truncate (summary empty)"
                                                     }
                                                 }
-                                                ModelResponsePart::Thinking(t)
-                                                    if !t.content.is_empty() =>
-                                                {
-                                                    accumulated_thinking.push_str(&t.content);
+                                                Err(_e) => {
+                                                    usage.record_request();
+                                                    if !matches!(compression.strategy, CompressionStrategy::SummarizeOrTruncate) {
+                                                        checkpoint!(checkpoint_sink, run_id_clone, step, CheckpointBoundary::Failed, messages, responses.last(), usage, tx);
+                                                        let _ = tx.try_send(Err(AgentRunError::ContextPolicy("Summary request failed".into())));
+                                                        return;
+                                                    }
+                                                    use crate::history::{
+                                                        HistoryProcessor, TruncateByTokens,
+                                                    };
+                                                    let truncator = TruncateByTokens::new(
+                                                        compression.target_tokens as u64,
+                                                    )
+                                                    .keep_first_n(2);
+                                                    let temp_ctx = RunContext::new((), &model_name);
+                                                    messages = truncator
+                                                        .process(&temp_ctx, messages)
+                                                        .await;
+                                                    "truncate (summary failed)"
+                                                }
+                                            }
+                                            }
+                                        }
+                                    }
+                                };
+
+                                // Calculate new size
+                                let new_bytes = serde_json::to_string(&messages)
+                                    .map(|s| s.len())
+                                    .unwrap_or(0);
+                                let compressed_tokens = new_bytes / 4;
+
+                                // Emit compression event
+                                let _ = tx
+                                    .send(Ok(AgentStreamEvent::ContextCompressed {
+                                        original_tokens,
+                                        compressed_tokens,
+                                        strategy: strategy_name.to_string(),
+                                        messages_before,
+                                        messages_after: messages.len(),
+                                    }))
+                                    .await;
+                            }
+                        }
+                    }
+                    // === End Context Compression ===
+
+                    for limits in [usage_limits.as_ref(), run_usage_limits.as_ref()]
+                        .into_iter()
+                        .flatten()
+                    {
+                        if let Err(error) = limits.check(&usage) {
+                            checkpoint!(
+                                checkpoint_sink,
+                                run_id_clone,
+                                step,
+                                CheckpointBoundary::Failed,
+                                messages,
+                                responses.last(),
+                                usage,
+                                tx
+                            );
+                            let _ = tx.try_send(Err(error.into()));
+                            return;
+                        }
+                    }
+                    // Make streaming request
+                    info!(
+                        step = step,
+                        message_count = messages.len(),
+                        "AgentStream: calling model.request_stream"
+                    );
+                    if let Err(error) = lifecycle::prepare(
+                        &processors,
+                        context_policy.as_ref(),
+                        context_failure,
+                        ContextPolicyInput {
+                            context: &policy_context,
+                            settings: &model_settings,
+                            parameters: &params,
+                            model: model.as_ref(),
+                        },
+                        &mut messages,
+                    )
+                    .await
+                    {
+                        checkpoint!(
+                            checkpoint_sink,
+                            run_id_clone,
+                            step,
+                            CheckpointBoundary::Failed,
+                            messages,
+                            responses.last(),
+                            usage,
+                            tx
+                        );
+                        let _ = tx.send(Err(error)).await;
+                        return;
+                    }
+                    checkpoint!(
+                        checkpoint_sink,
+                        run_id_clone,
+                        step,
+                        CheckpointBoundary::BeforeRequest,
+                        messages,
+                        None,
+                        usage,
+                        tx
+                    );
+                    let stream_result = model
+                        .request_stream(&messages, &model_settings, &params)
+                        .await;
+
+                    let mut partial_timer = lifecycle::partial_timer(checkpoint_sink.as_ref());
+                    let mut partial_response = ModelResponse::with_parts(Vec::new());
+                    let mut model_stream = match stream_result {
+                        Ok(s) => {
+                            debug!("AgentStream: model.request_stream succeeded, got stream");
+                            s
+                        }
+                        Err(e) => {
+                            error!(error = %e, "AgentStream: model.request_stream failed");
+                            let _ = tx
+                                .send(Ok(AgentStreamEvent::Error {
+                                    message: e.to_string(),
+                                }))
+                                .await;
+                            checkpoint!(
+                                checkpoint_sink,
+                                run_id_clone,
+                                step,
+                                CheckpointBoundary::ModelFailed(e.model_failure().kind),
+                                messages,
+                                Some(&partial_response),
+                                usage,
+                                tx
+                            );
+                            let _ = tx.send(Err(AgentRunError::Model(e))).await;
+                            return;
+                        }
+                    };
+
+                    // Collect response parts while streaming
+                    let mut response_parts: Vec<ModelResponsePart> = Vec::new();
+                    // Track stream events (used by tracing when enabled)
+                    let mut stream_event_count = 0u32;
+                    // Provider-reported finish reason (set by StreamComplete event)
+                    let mut stream_finish_reason: Option<FinishReason> = None;
+                    let mut stream_usage: Option<RequestUsage> = None;
+                    let mut terminal_metadata = None;
+
+                    // Process stream events
+                    debug!("AgentStream: starting to process model stream events");
+                    loop {
+                        partial_response.parts = response_parts.clone();
+                        partial_response.usage = stream_usage.clone();
+                        partial_response.finish_reason = stream_finish_reason;
+                        supervisor.update(&messages, Some(&partial_response), step, &usage);
+                        let event_result = tokio::select! {
+                            _ = partial_timer.tick(), if checkpoint_sink.as_ref().is_some_and(|sink| sink.partial_interval().is_some()) => {
+                                checkpoint!(checkpoint_sink, run_id_clone, step, CheckpointBoundary::Partial,
+                                    messages, Some(&partial_response), usage, tx);
+                                continue;
+                            }
+                            event = model_stream.next() => event,
+                        };
+                        let Some(event_result) = event_result else {
+                            break;
+                        };
+                        {
+                            stream_event_count += 1;
+                            let _ = stream_event_count;
+                        }
+                        match event_result {
+                            Ok(event) => {
+                                lifecycle::apply_partial(&mut partial_response, &event);
+                                supervisor.update(&messages, Some(&partial_response), step, &usage);
+                                match event {
+                                    ModelResponseStreamEvent::PartStart(start) => {
+                                        match &start.part {
+                                            ModelResponsePart::Text(t) => {
+                                                if !t.content.is_empty() {
                                                     let _ = tx
-                                                        .send(Ok(AgentStreamEvent::ThinkingDelta {
+                                                        .send(Ok(AgentStreamEvent::TextDelta {
                                                             text: t.content.clone(),
                                                         }))
                                                         .await;
                                                 }
-                                                _ => {}
                                             }
-                                            response_parts.push(start.part.clone());
-                                        }
-                                        ModelResponseStreamEvent::PartDelta(delta) => {
-                                            use serdes_ai_core::messages::ModelResponsePartDelta;
-                                            match &delta.delta {
-                                                ModelResponsePartDelta::Text(t) => {
-                                                    accumulated_text.push_str(&t.content_delta);
-                                                    let _ = tx
-                                                        .send(Ok(AgentStreamEvent::TextDelta {
-                                                            text: t.content_delta.clone(),
-                                                        }))
-                                                        .await;
-                                                    if let Some(ModelResponsePart::Text(text)) =
-                                                        response_parts.get_mut(delta.index)
-                                                    {
-                                                        text.content.push_str(&t.content_delta);
+                                            ModelResponsePart::ToolCall(tc) => {
+                                                let _ = tx
+                                                    .send(Ok(AgentStreamEvent::ToolCallStart {
+                                                        tool_name: tc.tool_name.clone(),
+                                                        tool_call_id: tc.tool_call_id.clone(),
+                                                    }))
+                                                    .await;
+                                                // If args are already present (non-streaming models),
+                                                // send them as a delta immediately
+                                                if let Ok(args_str) = tc.args.to_json_string() {
+                                                    if !args_str.is_empty() && args_str != "{}" {
+                                                        let _ = tx
+                                                            .send(Ok(
+                                                                AgentStreamEvent::ToolCallDelta {
+                                                                    delta: args_str,
+                                                                    tool_call_id: tc
+                                                                        .tool_call_id
+                                                                        .clone(),
+                                                                },
+                                                            ))
+                                                            .await;
                                                     }
                                                 }
-                                                ModelResponsePartDelta::ToolCall(tc) => {
-                                                    let tool_call_id =
-                                                        response_parts.get(delta.index).and_then(|p| {
-                                                            if let ModelResponsePart::ToolCall(tc) = p {
-                                                                tc.tool_call_id.clone()
-                                                            } else {
-                                                                None
-                                                            }
-                                                        });
-                                                    let _ = tx
-                                                        .send(Ok(AgentStreamEvent::ToolCallDelta {
-                                                            delta: tc.args_delta.clone(),
-                                                            tool_call_id,
-                                                        }))
-                                                        .await;
-                                                    if let Some(ModelResponsePart::ToolCall(
-                                                        tool_call,
-                                                    )) = response_parts.get_mut(delta.index)
-                                                    {
-                                                        tc.apply(tool_call);
-                                                    }
-                                                }
-                                                ModelResponsePartDelta::Thinking(t) => {
-                                                    accumulated_thinking.push_str(&t.content_delta);
-                                                    let _ = tx
-                                                        .send(Ok(AgentStreamEvent::ThinkingDelta {
-                                                            text: t.content_delta.clone(),
-                                                        }))
-                                                        .await;
-                                                    if let Some(ModelResponsePart::Thinking(
-                                                        think,
-                                                    )) = response_parts.get_mut(delta.index)
-                                                    {
-                                                        t.apply(think);
-                                                    }
-                                                }
-                                                _ => {}
                                             }
+                                            ModelResponsePart::Thinking(t)
+                                                if !t.content.is_empty() =>
+                                            {
+                                                let _ = tx
+                                                    .send(Ok(AgentStreamEvent::ThinkingDelta {
+                                                        text: t.content.clone(),
+                                                    }))
+                                                    .await;
+                                            }
+                                            _ => {}
                                         }
-                                        ModelResponseStreamEvent::PartEnd(_) => {}
-                                        ModelResponseStreamEvent::StreamComplete(sc) => {
-                                            stream_finish_reason = Some(sc.finish_reason);
-                                            stream_usage = usage_from_stream_complete(&sc);
+                                        response_parts.push(start.part.clone());
+                                    }
+                                    ModelResponseStreamEvent::PartDelta(delta) => {
+                                        use serdes_ai_core::messages::ModelResponsePartDelta;
+                                        match &delta.delta {
+                                            ModelResponsePartDelta::Text(t) => {
+                                                let _ = tx
+                                                    .send(Ok(AgentStreamEvent::TextDelta {
+                                                        text: t.content_delta.clone(),
+                                                    }))
+                                                    .await;
+                                                // Update the part
+                                                if let Some(ModelResponsePart::Text(text)) =
+                                                    response_parts.get_mut(delta.index)
+                                                {
+                                                    text.content.push_str(&t.content_delta);
+                                                }
+                                            }
+                                            ModelResponsePartDelta::ToolCall(tc) => {
+                                                // Get tool_call_id from the existing response part
+                                                let tool_call_id =
+                                                    response_parts.get(delta.index).and_then(|p| {
+                                                        if let ModelResponsePart::ToolCall(tc) = p {
+                                                            tc.tool_call_id.clone()
+                                                        } else {
+                                                            None
+                                                        }
+                                                    });
+                                                let _ = tx
+                                                    .send(Ok(AgentStreamEvent::ToolCallDelta {
+                                                        delta: tc.args_delta.clone(),
+                                                        tool_call_id,
+                                                    }))
+                                                    .await;
+                                                // Update args - accumulate the delta into the tool call
+                                                if let Some(ModelResponsePart::ToolCall(
+                                                    tool_call,
+                                                )) = response_parts.get_mut(delta.index)
+                                                {
+                                                    tc.apply(tool_call);
+                                                }
+                                            }
+                                            ModelResponsePartDelta::Thinking(t) => {
+                                                let _ = tx
+                                                    .send(Ok(AgentStreamEvent::ThinkingDelta {
+                                                        text: t.content_delta.clone(),
+                                                    }))
+                                                    .await;
+                                                if let Some(ModelResponsePart::Thinking(think)) =
+                                                    response_parts.get_mut(delta.index)
+                                                {
+                                                    t.apply(think);
+                                                }
+                                            }
+                                            _ => {}
                                         }
                                     }
-                                }
-                                Some(Err(e)) => {
-                                    let _ = tx
-                                        .send(Ok(AgentStreamEvent::Error {
-                                            message: e.to_string(),
-                                        }))
-                                        .await;
-                                    let _ = tx.send(Err(AgentRunError::Model(e))).await;
-                                    return;
-                                }
-                                None => {
-                                    // Stream ended normally
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // A stream may legitimately end without an explicit terminal StreamComplete
-                // (in-memory/mock streams, and OpenAI/Google/etc. parsers which never emit one).
-                // Anthropic's parser surfaces REAL truncation separately as an explicit Err
-                // (handled above), so a clean end here with content is a successful completion.
-                // Default the finish reason to Stop. (The `response_parts.is_empty()` guard in
-                // the next block still catches a stream that produced nothing.)
-                if stream_finish_reason.is_none() {
-                    debug!(
-                        parts = response_parts.len(),
-                        "stream ended without terminal StreamComplete; defaulting finish_reason=Stop"
-                    );
-                }
-                let stream_finish_reason = stream_finish_reason.unwrap_or(FinishReason::Stop);
-
-                // If the stream produced no parts at all, treat it as an error
-                if response_parts.is_empty() {
-                    let _ = tx
-                        .send(Ok(AgentStreamEvent::Error {
-                            message: "model stream ended without producing any content".to_string(),
-                        }))
-                        .await;
-                    let _ = tx
-                        .send(Err(AgentRunError::Model(
-                            serdes_ai_models::ModelError::incomplete_stream(
-                                "model stream ended without producing any content",
-                            ),
-                        )))
-                        .await;
-                    return;
-                }
-
-                // Build the complete response using the provider-reported finish reason
-                let mut response = ModelResponse {
-                    parts: response_parts.clone(),
-                    model_name: Some(model.name().to_string()),
-                    timestamp: Utc::now(),
-                    finish_reason: Some(stream_finish_reason),
-                    usage: stream_usage,
-                    vendor_id: None,
-                    vendor_details: None,
-                    kind: "response".to_string(),
-                };
-                canonicalize_tool_call_args_in_response(&mut response);
-
-                finish_reason = response.finish_reason;
-                responses.push(response.clone());
-
-                // Accumulate run-wide usage, mirroring the non-streaming run()
-                // path so streaming and non-streaming agree. The request is
-                // counted either way, so max_requests bounds the loop even
-                // against a provider that reports no usage.
-                match &response.usage {
-                    Some(u) => usage.add_request(u.clone()),
-                    None => usage.record_request(),
-                }
-
-                let _ = tx
-                    .send(Ok(AgentStreamEvent::ResponseComplete {
-                        step,
-                        usage: response.usage.clone(),
-                    }))
-                    .await;
-
-                // Check for tool calls
-                let tool_calls: Vec<_> = response
-                    .parts
-                    .iter()
-                    .filter_map(|p| {
-                        if let ModelResponsePart::ToolCall(tc) = p {
-                            Some(tc.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                if !tool_calls.is_empty() {
-                    let mut response_req = ModelRequest::new();
-                    response_req
-                        .parts
-                        .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
-                    messages.push(response_req);
-
-                    let mut tool_req = ModelRequest::new();
-
-                    for tc in tool_calls {
-                        // Check for cancellation before each tool execution
-                        if cancel_token_clone.is_cancelled() {
-                            info!(run_id = %run_id_clone, "AgentStream: cancelled before tool execution");
-                            let _ = tx
-                                .send(Ok(AgentStreamEvent::Cancelled {
-                                    partial_text: if accumulated_text.is_empty() {
-                                        None
-                                    } else {
-                                        Some(accumulated_text)
-                                    },
-                                    partial_thinking: if accumulated_thinking.is_empty() {
-                                        None
-                                    } else {
-                                        Some(accumulated_thinking)
-                                    },
-                                    pending_tools: pending_tool_names,
-                                    usage: usage.clone(),
-                                }))
-                                .await;
-                            let _ = tx.send(Err(AgentRunError::Cancelled)).await;
-                            return;
-                        }
-
-                        let _ = tx
-                            .send(Ok(AgentStreamEvent::ToolCallComplete {
-                                tool_name: tc.tool_name.clone(),
-                                tool_call_id: tc.tool_call_id.clone(),
-                            }))
-                            .await;
-
-                        usage.record_tool_call();
-                        // Remove from pending after completion
-                        pending_tool_names.retain(|n| n != &tc.tool_name);
-
-                        let tool = tools.iter().find(|t| t.definition.name == tc.tool_name);
-
-                        match tool {
-                            Some(tool) => {
-                                let tool_ctx =
-                                    RunContext::with_shared_deps(deps.clone(), model_name.clone())
-                                        .for_tool(&tc.tool_name, tc.tool_call_id.clone());
-
-                                let result =
-                                    tool.executor.execute(tc.args.to_json(), &tool_ctx).await;
-
-                                match result {
-                                    Ok(ret) => {
-                                        let _ = tx
-                                            .send(Ok(AgentStreamEvent::ToolExecuted {
-                                                tool_name: tc.tool_name.clone(),
-                                                tool_call_id: tc.tool_call_id.clone(),
-                                                success: true,
-                                                error: None,
-                                            }))
-                                            .await;
-
-                                        let mut part =
-                                            ToolReturnPart::new(&tc.tool_name, ret.content);
-                                        if let Some(id) = tc.tool_call_id.clone() {
-                                            part = part.with_tool_call_id(id);
-                                        }
-                                        tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                                    ModelResponseStreamEvent::PartEnd(_) => {
+                                        // Part finished
                                     }
-                                    Err(e) => {
-                                        let error_msg = e.to_string();
-                                        let _ = tx
-                                            .send(Ok(AgentStreamEvent::ToolExecuted {
-                                                tool_name: tc.tool_name.clone(),
-                                                tool_call_id: tc.tool_call_id.clone(),
-                                                success: false,
-                                                error: Some(error_msg.clone()),
-                                            }))
-                                            .await;
-
-                                        let mut part = ToolReturnPart::error(
-                                            &tc.tool_name,
-                                            format!("Tool error: {}", e),
-                                        );
-                                        if let Some(id) = tc.tool_call_id.clone() {
-                                            part = part.with_tool_call_id(id);
-                                        }
-                                        tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                                    ModelResponseStreamEvent::StreamComplete(sc) => {
+                                        stream_finish_reason = Some(sc.finish_reason);
+                                        stream_usage = usage_from_stream_complete(&sc);
+                                        terminal_metadata = sc.metadata.clone();
                                     }
                                 }
                             }
-                            None => {
-                                let error_msg = format!("Unknown tool: {}", tc.tool_name);
+                            Err(e) => {
                                 let _ = tx
-                                    .send(Ok(AgentStreamEvent::ToolExecuted {
-                                        tool_name: tc.tool_name.clone(),
-                                        tool_call_id: tc.tool_call_id.clone(),
-                                        success: false,
-                                        error: Some(error_msg.clone()),
+                                    .send(Ok(AgentStreamEvent::Error {
+                                        message: e.to_string(),
                                     }))
                                     .await;
-
-                                let mut part = ToolReturnPart::error(
-                                    &tc.tool_name,
-                                    format!("Unknown tool: {}", tc.tool_name),
+                                checkpoint!(
+                                    checkpoint_sink,
+                                    run_id_clone,
+                                    step,
+                                    CheckpointBoundary::ModelFailed(e.model_failure().kind),
+                                    messages,
+                                    Some(&partial_response),
+                                    usage,
+                                    tx
                                 );
-                                if let Some(id) = tc.tool_call_id.clone() {
-                                    part = part.with_tool_call_id(id);
-                                }
-                                tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                                let _ = tx.send(Err(AgentRunError::Model(e))).await;
+                                return;
                             }
                         }
                     }
 
-                    if !tool_req.parts.is_empty() {
-                        messages.push(tool_req);
+                    info!(
+                        stream_events = stream_event_count,
+                        parts = response_parts.len(),
+                        "AgentStream: finished processing model stream"
+                    );
+
+                    // A stream may legitimately end without an explicit terminal StreamComplete
+                    // (in-memory/mock streams, and OpenAI/Google/etc. parsers which never emit one).
+                    // Anthropic's parser surfaces REAL truncation separately as an explicit Err
+                    // (handled above), so a clean end here with content is a successful completion.
+                    // Default the finish reason to Stop. (The `response_parts.is_empty()` guard in
+                    // the next block still catches a stream that produced nothing.)
+                    if stream_finish_reason.is_none() {
+                        debug!(
+                            parts = response_parts.len(),
+                            "stream ended without terminal StreamComplete; defaulting finish_reason=Stop"
+                        );
+                    }
+                    let stream_finish_reason = stream_finish_reason.unwrap_or(FinishReason::Stop);
+
+                    // If the stream produced no parts at all, treat it as an error
+                    if response_parts.is_empty() && terminal_metadata.is_none() {
+                        checkpoint!(
+                            checkpoint_sink,
+                            run_id_clone,
+                            step,
+                            CheckpointBoundary::ModelFailed(
+                                serdes_ai_core::ModelFailureKind::IncompleteStream
+                            ),
+                            messages,
+                            Some(&partial_response),
+                            usage,
+                            tx
+                        );
+                        let _ = tx
+                            .send(Ok(AgentStreamEvent::Error {
+                                message: "model stream ended without producing any content"
+                                    .to_string(),
+                            }))
+                            .await;
+                        let _ = tx
+                            .send(Err(AgentRunError::Model(
+                                serdes_ai_models::ModelError::incomplete_stream(
+                                    "model stream ended without producing any content",
+                                ),
+                            )))
+                            .await;
+                        return;
                     }
 
-                    continue;
-                }
+                    // Build the complete response using the provider-reported finish reason
+                    let mut response = ModelResponse {
+                        parts: response_parts.clone(),
+                        model_name: Some(model.name().to_string()),
+                        timestamp: Utc::now(),
+                        finish_reason: Some(stream_finish_reason),
+                        usage: stream_usage,
+                        vendor_id: None,
+                        vendor_details: None,
+                        kind: "response".to_string(),
+                    };
+                    if let Some(metadata) = &terminal_metadata {
+                        metadata.apply(&mut response);
+                    }
+                    // Accumulate run-wide usage, mirroring the non-streaming run()
+                    // path so streaming and non-streaming agree. The request is
+                    // counted either way, so max_requests bounds the loop even
+                    // against a provider that reports no usage.
+                    match &response.usage {
+                        Some(u) => usage.add_request(u.clone()),
+                        None => usage.record_request(),
+                    }
 
-                if finish_reason.is_some_and(|r| r.is_complete()) {
-                    // Add final response to messages for complete history
-                    let mut response_req = ModelRequest::new();
-                    response_req
-                        .parts
-                        .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
-                    messages.push(response_req);
-
-                    finished = true;
-                    let _ = tx.send(Ok(AgentStreamEvent::OutputReady)).await;
-                } else if let Some(r) = finish_reason {
-                    // finish_reason is Some but NOT complete, and there were no
-                    // tool calls (the tool-call path `continue`d before reaching
-                    // here). The loop is about to silently re-issue the same
-                    // request - make that observable. NOT a behavior change:
-                    // termination is unchanged; termination-on-Length/etc. is a
-                    // separate P2 follow-up. `let _ = &r` keeps `r` "used" so the
-                    // no-op `warn!` build (tracing-integration off) stays clean.
-                    let _ = &r;
-                    warn!(
-                        finish_reason = ?r,
-                        "stream completed with a non-terminal finish reason and no tool calls; re-issuing request (this can loop - see follow-up for Length/ContentFilter/Error handling)"
+                    checkpoint!(
+                        checkpoint_sink,
+                        run_id_clone,
+                        step,
+                        CheckpointBoundary::AfterResponse,
+                        messages,
+                        Some(&response),
+                        usage,
+                        tx
                     );
-                }
-            }
+                    canonicalize_tool_call_args_in_response(&mut response);
 
-            let _ = tx
-                .send(Ok(AgentStreamEvent::RunComplete {
-                    run_id: run_id_clone,
+                    finish_reason = response.finish_reason;
+                    responses.clear(); // Only the current response is needed by streaming checkpoints.
+                    responses.push(response.clone());
+
+                    // Emit ResponseComplete
+                    let _ = tx
+                        .send(Ok(AgentStreamEvent::ResponseComplete {
+                            step,
+                            usage: response.usage.clone(),
+                        }))
+                        .await;
+
+                    // Check for tool calls that need execution
+                    let tool_calls: Vec<_> = response
+                        .parts
+                        .iter()
+                        .filter_map(|p| {
+                            if let ModelResponsePart::ToolCall(tc) = p {
+                                if output_schema.tool_name() == Some(tc.tool_name.as_str()) {
+                                    return None;
+                                }
+                                Some(tc.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    let explicit_output = response.parts.iter().any(|part| matches!(part,
+                        ModelResponsePart::ToolCall(call) if output_schema.tool_name() == Some(call.tool_name.as_str())));
+                    let mut accepted_mixed = None;
+                    if explicit_output
+                        && !tool_calls.is_empty()
+                        && !matches!(
+                            finish_reason,
+                            Some(FinishReason::Length | FinishReason::ContentFilter)
+                        )
+                    {
+                        policy_context.retry_count = output_retries;
+                        match crate::stream_output::validate(
+                            output_schema.as_ref(),
+                            &output_validators,
+                            &response,
+                            &policy_context,
+                        )
+                        .await
+                        {
+                            Ok(output) => accepted_mixed = Some(output),
+                            Err(_) => {
+                                output_retries += 1;
+                                let mut request = ModelRequest::new();
+                                request.parts.push(ModelRequestPart::ModelResponse(Box::new(
+                                    response.clone(),
+                                )));
+                                messages.push(request);
+                                if output_retries > max_output_retries {
+                                    checkpoint!(
+                                        checkpoint_sink,
+                                        run_id_clone,
+                                        step,
+                                        CheckpointBoundary::ValidationFailed,
+                                        messages,
+                                        Some(&response),
+                                        usage,
+                                        tx
+                                    );
+                                    let _ =
+                                        tx.try_send(Err(AgentRunError::OutputValidationFailed(
+                                            crate::OutputValidationError::failed(
+                                                "Output validation exhausted",
+                                            ),
+                                        )));
+                                    return;
+                                }
+                                let mut results = ModelRequest::new();
+                                for part in &response.parts {
+                                    if let ModelResponsePart::ToolCall(call) = part {
+                                        let mut result = ToolReturnPart::new(
+                                            &call.tool_name,
+                                            "Not executed: final output rejected; retry",
+                                        );
+                                        if let Some(id) = &call.tool_call_id {
+                                            result = result.with_tool_call_id(id);
+                                        }
+                                        results.parts.push(ModelRequestPart::ToolReturn(result));
+                                    }
+                                }
+                                messages.push(results);
+                                continue;
+                            }
+                        }
+                    }
+                    if !tool_calls.is_empty()
+                        && !matches!(
+                            finish_reason,
+                            Some(FinishReason::Length | FinishReason::ContentFilter)
+                        )
+                    {
+                        // Add response to messages for proper alternation
+                        let mut response_req = ModelRequest::new();
+                        response_req
+                            .parts
+                            .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
+                        messages.push(response_req);
+
+                        let mut tool_req = ModelRequest::new();
+
+                        for call in &tool_calls {
+                            if accepted_mixed.is_none()
+                                || _end_strategy == crate::EndStrategy::Exhaustive
+                            {
+                                usage.record_tool_call();
+                            }
+                            let _ = tx
+                                .send(Ok(AgentStreamEvent::ToolCallComplete {
+                                    tool_name: call.tool_name.clone(),
+                                    tool_call_id: call.tool_call_id.clone(),
+                                }))
+                                .await;
+                        }
+                        let results = if accepted_mixed.is_some()
+                            && _end_strategy == crate::EndStrategy::Early
+                        {
+                            tool_calls
+                                .into_iter()
+                                .map(|call| {
+                                    (
+                                        call,
+                                        Ok(serdes_ai_tools::ToolReturn::text(
+                                            "Skipped: final output accepted",
+                                        )),
+                                    )
+                                })
+                                .collect()
+                        } else {
+                            crate::stream_tools::execute(
+                                &tools,
+                                tool_calls,
+                                &policy_context,
+                                parallel_tools,
+                                max_concurrent_tools,
+                            )
+                            .await
+                        };
+                        for (call, result) in results {
+                            let success = result.is_ok();
+                            let error = result.as_ref().err().map(ToString::to_string);
+                            let mut part = match result {
+                                Ok(value) => ToolReturnPart::new(&call.tool_name, value.content),
+                                Err(_) => {
+                                    ToolReturnPart::error(&call.tool_name, "Tool execution failed")
+                                }
+                            };
+                            if let Some(id) = &call.tool_call_id {
+                                part = part.with_tool_call_id(id);
+                            }
+                            tool_req.parts.push(ModelRequestPart::ToolReturn(part));
+                            let _ = tx
+                                .send(Ok(AgentStreamEvent::ToolExecuted {
+                                    tool_name: call.tool_name,
+                                    tool_call_id: call.tool_call_id,
+                                    success,
+                                    error,
+                                }))
+                                .await;
+                        }
+                        // A mixed final-output call is not executed as an application tool.
+                        // Acknowledge it before asking for the next final response.
+                        for part in &response.parts {
+                            if let ModelResponsePart::ToolCall(call) = part {
+                                if output_schema.tool_name() == Some(call.tool_name.as_str()) {
+                                    let mut result = ToolReturnPart::new(
+                                        &call.tool_name,
+                                        "Output deferred until ordinary tools complete",
+                                    );
+                                    if let Some(id) = &call.tool_call_id {
+                                        result = result.with_tool_call_id(id);
+                                    }
+                                    tool_req.parts.push(ModelRequestPart::ToolReturn(result));
+                                }
+                            }
+                        }
+
+                        if !tool_req.parts.is_empty() {
+                            messages.push(tool_req);
+                            checkpoint!(
+                                checkpoint_sink,
+                                run_id_clone,
+                                step,
+                                CheckpointBoundary::AfterTools,
+                                messages,
+                                Some(&response),
+                                usage,
+                                tx
+                            );
+                        }
+
+                        if let Some(output) = accepted_mixed {
+                            validated_output = Some(output);
+                            finished = true;
+                            let _ = tx.send(Ok(AgentStreamEvent::OutputReady)).await;
+                        }
+                        continue;
+                    }
+
+                    // Parse and validate through the actual configured output type before
+                    // any completion event. Partial token/filter output remains partial.
+                    let partial = matches!(
+                        finish_reason,
+                        Some(FinishReason::Length | FinishReason::ContentFilter)
+                    );
+                    if partial {
+                        validated_output = None;
+                    }
+                    if !partial {
+                        policy_context.retry_count = output_retries;
+                        let validation = crate::stream_output::validate(
+                            output_schema.as_ref(),
+                            &output_validators,
+                            &response,
+                            &policy_context,
+                        )
+                        .await;
+                        if let Ok(value) = validation {
+                            validated_output = Some(value);
+                        } else {
+                            output_retries += 1;
+                            let mut rejected = ModelRequest::new();
+                            rejected
+                                .parts
+                                .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
+                            messages.push(rejected);
+                            if output_retries > max_output_retries {
+                                checkpoint!(
+                                    checkpoint_sink,
+                                    run_id_clone,
+                                    step,
+                                    CheckpointBoundary::ValidationFailed,
+                                    messages,
+                                    Some(&response),
+                                    usage,
+                                    tx
+                                );
+                                let _ = tx.try_send(Err(AgentRunError::OutputValidationFailed(
+                                    crate::OutputValidationError::failed(
+                                        "Output validation retry budget exhausted",
+                                    ),
+                                )));
+                                return;
+                            }
+                            let mut retry = ModelRequest::new();
+                            let output_calls: Vec<_> = response
+                                .parts
+                                .iter()
+                                .filter_map(|p| match p {
+                                    ModelResponsePart::ToolCall(call)
+                                        if output_schema.tool_name()
+                                            == Some(call.tool_name.as_str()) =>
+                                    {
+                                        Some(call)
+                                    }
+                                    _ => None,
+                                })
+                                .collect();
+                            if output_calls.is_empty() {
+                                retry.parts.push(ModelRequestPart::RetryPrompt(serdes_ai_core::messages::RetryPromptPart::new("Output did not pass validation; return a valid final output")));
+                            } else {
+                                for call in output_calls {
+                                    let mut part = serdes_ai_core::messages::RetryPromptPart::new("Output did not pass validation; return a valid final output").with_tool_name(&call.tool_name);
+                                    if let Some(id) = &call.tool_call_id {
+                                        part = part.with_tool_call_id(id);
+                                    }
+                                    retry.parts.push(ModelRequestPart::RetryPrompt(part));
+                                }
+                            }
+                            messages.push(retry);
+                            continue;
+                        }
+                    }
+                    // No tool calls - check finish condition
+                    if partial
+                        || _end_strategy == crate::EndStrategy::Early
+                        || finish_reason.is_some_and(|r| r.is_complete())
+                        || output_schema.tool_name().is_some()
+                    {
+                        // Add final response to messages for complete history
+                        let mut response_req = ModelRequest::new();
+                        response_req
+                            .parts
+                            .push(ModelRequestPart::ModelResponse(Box::new(response.clone())));
+                        messages.push(response_req);
+
+                        finished = true;
+                        if !partial {
+                            let _ = tx.send(Ok(AgentStreamEvent::OutputReady)).await;
+                        }
+                    } else if let Some(r) = finish_reason {
+                        // finish_reason is Some but NOT complete, and there were no
+                        // tool calls (the tool-call path `continue`d before reaching
+                        // here). The loop is about to silently re-issue the same
+                        // request - make that observable. NOT a behavior change:
+                        // termination is unchanged; termination-on-Length/etc. is a
+                        // separate P2 follow-up. `let _ = &r` keeps `r` "used" so the
+                        // no-op `warn!` build (tracing-integration off) stays clean.
+                        let _ = &r;
+                        warn!(
+                            finish_reason = ?r,
+                            "stream completed with a non-terminal finish reason and no tool calls; re-issuing request (this can loop - see follow-up for Length/ContentFilter/Error handling)"
+                        );
+                    }
+                }
+
+                checkpoint!(
+                    checkpoint_sink,
+                    run_id_clone,
+                    step,
+                    CheckpointBoundary::Terminal,
                     messages,
+                    responses.last(),
                     usage,
-                }))
+                    tx
+                );
+                if let Some(value) = validated_output {
+                    *output_writer.lock().unwrap() = Some(Box::new(value));
+                }
+                // Emit RunComplete
+                let _ = tx
+                    .send(Ok(AgentStreamEvent::RunComplete {
+                        run_id: run_id_clone,
+                        messages,
+                        usage,
+                    }))
+                    .await;
+            };
+            supervisor
+                .supervise(work, supervisor_tx, supervisor_token)
                 .await;
         });
 
         Ok(AgentStream {
+            output,
             rx,
             cancel_token: Some(cancel_token),
         })
@@ -1543,8 +1366,8 @@ impl AgentStream {
     /// [`AgentStream::new_with_cancel`], this will trigger cancellation.
     /// The stream will emit a `Cancelled` event with any partial results.
     ///
-    /// If this stream was created without cancellation support (via `new`),
-    /// this method does nothing.
+    /// Both constructors support cancellation. Dropping the receiver also stops
+    /// in-flight work and records ConsumerDetached when a sink is configured.
     pub fn cancel(&self) {
         if let Some(ref token) = self.cancel_token {
             token.cancel();

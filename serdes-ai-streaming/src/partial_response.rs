@@ -65,6 +65,7 @@ impl PartialPart {
 /// Accumulates streaming deltas into a complete response.
 #[derive(Debug, Clone)]
 pub struct PartialResponse {
+    terminal_metadata: Option<serdes_ai_core::messages::TerminalMetadata>,
     parts: Vec<PartialPart>,
     model_name: Option<String>,
     usage: Option<RequestUsage>,
@@ -84,6 +85,7 @@ impl PartialResponse {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            terminal_metadata: None,
             parts: Vec::new(),
             model_name: None,
             usage: None,
@@ -256,8 +258,24 @@ impl PartialResponse {
             finish_reason: self.finish_reason,
             usage: self.usage,
             vendor_id: self.vendor_id,
-            vendor_details: None,
+            vendor_details: self.terminal_metadata.and_then(|m| m.details),
             kind: "response".to_string(),
+        }
+    }
+
+    /// Preserve terminal metadata when consuming native model events.
+    pub fn handle_stream_complete(
+        &mut self,
+        event: &serdes_ai_core::messages::StreamCompleteEvent,
+    ) {
+        self.finish_reason = Some(event.finish_reason);
+        self.usage = event.request_usage();
+        self.terminal_metadata = event.metadata.clone();
+        if let Some(metadata) = &event.metadata {
+            self.vendor_id = metadata.response_id.clone();
+            if metadata.model.is_some() {
+                self.model_name = metadata.model.clone();
+            }
         }
     }
 
