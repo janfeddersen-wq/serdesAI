@@ -474,7 +474,7 @@ impl ToolCallPart {
 ///
 /// Used for models that support "thinking" or chain-of-thought reasoning,
 /// like Claude's extended thinking feature.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ThinkingPart {
     /// The thinking content.
     pub content: String,
@@ -490,6 +490,21 @@ pub struct ThinkingPart {
     /// Provider-specific details/metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_details: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+impl std::fmt::Debug for ThinkingPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThinkingPart")
+            .field("id", &self.id)
+            .field("provider_name", &self.provider_name)
+            .field("content", &"<redacted>")
+            .field("signature", &self.signature.as_ref().map(|_| "<redacted>"))
+            .field(
+                "provider_details",
+                &self.provider_details.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 impl ThinkingPart {

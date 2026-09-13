@@ -45,8 +45,8 @@ pub use content::{
 };
 pub use events::{
     BuiltinToolCallPartDelta, ModelResponsePartDelta, ModelResponseStreamEvent, PartDeltaEvent,
-    PartEndEvent, PartStartEvent, StreamCompleteEvent, TextPartDelta, ThinkingPartDelta,
-    ToolCallPartDelta,
+    PartEndEvent, PartStartEvent, StreamCompleteEvent, TerminalMetadata, TextPartDelta,
+    ThinkingPartDelta, ToolCallPartDelta,
 };
 pub use media::{AudioMediaType, DocumentMediaType, ImageMediaType, VideoMediaType};
 pub use parts::{

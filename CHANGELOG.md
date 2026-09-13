@@ -5,6 +5,103 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Typed streaming and execution parity
+- Align nonstreaming cooperative cancellation with bounded awaited checkpoint
+  saves; terminal success wins, failed saves do not recursively persist, and
+  pending cancellation stops model/tool work after nonterminal saves.
+- Preserve supported Responses multi-content native replay grouping through
+  streaming, nonstreaming and serde without duplicate native message IDs.
+- Reject malformed mixed final-output calls without dispatching ordinary tools;
+  retain paired retry history in both execution paths.
+- Add Agent::run_stream_typed and TypedAgentStream::finish/take_output to recover
+  validator-transformed Output after terminal checkpoint success, without changing
+  existing event streams. Partial token/filter outcomes have no typed output.
+- Honor streaming parallel-tool settings with bounded, ordered results and retries.
+- Correct explicit output-tool mixed-call Early/Exhaustive decisions in streaming
+  and nonstreaming; acknowledge skipped calls without executing early side effects.
+- Support interleaved Responses message content slots; retain/check indexed
+  reasoning summaries and native content metadata. See PR_NOTES for snapshot-only
+  metadata and explicit cooperative-cancellation/replay guarantees.
+
+### Responses terminal metadata
+- Add serde-default StreamCompleteEvent.metadata and TerminalMetadata, mapped to
+  existing response vendor fields; add terminal handlers to streaming accumulators.
+- Preserve bounded native output records and detailed usage without automatic opaque
+  item replay. Refusal maps to ContentFilter. Unsupported indexed stream content
+  fails explicitly instead of concatenating slots incorrectly.
+- Add optional Agent RunUsage.token_totals_complete. StreamCompleteEvent/RunUsage
+  struct literals require new fields; old serde data remains readable.
+- Redact ModelResponse Debug. See latest PR_NOTES for incomplete scope and limits.
+
+### Streaming lifetime and validation
+- Unify both streaming constructors; cancellation/consumer closure now covers
+  the whole worker lifetime, including final delivery, tools and summaries.
+- Add ConsumerDetached and ValidationFailed checkpoint boundaries. Committed
+  successful terminal checkpoints win over later consumer disappearance.
+- Run configured schema parsing, async output validators and dynamic prompts in
+  streaming; validation exhaustion errors instead of signaling valid output.
+- Add explicit SummarizeOrTruncate strategy; Summarize stops on summary failure.
+  Summary requests are bounded and their usage counts toward run limits.
+- Enum additions require exhaustive-match updates. AgentStream stays type-erased;
+  parallel tools and complete mixed-output parity remain unresolved (PR_NOTES).
+
+### Native Responses SSE and checkpoint hardening
+- Replace Responses streaming JSON fallback with true incremental SSE transport;
+  preserve reasoning/function items and reject premature EOF/provider failures.
+- Map incomplete_details max_output_tokens to Length and content_filter separately;
+  skip tool dispatch for both partial terminal reasons in streaming agents.
+- Add optional CheckpointSink partial_interval and save_timeout, Partial boundary,
+  cancellation-aware policy/event delivery, and additional failure snapshots.
+- Re-export lifecycle APIs through the serdes-ai facade; redact ThinkingPartDelta
+  Debug. ResponsesApiResponse gains incomplete_details (struct-literal breaking).
+- See the latest PR_NOTES section for exact supported events and remaining gaps.
+
+### Agent lifecycle and context hooks
+- Add awaited application `CheckpointSink` and versioned, serializable
+  `AgentCheckpoint` at request/response/tool-batch/terminal boundaries, including
+  partial streaming cancellation/provider failures. Snapshot Debug is redacted.
+- Apply configured history processors before every primary request in streaming
+  and non-streaming runs and update canonical active history. Custom policy /
+  processors disable legacy streaming automatic compression.
+- Add fallible async `ContextPolicy`, actual model/settings/tools context, and
+  explicit `ContextFailurePolicy` (Stop by default, KeepHistory opt-in).
+- Select cancellation during streaming request establishment and pending tools;
+  non-streaming cancellation now covers the whole step. No automatic side-effect
+  replay or exactly-once guarantee is introduced.
+- New AgentRunError ContextPolicy/Checkpoint variants require exhaustive matches
+  to be updated. Existing history_processor API remains source-compatible.
+- See PR_NOTES.md for precise boundary guarantees and remaining cancellation,
+  provider, archive-retention and resumability gaps.
+
+### Fixed
+- OpenAI Chat SSE rejects premature EOF with `IncompleteStream`, rejects malformed
+  frames and structured provider errors, preserves split UTF-8 and all deltas in a
+  frame, closes thinking/tool/text parts deterministically, and emits completion
+  once. Usage-only frames are retained; absent usage remains absent.
+- Native Chat token limits select `max_completion_tokens` for reasoning profiles,
+  o4 and GPT-5 names. `stream_usage` is honored instead of forced on.
+- Both streaming agent loops stop on `Length` without dispatching truncated tools
+  or reissuing the request. Interrupted native Chat tools never reach dispatch.
+- Buffered Responses rejects cancelled/in-progress statuses, rejects malformed
+  function arguments rather than substituting `{}`, and replays native reasoning
+  and function items in order. Empty-summary encrypted reasoning is retained.
+- Thinking and Responses item Debug output redacts reasoning payloads.
+
+### Added
+- `OpenAIChatModel::with_max_completion_tokens(bool)` overrides cap-key selection
+  for aliases; `with_finish_reason_terminal(bool)` explicitly permits compatible
+  endpoints that finish at clean EOF without `[DONE]` (default remains strict).
+
+### Compatibility
+- Stricter Chat error behavior affects adapters sharing `OpenAIStreamParser`.
+- New public `ResponseInput::Item` variant, `ResponsesApiRequest::include` field,
+  and `ResponseOutputItem::Reasoning::encrypted_content` field require downstream
+  exhaustive matches/struct literals to be updated. These are source-breaking.
+- Responses is still a buffered HTTP fallback, not native SSE. See PR_NOTES.md
+  for coverage and remaining work. Nothing in this section is published yet.
+
 ## [0.3.0] - 2026-08-24
 
 Combined release integrating PRs #51, #52, #53, #54 and #55. Streaming is now a

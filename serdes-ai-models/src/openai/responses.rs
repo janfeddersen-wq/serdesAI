@@ -18,9 +18,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serdes_ai_core::messages::{
-    ImageContent, ModelResponseStreamEvent, PartStartEvent, RetryPromptPart, StreamCompleteEvent,
-    TextPart, ThinkingPart, ToolCallArgs, ToolCallPart, ToolReturnPart, UserContent,
-    UserContentPart, UserPromptPart,
+    ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs, ToolCallPart,
+    ToolReturnPart, UserContent, UserContentPart, UserPromptPart,
 };
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, ModelSettings,
@@ -234,6 +233,8 @@ impl Serialize for TruncationMode {
 pub struct ResponsesApiRequest {
     /// Model to use.
     pub model: String,
+    /// Request encrypted reasoning for stateless replay.
+    pub include: Vec<String>,
     /// Input messages/content.
     pub input: Vec<ResponseInput>,
     /// System instructions (replaces system message).
@@ -296,7 +297,7 @@ pub struct TruncationConfig {
 }
 
 /// Input item for the Responses API.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "role")]
 #[allow(missing_docs)]
 pub enum ResponseInput {
@@ -316,6 +317,15 @@ pub enum ResponseInput {
         tool_call_id: String,
         content: String,
     },
+    /// Native Responses item (reasoning, function call, or function output).
+    #[serde(untagged)]
+    Item(JsonValue),
+}
+
+impl std::fmt::Debug for ResponseInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ResponseInput(<redacted>)")
+    }
 }
 
 /// Content for response input.
@@ -494,6 +504,8 @@ pub struct ResponsesApiResponse {
     pub usage: Option<ResponseUsage>,
     /// Response status.
     pub status: ResponseStatus,
+    /// Provider reason for a partial response.
+    pub incomplete_details: Option<JsonValue>,
     /// Error if any.
     pub error: Option<ResponseError>,
     /// Metadata.
@@ -527,7 +539,7 @@ pub struct ResponseError {
 }
 
 /// Output item from the Responses API.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub enum ResponseOutputItem {
@@ -535,6 +547,7 @@ pub enum ResponseOutputItem {
     #[serde(rename = "reasoning")]
     Reasoning {
         id: String,
+        encrypted_content: Option<String>,
         #[serde(default)]
         summary: Vec<ReasoningSummaryItem>,
         status: Option<String>,
@@ -600,12 +613,18 @@ pub enum ResponseOutputItem {
 }
 
 /// Reasoning summary item.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[allow(missing_docs)]
 pub enum ReasoningSummaryItem {
     #[serde(rename = "summary_text")]
     Text { text: String },
+}
+
+impl std::fmt::Debug for ResponseOutputItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ResponseOutputItem(<redacted>)")
+    }
 }
 
 /// Message content item.
@@ -851,7 +870,7 @@ impl OpenAIResponsesModel {
                     }
                     ModelRequestPart::ModelResponse(response) => {
                         // Add the assistant response to inputs for proper alternation
-                        inputs.push(self.convert_response_to_input(response));
+                        inputs.extend(self.convert_response_to_inputs(response));
                     }
                 }
             }
@@ -907,10 +926,10 @@ impl OpenAIResponsesModel {
     }
 
     fn convert_tool_return(&self, tool_ret: &ToolReturnPart) -> ResponseInput {
-        ResponseInput::Tool {
-            tool_call_id: tool_ret.tool_call_id.clone().unwrap_or_default(),
-            content: tool_ret.content.to_string_content(),
-        }
+        ResponseInput::Item(serde_json::json!({
+            "type":"function_call_output", "call_id":tool_ret.tool_call_id,
+            "output":tool_ret.content.to_string_content(),
+        }))
     }
 
     fn convert_retry_prompt(&self, retry: &RetryPromptPart) -> ResponseInput {
@@ -919,40 +938,46 @@ impl OpenAIResponsesModel {
         }
     }
 
-    /// Convert a ModelResponse to an assistant input for multi-turn conversations.
-    fn convert_response_to_input(&self, response: &ModelResponse) -> ResponseInput {
-        let mut content_parts = Vec::new();
-
-        for part in &response.parts {
-            match part {
-                ModelResponsePart::Text(text) => {
-                    content_parts.push(text.content.clone());
-                }
-                ModelResponsePart::ToolCall(_) => {
-                    // Tool calls are handled by the model, not included in assistant input
-                }
-                ModelResponsePart::Thinking(_) => {
-                    // Thinking parts are not sent back
-                }
-                ModelResponsePart::File(_) => {
-                    // Files are not sent back
-                }
-                ModelResponsePart::BuiltinToolCall(_) => {
-                    // Builtin tool calls are not sent back
-                }
-            }
+    /// Replay native items in their original order, not as invented Chat fields.
+    fn convert_response_to_inputs(&self, response: &ModelResponse) -> Vec<ResponseInput> {
+        if let Some(items) = super::responses_metadata::passive_replay(response) {
+            return items.into_iter().map(ResponseInput::Item).collect();
         }
-
-        let content = if content_parts.is_empty() {
-            ResponseInputContent::Text(String::new())
-        } else {
-            ResponseInputContent::Text(content_parts.join(""))
-        };
-
-        ResponseInput::Assistant {
-            content,
-            reasoning_id: None,
-        }
+        response
+            .parts
+            .iter()
+            .filter_map(|part| match part {
+                ModelResponsePart::Text(text) => Some(ResponseInput::Assistant {
+                    content: ResponseInputContent::Text(text.content.clone()),
+                    reasoning_id: None,
+                }),
+                ModelResponsePart::Thinking(thinking)
+                    if thinking.provider_name.as_deref() == Some("openai") =>
+                {
+                    let mut item = serde_json::json!({"type":"reasoning", "summary": []});
+                    if let Some(id) = &thinking.id {
+                        item["id"] = id.clone().into();
+                    }
+                    if let Some(details) = &thinking.provider_details {
+                        if let Some(summary) = details.get("summary") {
+                            item["summary"] = summary.clone();
+                        }
+                    }
+                    if let Some(encrypted) = &thinking.signature {
+                        item["encrypted_content"] = encrypted.clone().into();
+                    }
+                    Some(ResponseInput::Item(item))
+                }
+                ModelResponsePart::ToolCall(tool) => Some(ResponseInput::Item(serde_json::json!({
+                    "type":"function_call", "call_id":tool.tool_call_id, "name":tool.tool_name,
+                    "arguments": match &tool.args {
+                        ToolCallArgs::String(value) => value.clone(),
+                        ToolCallArgs::Json(value) => value.to_string(),
+                    }
+                }))),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Convert tool definitions to Responses API format.
@@ -1007,6 +1032,7 @@ impl OpenAIResponsesModel {
 
         ResponsesApiRequest {
             model: self.model_name.clone(),
+            include: vec!["reasoning.encrypted_content".to_owned()],
             input,
             instructions,
             tools,
@@ -1037,11 +1063,26 @@ impl OpenAIResponsesModel {
             return Err(ModelError::api("Response failed with unknown error"));
         }
 
+        match resp.status {
+            ResponseStatus::Cancelled => return Err(ModelError::Cancelled),
+            ResponseStatus::InProgress => {
+                return Err(ModelError::incomplete_stream(
+                    "Responses endpoint returned a non-terminal response",
+                ));
+            }
+            _ => {}
+        }
         let mut parts = Vec::new();
+        let mut refused = false;
 
         for output in resp.output {
             match output {
-                ResponseOutputItem::Reasoning { id, summary, .. } => {
+                ResponseOutputItem::Reasoning {
+                    id,
+                    summary,
+                    encrypted_content,
+                    ..
+                } => {
                     // Convert reasoning to ThinkingPart
                     let content: String = summary
                         .iter()
@@ -1051,10 +1092,15 @@ impl OpenAIResponsesModel {
                         .collect::<Vec<_>>()
                         .join("\n");
 
-                    if !content.is_empty() {
-                        let thinking = ThinkingPart::new(content)
+                    {
+                        let mut thinking = ThinkingPart::new(content)
                             .with_id(&id)
                             .with_provider_name("openai");
+                        thinking.signature = encrypted_content;
+                        thinking.provider_details = Some(serde_json::Map::from_iter([(
+                            "summary".to_owned(),
+                            serde_json::to_value(&summary).unwrap_or_default(),
+                        )]));
                         parts.push(ModelResponsePart::Thinking(thinking));
                     }
                 }
@@ -1066,8 +1112,8 @@ impl OpenAIResponsesModel {
                                     parts.push(ModelResponsePart::Text(TextPart::new(text)));
                                 }
                             }
-                            MessageContentItem::Refusal { refusal } => {
-                                return Err(ModelError::ContentFiltered(refusal));
+                            MessageContentItem::Refusal { .. } => {
+                                refused = true;
                             }
                         }
                     }
@@ -1078,8 +1124,9 @@ impl OpenAIResponsesModel {
                     arguments,
                     ..
                 } => {
-                    let args: JsonValue =
-                        serde_json::from_str(&arguments).unwrap_or(serde_json::json!({}));
+                    let args: JsonValue = serde_json::from_str(&arguments).map_err(|_| {
+                        ModelError::invalid_response("Invalid Responses function-call arguments")
+                    })?;
                     parts.push(ModelResponsePart::ToolCall(
                         ToolCallPart::new(name, ToolCallArgs::Json(args))
                             .with_tool_call_id(call_id),
@@ -1097,11 +1144,29 @@ impl OpenAIResponsesModel {
             }
         }
 
-        let finish_reason = match resp.status {
-            ResponseStatus::Completed => Some(FinishReason::Stop),
-            ResponseStatus::Incomplete => Some(FinishReason::Length),
-            ResponseStatus::Cancelled => Some(FinishReason::Stop),
-            _ => None,
+        let finish_reason = if refused {
+            Some(FinishReason::ContentFilter)
+        } else {
+            match resp.status {
+                ResponseStatus::Completed => Some(FinishReason::Stop),
+                ResponseStatus::Incomplete => Some(
+                    match resp
+                        .incomplete_details
+                        .as_ref()
+                        .and_then(|v| v["reason"].as_str())
+                    {
+                        Some("max_output_tokens") => FinishReason::Length,
+                        Some("content_filter") => FinishReason::ContentFilter,
+                        _ => {
+                            return Err(ModelError::invalid_response(
+                                "Unknown Responses incomplete reason",
+                            ));
+                        }
+                    },
+                ),
+                ResponseStatus::Cancelled => Some(FinishReason::Stop),
+                _ => None,
+            }
         };
 
         let usage = resp.usage.map(|u| RequestUsage {
@@ -1203,83 +1268,66 @@ impl Model for OpenAIResponsesModel {
             return Err(self.handle_error_response(status, &body));
         }
 
-        let resp: ResponsesApiResponse = response
+        let raw: JsonValue = response
             .json()
             .await
-            .map_err(|e| ModelError::invalid_response(e.to_string()))?;
-
-        self.process_response(resp)
+            .map_err(|_| ModelError::invalid_response("Invalid Responses JSON"))?;
+        let metadata = super::responses_metadata::terminal(&raw)?;
+        // Only native parts enter replay conversion. All other output records are
+        // retained in bounded archival metadata, including future provider types.
+        let mut parsed = raw.clone();
+        if let Some(items) = parsed["output"].as_array_mut() {
+            items.retain(|item| {
+                matches!(
+                    item["type"].as_str(),
+                    Some("message" | "reasoning" | "function_call")
+                )
+            });
+        }
+        let resp: ResponsesApiResponse = serde_json::from_value(parsed)
+            .map_err(|_| ModelError::invalid_response("Unsupported Responses JSON shape"))?;
+        let mut response = self.process_response(resp)?;
+        metadata.apply(&mut response);
+        Ok(response)
     }
 
-    /// Stream a response through the non-streaming request fallback.
+    /// Stream native Responses SSE incrementally.
     async fn request_stream(
         &self,
         messages: &[ModelRequest],
         settings: &ModelSettings,
         params: &ModelRequestParameters,
     ) -> Result<StreamedResponse, ModelError> {
-        // For now, fall back to non-streaming
-        // TODO: Implement proper streaming with ResponsesStreamParser
-        let response = self.request(messages, settings, params).await?;
-
-        let ModelResponse {
-            parts,
-            finish_reason,
-            usage,
-            ..
-        } = response;
-
-        // Part events first, terminal event last; the request error above
-        // short-circuits failures before any event is emitted.
-        let mut events: Vec<Result<ModelResponseStreamEvent, ModelError>> = parts
-            .into_iter()
-            .enumerate()
-            .map(|(idx, part)| {
-                Ok(ModelResponseStreamEvent::PartStart(PartStartEvent::new(
-                    idx, part,
-                )))
-            })
-            .collect();
-
-        events.push(Ok(stream_complete_event(finish_reason, usage.as_ref())));
-
-        Ok(Box::pin(futures::stream::iter(events)))
+        let body = self.build_request(messages, settings, params, true);
+        let mut request = self
+            .client
+            .post(format!("{}/responses", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Accept", "text/event-stream")
+            .timeout(settings.timeout.unwrap_or(self.default_timeout));
+        if let Some(org) = &self.organization {
+            request = request.header("OpenAI-Organization", org);
+        }
+        if let Some(project) = &self.project {
+            request = request.header("OpenAI-Project", project);
+        }
+        let response = request.json(&body).send().await?;
+        if !response.status().is_success() {
+            return Err(self.handle_error_response(
+                response.status().as_u16(),
+                &response.text().await.unwrap_or_default(),
+            ));
+        }
+        Ok(Box::pin(super::responses_stream::ResponsesStream::new(
+            response.bytes_stream(),
+        )))
     }
-}
-
-/// Build the terminal event from the finish reason and usage the
-/// non-streaming path mapped from the completed response.
-///
-/// Usage fields absent from the response stay `None`; a status the
-/// non-streaming mapping leaves unmapped defaults to [`FinishReason::Stop`],
-/// matching the chat stream parser's terminal default.
-fn stream_complete_event(
-    finish_reason: Option<FinishReason>,
-    usage: Option<&RequestUsage>,
-) -> ModelResponseStreamEvent {
-    let mut event = StreamCompleteEvent::new(finish_reason.unwrap_or(FinishReason::Stop));
-
-    if let Some(u) = usage {
-        if let Some(tokens) = u.request_tokens {
-            event = event.with_input_tokens(tokens);
-        }
-        if let Some(tokens) = u.response_tokens {
-            event = event.with_output_tokens(tokens);
-        }
-        if let Some(tokens) = u.cache_creation_tokens {
-            event = event.with_cache_creation_tokens(tokens);
-        }
-        if let Some(tokens) = u.cache_read_tokens {
-            event = event.with_cache_read_tokens(tokens);
-        }
-    }
-
-    ModelResponseStreamEvent::StreamComplete(event)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serdes_ai_core::messages::ModelResponseStreamEvent;
 
     /// Every effort variant serializes as its API string; custom values
     /// pass through verbatim.
@@ -1500,7 +1548,14 @@ mod tests {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .and(wiremock::matchers::path("/responses"))
-            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(body))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(format!(
+                        "data: {}\n\n",
+                        serde_json::json!({"type":"response.completed", "response":body})
+                    )),
+            )
             .mount(&server)
             .await;
 
@@ -1543,8 +1598,8 @@ mod tests {
             Some(ModelResponseStreamEvent::PartStart(start)) => {
                 assert_eq!(start.index, 0);
                 assert!(
-                    matches!(&start.part, ModelResponsePart::Text(t) if t.content == "Hello"),
-                    "expected the buffered text part first, got {:?}",
+                    matches!(&start.part, ModelResponsePart::Text(t) if t.content.is_empty()),
+                    "expected the incremental text part start, got {:?}",
                     start.part
                 );
             }

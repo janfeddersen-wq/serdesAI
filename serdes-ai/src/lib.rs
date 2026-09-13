@@ -303,8 +303,9 @@ pub use serdes_ai_core::{
 
 // Agent
 pub use serdes_ai_agent::{
-    Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent, EndStrategy,
-    ModelConfig, RunContext, RunOptions, StepResult,
+    Agent, AgentBuilder, AgentCheckpoint, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent,
+    CheckpointBoundary, CheckpointSink, ContextFailurePolicy, ContextPolicy, ContextPolicyInput,
+    EndStrategy, ModelConfig, RunContext, RunOptions, StepResult, TypedAgentStream,
 };
 
 // Models
@@ -426,7 +427,7 @@ pub mod prelude {
     // Agent
     pub use crate::agent::{
         Agent, AgentBuilder, AgentRun, AgentRunResult, AgentStream, AgentStreamEvent, EndStrategy,
-        ModelConfig, RunContext, RunOptions,
+        ModelConfig, RunContext, RunOptions, TypedAgentStream,
     };
 
     // Models

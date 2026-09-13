@@ -234,7 +234,10 @@ pub struct AgentBuilder<Deps = (), Output = String> {
     max_output_retries: u32,
     max_tool_retries: u32,
     usage_limits: Option<UsageLimits>,
-    history_processors: Vec<Box<dyn HistoryProcessor<Deps>>>,
+    history_processors: Vec<Arc<dyn HistoryProcessor<Deps>>>,
+    context_policy: Option<Arc<dyn crate::lifecycle::ContextPolicy<Deps>>>,
+    context_failure: crate::lifecycle::ContextFailurePolicy,
+    checkpoint_sink: Option<Arc<dyn crate::lifecycle::CheckpointSink>>,
     instrument: Option<InstrumentationSettings>,
     parallel_tool_calls: bool,
     max_concurrent_tools: Option<usize>,
@@ -299,6 +302,9 @@ where
             max_tool_retries: 3,
             usage_limits: None,
             history_processors: Vec::new(),
+            context_policy: None,
+            context_failure: Default::default(),
+            checkpoint_sink: None,
             instrument: None,
             parallel_tool_calls: true,
             max_concurrent_tools: None,
@@ -652,10 +658,35 @@ where
         self
     }
 
+    /// Install a fallible context policy and disable legacy automatic compression.
+    pub fn context_policy(
+        mut self,
+        policy: impl crate::lifecycle::ContextPolicy<Deps> + 'static,
+    ) -> Self {
+        self.context_policy = Some(Arc::new(policy));
+        self
+    }
+    /// Explicit behavior when the custom policy fails (default: stop).
+    pub fn context_failure_policy(
+        mut self,
+        policy: crate::lifecycle::ContextFailurePolicy,
+    ) -> Self {
+        self.context_failure = policy;
+        self
+    }
+    /// Await this persistence hook at lifecycle boundaries.
+    pub fn checkpoint_sink(
+        mut self,
+        sink: impl crate::lifecycle::CheckpointSink + 'static,
+    ) -> Self {
+        self.checkpoint_sink = Some(Arc::new(sink));
+        self
+    }
+
     /// Add history processor.
     #[must_use]
     pub fn history_processor<P: HistoryProcessor<Deps> + 'static>(mut self, processor: P) -> Self {
-        self.history_processors.push(Box::new(processor));
+        self.history_processors.push(Arc::new(processor));
         self
     }
 
@@ -753,17 +784,20 @@ where
             name: self.name,
             model_settings: self.model_settings,
             static_system_prompt,
-            instruction_fns: self.instruction_fns,
-            system_prompt_fns: self.system_prompt_fns,
+            instruction_fns: self.instruction_fns.into_iter().map(Arc::from).collect(),
+            system_prompt_fns: self.system_prompt_fns.into_iter().map(Arc::from).collect(),
             tools: self.tools,
             cached_tool_defs,
-            output_schema,
-            output_validators: self.output_validators,
+            output_schema: Arc::from(output_schema),
+            output_validators: self.output_validators.into_iter().map(Arc::from).collect(),
             end_strategy: self.end_strategy,
             max_output_retries: self.max_output_retries,
             max_tool_retries: self.max_tool_retries,
             usage_limits: self.usage_limits,
             history_processors: self.history_processors,
+            context_policy: self.context_policy,
+            context_failure: self.context_failure,
+            checkpoint_sink: self.checkpoint_sink,
             instrument: self.instrument,
             parallel_tool_calls: self.parallel_tool_calls,
             max_concurrent_tools: self.max_concurrent_tools,
@@ -794,6 +828,9 @@ impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
             max_tool_retries: self.max_tool_retries,
             usage_limits: self.usage_limits,
             history_processors: self.history_processors,
+            context_policy: self.context_policy,
+            context_failure: self.context_failure,
+            checkpoint_sink: self.checkpoint_sink,
             instrument: self.instrument,
             parallel_tool_calls: self.parallel_tool_calls,
             max_concurrent_tools: self.max_concurrent_tools,
@@ -823,6 +860,9 @@ impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
             max_tool_retries: self.max_tool_retries,
             usage_limits: self.usage_limits,
             history_processors: self.history_processors,
+            context_policy: self.context_policy,
+            context_failure: self.context_failure,
+            checkpoint_sink: self.checkpoint_sink,
             instrument: self.instrument,
             parallel_tool_calls: self.parallel_tool_calls,
             max_concurrent_tools: self.max_concurrent_tools,
@@ -855,6 +895,9 @@ impl<Deps: Send + Sync + 'static> AgentBuilder<Deps, String> {
             max_tool_retries: self.max_tool_retries,
             usage_limits: self.usage_limits,
             history_processors: self.history_processors,
+            context_policy: self.context_policy,
+            context_failure: self.context_failure,
+            checkpoint_sink: self.checkpoint_sink,
             instrument: self.instrument,
             parallel_tool_calls: self.parallel_tool_calls,
             max_concurrent_tools: self.max_concurrent_tools,

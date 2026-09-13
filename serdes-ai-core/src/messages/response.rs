@@ -10,7 +10,7 @@ use super::parts::{BuiltinToolCallPart, FilePart, TextPart, ThinkingPart, ToolCa
 use crate::usage::RequestUsage;
 
 /// A complete model response containing multiple parts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelResponse {
     /// The response parts.
     pub parts: Vec<ModelResponsePart>,
@@ -40,6 +40,14 @@ fn default_response_kind() -> String {
     "response".to_string()
 }
 
+impl std::fmt::Debug for ModelResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ModelResponse")
+            .field("part_count", &self.parts.len())
+            .field("finish_reason", &self.finish_reason)
+            .finish_non_exhaustive()
+    }
+}
 impl ModelResponse {
     /// Create a new empty response.
     #[must_use]
