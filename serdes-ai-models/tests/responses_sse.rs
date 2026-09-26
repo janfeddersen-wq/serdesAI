@@ -25,7 +25,7 @@ async fn native(body: String) -> Vec<Result<Event, ModelError>> {
     tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut request = vec![0; 65536];
-        socket.read(&mut request).await.unwrap();
+        let _read = socket.read(&mut request).await.unwrap();
         socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
         // Force every UTF-8 and JSON byte boundary over real chunked HTTP.
         for byte in body.as_bytes() {

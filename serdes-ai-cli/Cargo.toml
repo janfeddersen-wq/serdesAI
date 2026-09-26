@@ -12,15 +12,20 @@ readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
 rust-version.workspace = true
+# Not published in 0.3.0: depends on the git-only streamdown-rs rev c72d9e3,
+# which is newer than streamdown 0.1.4 on crates.io. Will be published once
+# streamdown 0.1.5 is released.
+publish = false
 
 [[bin]]
 name = "serdes-ai"
 path = "src/main.rs"
 
 [dependencies]
-# Streaming markdown rendering. Not published to crates.io, so pinned by
-# revision rather than version: a floating branch would change the rendering
-# under us without any change here.
+# Streaming markdown rendering. The required changes (rev c72d9e3) are newer
+# than streamdown 0.1.4 on crates.io, so pinned by git revision rather than
+# version: a floating branch would change the rendering under us without any
+# change here. Switch to a crates.io version once streamdown 0.1.5 is released.
 unicode-width = "0.2"
 
 streamdown-parser = { git = "https://github.com/fed-stew/streamdown-rs", rev = "c72d9e3" }

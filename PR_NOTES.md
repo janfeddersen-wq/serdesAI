@@ -1,10 +1,9 @@
 # Reliability branch: authoritative current status
 
 Owner: planning-agent-a12d28. Worktree: /Users/gabe/repos/fedstew/serdesAI.
-Branch: feat/reliable-streaming-and-checkpoints. HEAD/base:
-d0aae194fc6a8bf98bd9c1f6206099af4c126046. All work remains uncommitted;
-prior dirty/untracked changes retained. No delegation, commits, publication,
-real-provider calls, or application changes.
+Branch: main. feat/reliable-streaming-and-checkpoints was merged via PR #77
+(96b693b67eb3cbeef789232e843d89da2f4a93be); original base
+d0aae194fc6a8bf98bd9c1f6206099af4c126046. Prepared for the 0.3.0 release.
 
 ## Typed validated streaming output
 
@@ -189,8 +188,9 @@ partials still complete as partial runs but no longer emit OutputReady.
 - AgentStream remains type-erased: validators actually execute, but transformed
   typed output is not exposed by OutputReady. Use non-streaming run for the typed
   result. A generic stream result API remains future work.
-- Streaming tools remain sequential; parallel_tool_calls/max_concurrent_tools
-  parity is NOT implemented in this pass. Mixed output-tool plus ordinary-tool
+- Streaming tool batches honor parallel_tool_calls/max_concurrent_tools
+  (serdes-ai-agent/src/stream_tools.rs, called from stream.rs; see "Tool
+  execution and output decisions" above). Mixed output-tool plus ordinary-tool
   responses still need protocol acknowledgement/parity fixtures. EndStrategy
   follows ordinary-tool priority but exhaustive multi-output behavior is not
   comprehensively verified against run.rs. These are unresolved, not claimed done.

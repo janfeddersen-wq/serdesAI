@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-26
+
+- serdes-ai-cli is not published to crates.io in this release (`publish = false`;
+  it depends on the git-only streamdown-rs rev c72d9e3).
+
 ### Typed streaming and execution parity
 - Align nonstreaming cooperative cancellation with bounded awaited checkpoint
   saves; terminal success wins, failed saves do not recursively persist, and
@@ -102,7 +107,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Responses is still a buffered HTTP fallback, not native SSE. See PR_NOTES.md
   for coverage and remaining work. Nothing in this section is published yet.
 
-## [0.3.0] - 2026-08-24
+### Combined PRs #51-#55 (previously drafted as 0.3.0 on 2026-08-24)
 
 Combined release integrating PRs #51, #52, #53, #54 and #55. Streaming is now a
 fully observable path: providers emit a terminal `StreamComplete` carrying token
