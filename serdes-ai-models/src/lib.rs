@@ -58,6 +58,7 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+mod collect;
 pub mod error;
 pub mod fallback;
 pub mod model;
@@ -165,6 +166,7 @@ pub mod retry;
 pub mod scripted;
 
 // Re-exports
+pub use collect::collect_stream;
 pub use error::{ModelError, ModelResult, ProviderErrorKind};
 pub use fallback::{FallbackModel, RetryOn};
 pub use mock::{FunctionModel, MockModel, TestModel};

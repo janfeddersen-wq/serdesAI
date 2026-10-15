@@ -728,6 +728,8 @@ pub struct OpenAIResponsesModel {
     profile: ModelProfile,
     default_timeout: Duration,
     default_settings: OpenAIResponsesModelSettings,
+    /// `store` request field; `None` omits it (provider default).
+    store: Option<bool>,
 }
 
 impl OpenAIResponsesModel {
@@ -746,6 +748,7 @@ impl OpenAIResponsesModel {
             profile,
             default_timeout: Duration::from_secs(300), // Longer for reasoning
             default_settings: OpenAIResponsesModelSettings::default(),
+            store: None,
         }
     }
 
@@ -785,6 +788,17 @@ impl OpenAIResponsesModel {
     #[must_use]
     pub fn with_reasoning_summary(mut self, summary: ReasoningSummary) -> Self {
         self.default_settings.reasoning_summary = Some(summary);
+        self
+    }
+
+    /// Set the `store` request field on every request made by this model.
+    ///
+    /// `false` asks the provider not to persist the response - required by
+    /// stateless backends. Without a call the field is omitted and the
+    /// provider default applies.
+    #[must_use]
+    pub fn with_store(mut self, store: bool) -> Self {
+        self.store = Some(store);
         self
     }
 
@@ -939,9 +953,16 @@ impl OpenAIResponsesModel {
     }
 
     /// Replay native items in their original order, not as invented Chat fields.
+    ///
+    /// Under `store: false` the server's output archive is never replayed: the
+    /// server persists nothing, and stateless backends stream every item but
+    /// send an empty `response.completed.output`. The turn is rebuilt from the
+    /// collected parts instead, as self-contained items.
     fn convert_response_to_inputs(&self, response: &ModelResponse) -> Vec<ResponseInput> {
-        if let Some(items) = super::responses_metadata::passive_replay(response) {
-            return items.into_iter().map(ResponseInput::Item).collect();
+        if self.store != Some(false) {
+            if let Some(items) = super::responses_metadata::passive_replay(response) {
+                return items.into_iter().map(ResponseInput::Item).collect();
+            }
         }
         response
             .parts
@@ -1045,7 +1066,7 @@ impl OpenAIResponsesModel {
             service_tier: self.default_settings.service_tier,
             truncation,
             user: None,
-            store: None,
+            store: self.store,
             metadata: None,
         }
     }
@@ -1645,6 +1666,273 @@ mod tests {
                 assert_eq!(complete.cache_read_tokens, None);
             }
             other => panic!("expected terminal StreamComplete last, got {:?}", other),
+        }
+    }
+
+    // Store control and store=false conversations (H3, H5, H6).
+
+    /// SSE wire response carrying the given Responses events.
+    fn sse_response(events: &[serde_json::Value]) -> wiremock::ResponseTemplate {
+        let body: String = events
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect();
+        wiremock::ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_string(body)
+    }
+
+    /// Mount `POST /responses` answering every request with `template`.
+    async fn responses_server(template: wiremock::ResponseTemplate) -> wiremock::MockServer {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/responses"))
+            .respond_with(template)
+            .mount(&server)
+            .await;
+        server
+    }
+
+    /// JSON body of the single request the server received.
+    async fn only_sent_body(server: &wiremock::MockServer) -> serde_json::Value {
+        let requests = server
+            .received_requests()
+            .await
+            .expect("mock server records requests");
+        assert_eq!(requests.len(), 1, "expected exactly one captured request");
+        requests[0].body_json().expect("request body is JSON")
+    }
+
+    /// Drive one request (streaming or not) with `messages` and return the
+    /// JSON body the model actually sent.
+    async fn sent_body(
+        model: OpenAIResponsesModel,
+        messages: &[ModelRequest],
+        streaming: bool,
+    ) -> serde_json::Value {
+        use futures::StreamExt;
+
+        let completed = completed_response_body(None);
+        let template = if streaming {
+            sse_response(&[
+                serde_json::json!({"type": "response.completed", "response": completed}),
+            ])
+        } else {
+            wiremock::ResponseTemplate::new(200).set_body_json(completed)
+        };
+        let server = responses_server(template).await;
+        let model = model.with_base_url(server.uri());
+        let settings = ModelSettings::new();
+        let params = ModelRequestParameters::new();
+        if streaming {
+            let mut stream = model
+                .request_stream(messages, &settings, &params)
+                .await
+                .expect("mocked stream request succeeds");
+            while let Some(event) = stream.next().await {
+                event.expect("mocked stream event");
+            }
+        } else {
+            model
+                .request(messages, &settings, &params)
+                .await
+                .expect("mocked request succeeds");
+        }
+        only_sent_body(&server).await
+    }
+
+    fn hello() -> Vec<ModelRequest> {
+        let mut request = ModelRequest::new();
+        request.add_user_prompt("Hello");
+        vec![request]
+    }
+
+    /// H3 - `with_store(v)` sends `"store": v` on both paths; without the call
+    /// the field is absent (the default behavior).
+    #[tokio::test]
+    async fn with_store_sets_store_field() {
+        for streaming in [false, true] {
+            let model = OpenAIResponsesModel::new("gpt-test", "sk-test").with_store(false);
+            let body = sent_body(model, &hello(), streaming).await;
+            assert_eq!(
+                body.get("store"),
+                Some(&serde_json::json!(false)),
+                "streaming={streaming}"
+            );
+
+            let model = OpenAIResponsesModel::new("gpt-test", "sk-test").with_store(true);
+            let body = sent_body(model, &hello(), streaming).await;
+            assert_eq!(
+                body.get("store"),
+                Some(&serde_json::json!(true)),
+                "streaming={streaming}"
+            );
+
+            let model = OpenAIResponsesModel::new("gpt-test", "sk-test");
+            let body = sent_body(model, &hello(), streaming).await;
+            assert!(
+                body.get("store").is_none(),
+                "store must be absent without with_store (streaming={streaming})"
+            );
+        }
+    }
+
+    /// A stateless (`store: false`) turn as a Codex-style backend streams it:
+    /// reasoning, text and a function call arrive ONLY as streamed items -
+    /// `response.completed` carries an empty `output`. Synthetic values only.
+    fn store_false_turn_events() -> Vec<serde_json::Value> {
+        use serde_json::json;
+        vec![
+            json!({"type": "response.created", "response": {"id": "resp_s1", "status": "in_progress", "output": []}}),
+            json!({"type": "response.output_item.added", "output_index": 0,
+                "item": {"type": "reasoning", "id": "rs_s1", "summary": []}}),
+            json!({"type": "response.reasoning_summary_part.added", "item_id": "rs_s1", "output_index": 0,
+                "summary_index": 0, "part": {"type": "summary_text", "text": ""}}),
+            json!({"type": "response.reasoning_summary_text.delta", "item_id": "rs_s1", "output_index": 0,
+                "summary_index": 0, "delta": "Checking the weather."}),
+            json!({"type": "response.output_item.done", "output_index": 0,
+                "item": {"type": "reasoning", "id": "rs_s1",
+                    "summary": [{"type": "summary_text", "text": "Checking the weather."}],
+                    "encrypted_content": "enc-synthetic-0123"}}),
+            json!({"type": "response.output_item.added", "output_index": 1,
+                "item": {"type": "message", "id": "msg_s1", "role": "assistant", "status": "in_progress", "content": []}}),
+            json!({"type": "response.content_part.added", "item_id": "msg_s1", "output_index": 1,
+                "content_index": 0, "part": {"type": "output_text", "text": "", "annotations": []}}),
+            json!({"type": "response.output_text.delta", "item_id": "msg_s1", "output_index": 1,
+                "content_index": 0, "delta": "Looking it "}),
+            json!({"type": "response.output_text.delta", "item_id": "msg_s1", "output_index": 1,
+                "content_index": 0, "delta": "up."}),
+            json!({"type": "response.output_text.done", "item_id": "msg_s1", "output_index": 1,
+                "content_index": 0, "text": "Looking it up."}),
+            json!({"type": "response.output_item.done", "output_index": 1,
+                "item": {"type": "message", "id": "msg_s1", "role": "assistant", "status": "completed",
+                    "content": [{"type": "output_text", "text": "Looking it up.", "annotations": []}]}}),
+            json!({"type": "response.output_item.added", "output_index": 2,
+                "item": {"type": "function_call", "id": "fc_s1", "call_id": "call_s1", "name": "get_weather",
+                    "arguments": "", "status": "in_progress"}}),
+            json!({"type": "response.function_call_arguments.delta", "item_id": "fc_s1", "output_index": 2,
+                "delta": "{\"city\":"}),
+            json!({"type": "response.function_call_arguments.delta", "item_id": "fc_s1", "output_index": 2,
+                "delta": "\"Berlin\"}"}),
+            json!({"type": "response.function_call_arguments.done", "item_id": "fc_s1", "output_index": 2,
+                "arguments": "{\"city\":\"Berlin\"}"}),
+            json!({"type": "response.output_item.done", "output_index": 2,
+                "item": {"type": "function_call", "id": "fc_s1", "call_id": "call_s1", "name": "get_weather",
+                    "arguments": "{\"city\":\"Berlin\"}", "status": "completed"}}),
+            json!({"type": "response.completed", "response": {"id": "resp_s1", "model": "gpt-test",
+                "status": "completed", "output": [],
+                "usage": {"input_tokens": 9, "output_tokens": 4}}}),
+        ]
+    }
+
+    /// Stream the stateless turn through a `with_store(false)` model and
+    /// collect it, as a caller needing a complete response would.
+    async fn collected_store_false_turn() -> ModelResponse {
+        let server = responses_server(sse_response(&store_false_turn_events())).await;
+        let model = OpenAIResponsesModel::new("gpt-test", "sk-test")
+            .with_store(false)
+            .with_base_url(server.uri());
+        let stream = model
+            .request_stream(
+                &hello(),
+                &ModelSettings::new(),
+                &ModelRequestParameters::new(),
+            )
+            .await
+            .expect("mocked stream request succeeds");
+        crate::collect_stream(stream)
+            .await
+            .expect("a store=false stream collects")
+    }
+
+    /// H5 - with an empty `response.completed.output`, the streamed reasoning,
+    /// text and function-call items still arrive complete.
+    #[tokio::test]
+    async fn store_false_stream_collects_without_completed_output() {
+        let response = collected_store_false_turn().await;
+
+        assert_eq!(response.parts.len(), 3, "reasoning, text and tool call");
+        match &response.parts[0] {
+            ModelResponsePart::Thinking(thinking) => {
+                assert_eq!(thinking.content, "Checking the weather.");
+                assert_eq!(thinking.id.as_deref(), Some("rs_s1"));
+                assert_eq!(thinking.provider_name.as_deref(), Some("openai"));
+                assert_eq!(thinking.signature.as_deref(), Some("enc-synthetic-0123"));
+            }
+            other => panic!("expected the reasoning part, got {other:?}"),
+        }
+        match &response.parts[1] {
+            ModelResponsePart::Text(text) => assert_eq!(text.content, "Looking it up."),
+            other => panic!("expected the text part, got {other:?}"),
+        }
+        match &response.parts[2] {
+            ModelResponsePart::ToolCall(call) => {
+                assert_eq!(call.tool_name, "get_weather");
+                assert_eq!(call.tool_call_id.as_deref(), Some("call_s1"));
+                assert_eq!(call.args.to_json(), serde_json::json!({"city": "Berlin"}));
+            }
+            other => panic!("expected the tool-call part, got {other:?}"),
+        }
+        assert_eq!(response.finish_reason, Some(FinishReason::ToolCall));
+        assert_eq!(response.vendor_id.as_deref(), Some("resp_s1"));
+        let usage = response.usage.expect("usage from response.completed");
+        assert_eq!(usage.request_tokens, Some(9));
+        assert_eq!(usage.response_tokens, Some(4));
+    }
+
+    /// H6 - the next turn of a stateless conversation replays the collected
+    /// reasoning and function call as self-contained items: no item reference
+    /// and no item consisting only of `id`/`type`, on both paths.
+    #[tokio::test]
+    async fn store_false_body_has_no_item_references() {
+        let previous = collected_store_false_turn().await;
+        let mut history = hello();
+        history.push(ModelRequest::with_parts(vec![
+            ModelRequestPart::ModelResponse(Box::new(previous)),
+        ]));
+        history.push(ModelRequest::with_parts(vec![
+            ModelRequestPart::ToolReturn(
+                ToolReturnPart::new("get_weather", "sunny").with_tool_call_id("call_s1"),
+            ),
+        ]));
+
+        for streaming in [false, true] {
+            let model = OpenAIResponsesModel::new("gpt-test", "sk-test").with_store(false);
+            let body = sent_body(model, &history, streaming).await;
+            let input = body["input"].as_array().expect("input is an array");
+
+            for item in input {
+                let object = item.as_object().expect("input items are objects");
+                assert!(
+                    !matches!(
+                        object.get("type").and_then(|t| t.as_str()),
+                        Some("item_reference" | "input_item_reference" | "reference")
+                    ),
+                    "no item reference may be replayed (streaming={streaming})"
+                );
+                assert!(
+                    object.keys().any(|key| key != "id" && key != "type"),
+                    "no id/type-only item may be replayed (streaming={streaming})"
+                );
+            }
+            let reasoning = input
+                .iter()
+                .find(|item| item["type"] == "reasoning")
+                .unwrap_or_else(|| panic!("reasoning must be replayed (streaming={streaming})"));
+            assert_eq!(reasoning["encrypted_content"], "enc-synthetic-0123");
+            assert!(
+                input
+                    .iter()
+                    .any(|item| item["type"] == "function_call" && item["call_id"] == "call_s1"),
+                "the function call answered by the tool output must be replayed (streaming={streaming})"
+            );
+            assert!(
+                input
+                    .iter()
+                    .any(|item| item["type"] == "function_call_output"
+                        && item["call_id"] == "call_s1"),
+                "the tool output must be sent (streaming={streaming})"
+            );
         }
     }
 }

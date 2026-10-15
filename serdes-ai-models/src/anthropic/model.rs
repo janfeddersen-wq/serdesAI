@@ -8,8 +8,8 @@ use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{ModelProfile, anthropic_claude_profile};
 use async_trait::async_trait;
 use base64::Engine;
-use reqwest::Client;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, RequestBuilder};
 use serdes_ai_core::messages::{
     DocumentContent, ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs,
     ToolCallPart, ToolReturnPart, UserContent, UserContentPart,
@@ -45,6 +45,8 @@ enum HeaderMergeMode {
     Set,
     /// Add a value, keeping any existing ones.
     Append,
+    /// Remove every existing value of that header name. Carries no value.
+    Remove,
 }
 
 /// One caller-supplied header. Named fields rather than a tuple: two `String`
@@ -86,6 +88,8 @@ pub struct AnthropicModel {
     api_version: String,
     /// Caller-supplied headers, in call order.
     extra_headers: Vec<ExtraHeader>,
+    /// Caller-supplied query parameters for the Messages endpoint, in call order.
+    query_params: Vec<(String, String)>,
 }
 
 /// Hand-written so that secrets never reach a log or a panic message: the API
@@ -105,6 +109,14 @@ impl fmt::Debug for AnthropicModel {
             .field("enable_caching", &self.enable_caching)
             .field("api_version", &self.api_version)
             .field("extra_headers", &self.extra_headers)
+            .field(
+                "query_params",
+                &self
+                    .query_params
+                    .iter()
+                    .map(|(name, _)| (name.as_str(), REDACTED))
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -127,6 +139,7 @@ impl AnthropicModel {
             enable_caching: false,
             api_version: "2023-06-01".to_string(),
             extra_headers: Vec::new(),
+            query_params: Vec::new(),
         }
     }
 
@@ -263,6 +276,56 @@ impl AnthropicModel {
         self
     }
 
+    /// Remove an HTTP header from every request made by this model.
+    ///
+    /// Removes ALL values of that name - including the library's own headers
+    /// (`x-api-key`, `anthropic-version`, `Content-Type`, `anthropic-beta`) and
+    /// any value an earlier [`with_header`](Self::with_header) or
+    /// [`with_appended_header`](Self::with_appended_header) call added. Calls
+    /// apply in order, so a later `with_header` of the same name adds it again.
+    ///
+    /// Typical use: authenticating with `Authorization: Bearer ...` via
+    /// [`with_header`](Self::with_header) instead of `x-api-key`.
+    ///
+    /// An invalid header name is reported as a [`ModelError::Configuration`]
+    /// when the request is built, since this builder cannot fail.
+    #[must_use]
+    pub fn without_header(mut self, name: impl Into<String>) -> Self {
+        self.extra_headers.push(ExtraHeader {
+            name: name.into(),
+            value: String::new(),
+            mode: HeaderMergeMode::Remove,
+        });
+        self
+    }
+
+    /// Append a query parameter to the Messages endpoint URL of every request
+    /// made by this model (streaming and non-streaming).
+    ///
+    /// Parameters are sent in call order and URL-encoded; calling this twice
+    /// with the same name sends both pairs. Without a call the URL carries no
+    /// query string at all.
+    #[must_use]
+    pub fn with_query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.query_params.push((name.into(), value.into()));
+        self
+    }
+
+    /// Start a POST to the Messages endpoint - the single construction site
+    /// shared by the streaming and non-streaming paths (URL, query, headers,
+    /// timeout).
+    fn messages_request(&self, timeout: Duration) -> Result<RequestBuilder, ModelError> {
+        let request = self
+            .client
+            .post(format!("{}/v1/messages", self.base_url))
+            .headers(self.build_headers()?)
+            .timeout(timeout);
+        if self.query_params.is_empty() {
+            return Ok(request);
+        }
+        Ok(request.query(&self.query_params))
+    }
+
     /// Build the headers for a request - the single construction site shared by
     /// the streaming and non-streaming paths.
     ///
@@ -311,13 +374,15 @@ impl AnthropicModel {
                     name.escape_debug()
                 ))
             })?;
-            let header_value = parse_header_value(name, value)?;
             match mode {
                 HeaderMergeMode::Set => {
-                    headers.insert(header_name, header_value);
+                    headers.insert(header_name, parse_header_value(name, value)?);
                 }
                 HeaderMergeMode::Append => {
-                    headers.append(header_name, header_value);
+                    headers.append(header_name, parse_header_value(name, value)?);
+                }
+                HeaderMergeMode::Remove => {
+                    headers.remove(header_name);
                 }
             }
         }
@@ -800,11 +865,7 @@ impl Model for AnthropicModel {
 
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
-        let request = self
-            .client
-            .post(format!("{}/v1/messages", self.base_url))
-            .headers(self.build_headers()?)
-            .timeout(timeout);
+        let request = self.messages_request(timeout)?;
 
         let response = request.json(&body).send().await?;
 
@@ -833,11 +894,7 @@ impl Model for AnthropicModel {
 
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
-        let request = self
-            .client
-            .post(format!("{}/v1/messages", self.base_url))
-            .headers(self.build_headers()?)
-            .timeout(timeout);
+        let request = self.messages_request(timeout)?;
 
         let response = request.json(&body).send().await?;
 
@@ -1152,14 +1209,14 @@ mod tests {
         server
     }
 
-    /// Headers of the single request the mock server received.
-    async fn only_received_headers(server: &wiremock::MockServer) -> HeaderMap {
-        let requests = server
+    /// The single request the mock server received.
+    async fn only_received_request(server: &wiremock::MockServer) -> wiremock::Request {
+        let mut requests = server
             .received_requests()
             .await
             .expect("mock server records requests");
         assert_eq!(requests.len(), 1, "expected exactly one captured request");
-        requests[0].headers.clone()
+        requests.remove(0)
     }
 
     /// All values sent for `name`, in order. Empty when the header is absent.
@@ -1175,8 +1232,8 @@ mod tests {
             .collect()
     }
 
-    /// Drive one non-streaming request and return the headers actually sent.
-    async fn headers_of_non_streaming_request(model: AnthropicModel) -> HeaderMap {
+    /// Drive one non-streaming request and return the request actually sent.
+    async fn sent_non_streaming_request(model: AnthropicModel) -> wiremock::Request {
         let server = messages_mock_server().await;
         model
             .with_base_url(server.uri())
@@ -1187,14 +1244,14 @@ mod tests {
             )
             .await
             .expect("mocked request succeeds");
-        only_received_headers(&server).await
+        only_received_request(&server).await
     }
 
-    /// Drive one streaming request and return the headers actually sent.
+    /// Drive one streaming request and return the request actually sent.
     ///
     /// `request_stream` only checks the status before handing back the parser,
     /// so the body is never polled here - the request is already captured.
-    async fn headers_of_streaming_request(model: AnthropicModel) -> HeaderMap {
+    async fn sent_streaming_request(model: AnthropicModel) -> wiremock::Request {
         let server = messages_mock_server().await;
         let _stream = model
             .with_base_url(server.uri())
@@ -1205,7 +1262,17 @@ mod tests {
             )
             .await
             .expect("mocked stream request succeeds");
-        only_received_headers(&server).await
+        only_received_request(&server).await
+    }
+
+    /// Drive one non-streaming request and return the headers actually sent.
+    async fn headers_of_non_streaming_request(model: AnthropicModel) -> HeaderMap {
+        sent_non_streaming_request(model).await.headers
+    }
+
+    /// Drive one streaming request and return the headers actually sent.
+    async fn headers_of_streaming_request(model: AnthropicModel) -> HeaderMap {
+        sent_streaming_request(model).await.headers
     }
 
     /// AC6 - default behavior: the three fixed headers, and no `anthropic-beta`.
@@ -1345,6 +1412,110 @@ mod tests {
             vec!["2", "1"],
             "a later append must keep the earlier set value"
         );
+    }
+
+    /// H1 - `without_header` removes a library header from BOTH paths, case-
+    /// insensitively, and also removes a value an earlier `with_header` set.
+    /// The other library headers stay untouched.
+    #[tokio::test]
+    async fn without_header_removes_library_header() {
+        let removed = || AnthropicModel::new("claude-test", "sk-test").without_header("x-api-key");
+
+        for headers in [
+            headers_of_non_streaming_request(removed()).await,
+            headers_of_streaming_request(removed()).await,
+        ] {
+            assert!(
+                header_values(&headers, "x-api-key").is_empty(),
+                "x-api-key must not be sent after without_header"
+            );
+            assert_eq!(
+                header_values(&headers, "anthropic-version"),
+                vec!["2023-06-01"]
+            );
+            assert_eq!(
+                header_values(&headers, "content-type"),
+                vec!["application/json"]
+            );
+        }
+
+        let set_then_removed = AnthropicModel::new("claude-test", "sk-test")
+            .with_header("x-api-key", "override")
+            .without_header("X-Api-Key");
+        let headers = headers_of_non_streaming_request(set_then_removed).await;
+        assert!(
+            header_values(&headers, "x-api-key").is_empty(),
+            "without_header must also remove a value set by an earlier with_header"
+        );
+    }
+
+    /// H1 - removal follows call order: a later `with_header` re-adds the name,
+    /// and removing a multi-valued header drops every value.
+    #[tokio::test]
+    async fn without_header_honors_call_order() {
+        let removed_then_set = AnthropicModel::new("claude-test", "sk-test")
+            .without_header("x-api-key")
+            .with_header("x-api-key", "again");
+        let headers = headers_of_non_streaming_request(removed_then_set).await;
+        assert_eq!(header_values(&headers, "x-api-key"), vec!["again"]);
+
+        let all_beta_removed = AnthropicModel::new("claude-test", "sk-test")
+            .with_thinking(Some(1024))
+            .with_caching()
+            .with_appended_header("anthropic-beta", "my-flag")
+            .without_header("anthropic-beta");
+        let headers = headers_of_non_streaming_request(all_beta_removed).await;
+        assert!(header_values(&headers, "anthropic-beta").is_empty());
+    }
+
+    /// H1 - an invalid name passed to `without_header` is a configuration
+    /// error like every other caller header, not a silent no-op.
+    #[test]
+    fn without_header_invalid_name_is_configuration_error() {
+        let model = AnthropicModel::new("claude-test", "sk-test").without_header("bad name");
+
+        let error = model.build_headers().expect_err("invalid name must error");
+
+        assert!(matches!(error, ModelError::Configuration(_)));
+        assert!(error.to_string().contains("bad name"));
+    }
+
+    /// H2 - query parameters reach BOTH messages paths, in call order and
+    /// URL-encoded; without a call the URL carries no query at all.
+    #[tokio::test]
+    async fn with_query_param_reaches_both_paths() {
+        let with_beta =
+            || AnthropicModel::new("claude-test", "sk-test").with_query_param("beta", "true");
+
+        for request in [
+            sent_non_streaming_request(with_beta()).await,
+            sent_streaming_request(with_beta()).await,
+        ] {
+            assert_eq!(request.url.path(), "/v1/messages");
+            assert_eq!(request.url.query(), Some("beta=true"));
+        }
+
+        let several = AnthropicModel::new("claude-test", "sk-test")
+            .with_query_param("beta", "true")
+            .with_query_param("note", "a b&c=d");
+        let request = sent_non_streaming_request(several).await;
+        assert_eq!(request.url.query(), Some("beta=true&note=a+b%26c%3Dd"));
+        let decoded: Vec<(String, String)> = request.url.query_pairs().into_owned().collect();
+        assert_eq!(
+            decoded,
+            vec![
+                ("beta".to_owned(), "true".to_owned()),
+                ("note".to_owned(), "a b&c=d".to_owned()),
+            ]
+        );
+
+        for request in [
+            sent_non_streaming_request(AnthropicModel::new("claude-test", "sk-test")).await,
+            sent_streaming_request(AnthropicModel::new("claude-test", "sk-test")).await,
+        ] {
+            assert_eq!(request.url.path(), "/v1/messages");
+            assert_eq!(request.url.query(), None, "no query without a call");
+        }
     }
 
     /// AC8 - an invalid header NAME is a real configuration error naming the
