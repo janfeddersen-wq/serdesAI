@@ -58,10 +58,12 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+mod collect;
 pub mod error;
 pub mod fallback;
 pub mod model;
 pub mod profile;
+pub mod refusal;
 pub mod schema_transformer;
 
 // Provider modules (feature-gated)
@@ -165,6 +167,7 @@ pub mod retry;
 pub mod scripted;
 
 // Re-exports
+pub use collect::collect_stream;
 pub use error::{ModelError, ModelResult, ProviderErrorKind};
 pub use fallback::{FallbackModel, RetryOn};
 pub use mock::{FunctionModel, MockModel, TestModel};
@@ -177,6 +180,7 @@ pub use profile::{
     anthropic_claude_profile, deepseek_profile, google_gemini_profile, mistral_profile,
     openai_gpt4o_profile, openai_o1_profile, qwen_profile,
 };
+pub use refusal::StopDetails;
 pub use retry::{ModelRetryExt, RetryingModel};
 pub use schema_transformer::JsonSchemaTransformer;
 pub use serdes_ai_retries::{RetryDecision, RetryFailure, RetryPolicy, WaitStrategy};

@@ -6,7 +6,9 @@
 //!
 //! ## Features
 //!
-//! - **Extended Thinking**: Enable Claude's reasoning mode with `with_thinking()`
+//! - **Extended Thinking**: Enable Claude's reasoning mode with `with_thinking()`,
+//!   or adaptive thinking with `with_adaptive_thinking()`, `with_thinking_display()`
+//!   and `with_effort()`
 //! - **Prompt Caching**: Reduce costs with `with_caching()`
 //! - **Multi-modal**: Images and documents (PDF) support
 //! - **Tool Use**: Full function calling support
@@ -32,12 +34,18 @@
 //! let response = model.request(&messages, &settings, &params).await?;
 //! ```
 
+pub mod controls;
 mod error;
 pub mod model;
 pub mod stream;
 pub mod types;
 
 // Re-exports
+pub use crate::refusal::StopDetails;
+pub use controls::{
+    BlockBinding, Effort, OutputConfig, PrefixMismatchBehavior, THINKING_BINDING_BETA,
+    ThinkingDisplay,
+};
 pub use model::AnthropicModel;
 pub use types::{
     AnthropicContent, AnthropicError, AnthropicMessage, AnthropicTool, AnthropicToolChoice,

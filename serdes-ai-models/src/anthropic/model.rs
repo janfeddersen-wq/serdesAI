@@ -1,15 +1,20 @@
 //! Anthropic Claude model implementation.
 
+use super::controls::{
+    BlockBinding, Effort, INTERLEAVED_THINKING_BETA, THINKING_BINDING_BETA, ThinkingControls,
+    ThinkingDisplay, ThinkingMode,
+};
 use super::error::map_anthropic_error;
 use super::stream::AnthropicStreamParser;
 use super::types::*;
 use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{ModelProfile, anthropic_claude_profile};
+use crate::refusal::terminal_details;
 use async_trait::async_trait;
 use base64::Engine;
-use reqwest::Client;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
+use reqwest::{Client, RequestBuilder};
 use serdes_ai_core::messages::{
     DocumentContent, ImageContent, RetryPromptPart, TextPart, ThinkingPart, ToolCallArgs,
     ToolCallPart, ToolReturnPart, UserContent, UserContentPart,
@@ -38,6 +43,28 @@ fn parse_header_value(name: &str, value: &str) -> Result<HeaderValue, ModelError
         .map_err(|e| ModelError::configuration(format!("Invalid value for header '{name}': {e}")))
 }
 
+/// Whether a text is empty or whitespace only - the API rejects such a text block.
+fn is_blank(text: &str) -> bool {
+    text.trim().is_empty()
+}
+
+/// Whether user content carries nothing to send.
+fn is_blank_content(content: &AnthropicContent) -> bool {
+    match content {
+        AnthropicContent::Text(text) => is_blank(text),
+        AnthropicContent::Blocks(blocks) => blocks.is_empty(),
+    }
+}
+
+/// The text as a block list: one text block, or none when the text is blank.
+fn text_blocks(text: &str) -> Vec<ContentBlock> {
+    if is_blank(text) {
+        Vec::new()
+    } else {
+        vec![ContentBlock::text(text)]
+    }
+}
+
 /// How a caller-supplied header is merged into the request headers.
 #[derive(Debug, Clone)]
 enum HeaderMergeMode {
@@ -45,6 +72,8 @@ enum HeaderMergeMode {
     Set,
     /// Add a value, keeping any existing ones.
     Append,
+    /// Remove every existing value of that header name. Carries no value.
+    Remove,
 }
 
 /// One caller-supplied header. Named fields rather than a tuple: two `String`
@@ -76,16 +105,16 @@ pub struct AnthropicModel {
     base_url: String,
     profile: ModelProfile,
     default_timeout: Duration,
-    /// Enable extended thinking.
-    enable_thinking: bool,
-    /// Thinking budget tokens.
-    thinking_budget: Option<u64>,
+    /// Thinking form, display, effort and block binding.
+    thinking: ThinkingControls,
     /// Enable prompt caching.
     enable_caching: bool,
     /// Anthropic API version.
     api_version: String,
     /// Caller-supplied headers, in call order.
     extra_headers: Vec<ExtraHeader>,
+    /// Caller-supplied query parameters for the Messages endpoint, in call order.
+    query_params: Vec<(String, String)>,
 }
 
 /// Hand-written so that secrets never reach a log or a panic message: the API
@@ -100,11 +129,18 @@ impl fmt::Debug for AnthropicModel {
             .field("base_url", &self.base_url)
             .field("profile", &self.profile)
             .field("default_timeout", &self.default_timeout)
-            .field("enable_thinking", &self.enable_thinking)
-            .field("thinking_budget", &self.thinking_budget)
+            .field("thinking", &self.thinking)
             .field("enable_caching", &self.enable_caching)
             .field("api_version", &self.api_version)
             .field("extra_headers", &self.extra_headers)
+            .field(
+                "query_params",
+                &self
+                    .query_params
+                    .iter()
+                    .map(|(name, _)| (name.as_str(), REDACTED))
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -122,11 +158,11 @@ impl AnthropicModel {
             base_url: "https://api.anthropic.com".to_string(),
             profile,
             default_timeout: Duration::from_secs(300), // Claude can be slow
-            enable_thinking: false,
-            thinking_budget: None,
+            thinking: ThinkingControls::default(),
             enable_caching: false,
             api_version: "2023-06-01".to_string(),
             extra_headers: Vec::new(),
+            query_params: Vec::new(),
         }
     }
 
@@ -165,13 +201,59 @@ impl AnthropicModel {
         self
     }
 
-    /// Enable extended thinking.
+    /// Enable extended thinking in the legacy form
+    /// `{"type": "enabled", "budget_tokens": ...}`, which also sends the
+    /// `interleaved-thinking-2025-05-14` beta flag.
+    ///
+    /// The last call of this and [`with_adaptive_thinking`](Self::with_adaptive_thinking)
+    /// wins. Models that reject the legacy form (claude-opus-5-5) need adaptive thinking.
     #[must_use]
     pub fn with_thinking(mut self, budget: Option<u64>) -> Self {
-        self.enable_thinking = true;
-        self.thinking_budget = budget;
+        self.thinking.mode = ThinkingMode::Enabled { budget };
         // Update profile
         self.profile.supports_reasoning = true;
+        self
+    }
+
+    /// Enable adaptive thinking: `{"type": "adaptive"}` without a budget,
+    /// steered by [`with_effort`](Self::with_effort). It sends no
+    /// interleaved-thinking beta flag.
+    ///
+    /// The last call of this and [`with_thinking`](Self::with_thinking) wins.
+    #[must_use]
+    pub fn with_adaptive_thinking(mut self) -> Self {
+        self.thinking.mode = ThinkingMode::Adaptive;
+        self.profile.supports_reasoning = true;
+        self
+    }
+
+    /// Set `thinking.display` (`"summarized"`, `"omitted"` or any other
+    /// string). It is sent with whichever thinking form is on, and not at all
+    /// while thinking is off.
+    #[must_use]
+    pub fn with_thinking_display(mut self, display: impl Into<ThinkingDisplay>) -> Self {
+        self.thinking.display = Some(display.into());
+        self
+    }
+
+    /// Set `output_config.effort` (`"low"` ... `"max"` or any other string).
+    /// It is sent whether thinking is on or not.
+    #[must_use]
+    pub fn with_effort(mut self, effort: impl Into<Effort>) -> Self {
+        self.thinking.effort = Some(effort.into());
+        self
+    }
+
+    /// Opt in to `thinking.block_binding`. Sent only while thinking is on, and
+    /// then together with the `anthropic-beta` flag [`THINKING_BINDING_BETA`].
+    ///
+    /// A later [`with_header`](Self::with_header)`("anthropic-beta", ..)`
+    /// REPLACES the library's beta flags, this one included: such a value must
+    /// list [`THINKING_BINDING_BETA`] itself, or add flags with
+    /// [`with_appended_header`](Self::with_appended_header) instead.
+    #[must_use]
+    pub fn with_thinking_block_binding(mut self, block_binding: BlockBinding) -> Self {
+        self.thinking.block_binding = Some(block_binding);
         self
     }
 
@@ -263,6 +345,56 @@ impl AnthropicModel {
         self
     }
 
+    /// Remove an HTTP header from every request made by this model.
+    ///
+    /// Removes ALL values of that name - including the library's own headers
+    /// (`x-api-key`, `anthropic-version`, `Content-Type`, `anthropic-beta`) and
+    /// any value an earlier [`with_header`](Self::with_header) or
+    /// [`with_appended_header`](Self::with_appended_header) call added. Calls
+    /// apply in order, so a later `with_header` of the same name adds it again.
+    ///
+    /// Typical use: authenticating with `Authorization: Bearer ...` via
+    /// [`with_header`](Self::with_header) instead of `x-api-key`.
+    ///
+    /// An invalid header name is reported as a [`ModelError::Configuration`]
+    /// when the request is built, since this builder cannot fail.
+    #[must_use]
+    pub fn without_header(mut self, name: impl Into<String>) -> Self {
+        self.extra_headers.push(ExtraHeader {
+            name: name.into(),
+            value: String::new(),
+            mode: HeaderMergeMode::Remove,
+        });
+        self
+    }
+
+    /// Append a query parameter to the Messages endpoint URL of every request
+    /// made by this model (streaming and non-streaming).
+    ///
+    /// Parameters are sent in call order and URL-encoded; calling this twice
+    /// with the same name sends both pairs. Without a call the URL carries no
+    /// query string at all.
+    #[must_use]
+    pub fn with_query_param(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.query_params.push((name.into(), value.into()));
+        self
+    }
+
+    /// Start a POST to the Messages endpoint - the single construction site
+    /// shared by the streaming and non-streaming paths (URL, query, headers,
+    /// timeout).
+    fn messages_request(&self, timeout: Duration) -> Result<RequestBuilder, ModelError> {
+        let request = self
+            .client
+            .post(format!("{}/v1/messages", self.base_url))
+            .headers(self.build_headers()?)
+            .timeout(timeout);
+        if self.query_params.is_empty() {
+            return Ok(request);
+        }
+        Ok(request.query(&self.query_params))
+    }
+
     /// Build the headers for a request - the single construction site shared by
     /// the streaming and non-streaming paths.
     ///
@@ -287,16 +419,22 @@ impl AnthropicModel {
 
         // Beta flags are multi-valued: the second one appends so that enabling
         // both thinking and caching still sends both.
-        if self.enable_thinking {
+        if self.thinking.is_legacy_enabled() {
             headers.append(
                 ANTHROPIC_BETA,
-                HeaderValue::from_static("interleaved-thinking-2025-05-14"),
+                HeaderValue::from_static(INTERLEAVED_THINKING_BETA),
             );
         }
         if self.enable_caching {
             headers.append(
                 ANTHROPIC_BETA,
                 HeaderValue::from_static("prompt-caching-2024-07-31"),
+            );
+        }
+        if self.thinking.sends_block_binding() {
+            headers.append(
+                ANTHROPIC_BETA,
+                HeaderValue::from_static(THINKING_BINDING_BETA),
             );
         }
 
@@ -311,13 +449,15 @@ impl AnthropicModel {
                     name.escape_debug()
                 ))
             })?;
-            let header_value = parse_header_value(name, value)?;
             match mode {
                 HeaderMergeMode::Set => {
-                    headers.insert(header_name, header_value);
+                    headers.insert(header_name, parse_header_value(name, value)?);
                 }
                 HeaderMergeMode::Append => {
-                    headers.append(header_name, header_value);
+                    headers.append(header_name, parse_header_value(name, value)?);
+                }
+                HeaderMergeMode::Remove => {
+                    headers.remove(header_name);
                 }
             }
         }
@@ -360,6 +500,10 @@ impl AnthropicModel {
                     }
                     ModelRequestPart::UserPrompt(user) => {
                         let content = self.convert_user_content(&user.content);
+                        // The API rejects empty text, and a blank prompt carries nothing.
+                        if is_blank_content(&content) {
+                            continue;
+                        }
                         // Anthropic requires alternating messages, merge if last was user
                         if let Some(last) = api_messages.last_mut() {
                             if last.role == "user" {
@@ -452,7 +596,11 @@ impl AnthropicModel {
         for part in &response.parts {
             match part {
                 ModelResponsePart::Text(text) => {
-                    blocks.push(ContentBlock::text(&text.content));
+                    // The API rejects empty text blocks; thinking blocks below
+                    // are kept even when empty, their signature must be replayed.
+                    if !is_blank(&text.content) {
+                        blocks.push(ContentBlock::text(&text.content));
+                    }
                 }
                 ModelResponsePart::ToolCall(tc) => {
                     blocks.push(ContentBlock::ToolUse {
@@ -504,6 +652,7 @@ impl AnthropicModel {
 
     fn convert_content_part(&self, part: &UserContentPart) -> Option<ContentBlock> {
         match part {
+            UserContentPart::Text { text } if is_blank(text) => None,
             UserContentPart::Text { text } => Some(ContentBlock::text(text)),
             UserContentPart::Image { image } => Some(self.convert_image(image)),
             UserContentPart::Document { document } => self.convert_document(document),
@@ -570,7 +719,7 @@ impl AnthropicModel {
         }
     }
 
-    /// Merge content into existing content.
+    /// Merge content into existing content. Blank text never becomes a block.
     fn merge_content(existing: &mut AnthropicContent, new: AnthropicContent) {
         match (&mut *existing, new) {
             (AnthropicContent::Text(s), AnthropicContent::Text(t)) => {
@@ -581,21 +730,23 @@ impl AnthropicModel {
                 blocks.extend(new_blocks);
             }
             (AnthropicContent::Text(s), AnthropicContent::Blocks(new_blocks)) => {
-                let mut blocks = vec![ContentBlock::text(s.clone())];
+                let mut blocks = text_blocks(s);
                 blocks.extend(new_blocks);
                 *existing = AnthropicContent::Blocks(blocks);
             }
             (AnthropicContent::Blocks(blocks), AnthropicContent::Text(t)) => {
-                blocks.push(ContentBlock::text(t));
+                blocks.extend(text_blocks(&t));
             }
         }
     }
 
-    /// Add a block to content.
+    /// Add a block to content. Blank text never becomes a block.
     fn add_block_to_content(content: &mut AnthropicContent, block: ContentBlock) {
         match content {
             AnthropicContent::Text(s) => {
-                *content = AnthropicContent::Blocks(vec![ContentBlock::text(s.clone()), block]);
+                let mut blocks = text_blocks(s);
+                blocks.push(block);
+                *content = AnthropicContent::Blocks(blocks);
             }
             AnthropicContent::Blocks(blocks) => {
                 blocks.push(block);
@@ -654,15 +805,6 @@ impl AnthropicModel {
             .as_ref()
             .and_then(|c| self.convert_tool_choice(c));
 
-        let thinking = if self.enable_thinking {
-            Some(match self.thinking_budget {
-                Some(budget) => ThinkingConfig::with_budget(budget),
-                None => ThinkingConfig::enabled(),
-            })
-        } else {
-            None
-        };
-
         MessagesRequest {
             model: self.model_name.clone(),
             messages: api_messages,
@@ -680,13 +822,19 @@ impl AnthropicModel {
             tool_choice,
             metadata: None,
             stream: if stream { Some(true) } else { None },
-            thinking,
+            thinking: self.thinking.thinking_config(),
+            output_config: self.thinking.output_config(),
         }
     }
 
     /// Parse Anthropic response to our format.
     fn parse_response(&self, resp: MessagesResponse) -> Result<ModelResponse, ModelError> {
         let mut parts = Vec::new();
+        let vendor_details = terminal_details(
+            resp.stop_reason.as_deref(),
+            resp.stop_details.as_ref(),
+            resp.input_transformations.as_ref(),
+        );
 
         for block in resp.content {
             match block {
@@ -723,6 +871,7 @@ impl AnthropicModel {
             "stop_sequence" => FinishReason::Stop,
             "max_tokens" => FinishReason::Length,
             "tool_use" => FinishReason::ToolCall,
+            "refusal" => FinishReason::ContentFilter,
             _ => FinishReason::Stop,
         });
 
@@ -742,7 +891,7 @@ impl AnthropicModel {
             finish_reason,
             usage: Some(usage),
             vendor_id: Some(resp.id),
-            vendor_details: None,
+            vendor_details,
             kind: "response".to_string(),
         })
     }
@@ -800,11 +949,7 @@ impl Model for AnthropicModel {
 
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
-        let request = self
-            .client
-            .post(format!("{}/v1/messages", self.base_url))
-            .headers(self.build_headers()?)
-            .timeout(timeout);
+        let request = self.messages_request(timeout)?;
 
         let response = request.json(&body).send().await?;
 
@@ -833,11 +978,7 @@ impl Model for AnthropicModel {
 
         let timeout = settings.timeout.unwrap_or(self.default_timeout);
 
-        let request = self
-            .client
-            .post(format!("{}/v1/messages", self.base_url))
-            .headers(self.build_headers()?)
-            .timeout(timeout);
+        let request = self.messages_request(timeout)?;
 
         let response = request.json(&body).send().await?;
 
@@ -964,8 +1105,12 @@ mod tests {
             .with_timeout(Duration::from_secs(60));
 
         assert_eq!(model.base_url, "https://custom.api.com");
-        assert!(model.enable_thinking);
-        assert_eq!(model.thinking_budget, Some(10000));
+        assert_eq!(
+            model.thinking.mode,
+            ThinkingMode::Enabled {
+                budget: Some(10000)
+            }
+        );
         assert!(model.enable_caching);
         assert_eq!(model.default_timeout, Duration::from_secs(60));
     }
@@ -1089,6 +1234,8 @@ mod tests {
                 cache_creation_input_tokens: None,
                 cache_read_input_tokens: None,
             },
+            stop_details: None,
+            input_transformations: None,
         };
 
         let result = model.parse_response(resp).unwrap();
@@ -1121,6 +1268,8 @@ mod tests {
             stop_reason: Some("tool_use".to_string()),
             stop_sequence: None,
             usage: AnthropicUsage::default(),
+            stop_details: None,
+            input_transformations: None,
         };
 
         let result = model.parse_response(resp).unwrap();
@@ -1129,6 +1278,245 @@ mod tests {
         assert!(matches!(&result.parts[0], ModelResponsePart::Text(_)));
         assert!(matches!(&result.parts[1], ModelResponsePart::ToolCall(_)));
         assert!(matches!(result.finish_reason, Some(FinishReason::ToolCall)));
+    }
+
+    // -----------------------------------------------------------------
+    // Opus 5.5: adaptive thinking, display, effort, empty text, refusal
+    // -----------------------------------------------------------------
+
+    /// The JSON body `build_request` produces for one user prompt.
+    fn request_body(model: &AnthropicModel) -> serde_json::Value {
+        let mut req = ModelRequest::new();
+        req.add_user_prompt("Think about this.");
+        let request = model.build_request(
+            &[req],
+            &ModelSettings::new(),
+            &ModelRequestParameters::new(),
+            false,
+        );
+        serde_json::to_value(&request).unwrap()
+    }
+
+    #[test]
+    fn adaptive_thinking_without_display_sends_only_the_type() {
+        let body =
+            request_body(&AnthropicModel::new("claude-opus-5-5", "key").with_adaptive_thinking());
+
+        assert_eq!(body["thinking"], serde_json::json!({"type": "adaptive"}));
+        assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn adaptive_thinking_with_display_and_effort() {
+        let model = AnthropicModel::new("claude-opus-5-5", "key")
+            .with_adaptive_thinking()
+            .with_thinking_display(ThinkingDisplay::Summarized)
+            .with_effort(Effort::XHigh);
+
+        let body = request_body(&model);
+
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({"type": "adaptive", "display": "summarized"})
+        );
+        assert_eq!(
+            body["output_config"],
+            serde_json::json!({"effort": "xhigh"})
+        );
+    }
+
+    #[test]
+    fn effort_is_sent_without_thinking_and_display_is_not() {
+        let model = AnthropicModel::new("claude-opus-5-5", "key")
+            .with_thinking_display("omitted")
+            .with_effort("max");
+
+        let body = request_body(&model);
+
+        assert!(body.get("thinking").is_none());
+        assert_eq!(body["output_config"], serde_json::json!({"effort": "max"}));
+    }
+
+    #[test]
+    fn legacy_thinking_body_is_unchanged() {
+        let body = request_body(
+            &AnthropicModel::new("claude-3-5-sonnet-20241022", "key").with_thinking(Some(5000)),
+        );
+
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({"type": "enabled", "budget_tokens": 5000})
+        );
+        assert!(body.get("output_config").is_none());
+    }
+
+    #[test]
+    fn last_thinking_call_wins() {
+        let adaptive = AnthropicModel::new("claude-opus-5-5", "key")
+            .with_thinking(Some(1024))
+            .with_adaptive_thinking();
+        assert_eq!(
+            request_body(&adaptive)["thinking"],
+            serde_json::json!({"type": "adaptive"})
+        );
+
+        let legacy = AnthropicModel::new("claude-opus-5-5", "key")
+            .with_adaptive_thinking()
+            .with_thinking(Some(1024));
+        assert_eq!(
+            request_body(&legacy)["thinking"],
+            serde_json::json!({"type": "enabled", "budget_tokens": 1024})
+        );
+    }
+
+    /// Every content block of every message in a serialized request.
+    fn all_blocks(body: &serde_json::Value) -> Vec<serde_json::Value> {
+        body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["content"].as_array().cloned())
+            .flatten()
+            .collect()
+    }
+
+    #[test]
+    fn blank_text_parts_are_not_sent_as_blocks() {
+        use serdes_ai_core::messages::UserPromptPart;
+
+        let model = AnthropicModel::new("claude-opus-5-5", "key");
+
+        let mut first = ModelRequest::new();
+        first.add_user_prompt(UserContent::Parts(vec![
+            UserContentPart::Text {
+                text: String::new(),
+            },
+            UserContentPart::Text {
+                text: "Question".into(),
+            },
+            UserContentPart::Text {
+                text: "  \n".into(),
+            },
+        ]));
+        let mut answer = ModelResponse::with_parts(vec![
+            ModelResponsePart::Thinking(ThinkingPart::new("").with_signature("sig-1")),
+            ModelResponsePart::Text(TextPart::new("")),
+            ModelResponsePart::ToolCall(
+                ToolCallPart::new("search", serde_json::json!({})).with_tool_call_id("tool_1"),
+            ),
+        ]);
+        answer.finish_reason = Some(FinishReason::ToolCall);
+        first.add_part(ModelRequestPart::ModelResponse(Box::new(answer)));
+        // A blank prompt before a tool return must not leave a text block.
+        first.add_part(ModelRequestPart::UserPrompt(UserPromptPart::new(" ")));
+        first.add_part(ModelRequestPart::ToolReturn(
+            ToolReturnPart::success("search", "found").with_tool_call_id("tool_1"),
+        ));
+        // An assistant turn holding only empty text is dropped as a whole.
+        first.add_part(ModelRequestPart::ModelResponse(Box::new(
+            ModelResponse::with_parts(vec![ModelResponsePart::Text(TextPart::new(""))]),
+        )));
+
+        let request = model.build_request(
+            &[first],
+            &ModelSettings::new(),
+            &ModelRequestParameters::new(),
+            false,
+        );
+        let body = serde_json::to_value(&request).unwrap();
+        let blocks = all_blocks(&body);
+
+        assert!(
+            blocks
+                .iter()
+                .filter(|b| b["type"] == "text")
+                .all(|b| !b["text"].as_str().unwrap().trim().is_empty()),
+            "no blank text block may be sent: {body}"
+        );
+        assert!(
+            blocks
+                .iter()
+                .any(|b| b["type"] == "thinking" && b["signature"] == "sig-1"),
+            "an empty thinking block keeps its signature: {body}"
+        );
+        let roles: Vec<_> = request.messages.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, vec!["user", "assistant", "user"]);
+    }
+
+    #[test]
+    fn parse_response_maps_refusal_and_keeps_stop_details_without_explanation() {
+        let model = AnthropicModel::new("claude-opus-5-5", "key");
+        let resp: MessagesResponse = serde_json::from_str(
+            r#"{"id":"msg_1","type":"message","role":"assistant","content":[],"model":"claude-opus-5-5","stop_reason":"refusal","stop_sequence":null,"stop_details":{"type":"refusal","category":"reasoning_extraction","explanation":"private text"},"usage":{"input_tokens":1,"output_tokens":0}}"#,
+        )
+        .unwrap();
+
+        let result = model.parse_response(resp).unwrap();
+
+        assert_eq!(result.finish_reason, Some(FinishReason::ContentFilter));
+        let stop = crate::refusal::StopDetails::from_response(&result).unwrap();
+        assert_eq!(stop.stop_type.as_deref(), Some("refusal"));
+        assert_eq!(stop.category.as_deref(), Some("reasoning_extraction"));
+        let details = result.vendor_details.unwrap();
+        assert_eq!(details["stop_reason"], "refusal");
+        assert!(!details.to_string().contains("private text"));
+    }
+
+    #[test]
+    fn parse_response_end_turn_keeps_vendor_details_none() {
+        let model = AnthropicModel::new("claude-opus-5-5", "key");
+        let resp: MessagesResponse = serde_json::from_str(MESSAGES_SUCCESS_BODY).unwrap();
+
+        let result = model.parse_response(resp).unwrap();
+
+        assert_eq!(result.finish_reason, Some(FinishReason::Stop));
+        assert!(result.vendor_details.is_none());
+    }
+
+    #[tokio::test]
+    async fn adaptive_thinking_sends_no_beta_flag() {
+        let model = AnthropicModel::new("claude-opus-5-5", "sk-test")
+            .with_adaptive_thinking()
+            .with_effort(Effort::High);
+
+        let headers = headers_of_non_streaming_request(model).await;
+
+        assert!(header_values(&headers, "anthropic-beta").is_empty());
+    }
+
+    #[tokio::test]
+    async fn block_binding_is_sent_with_its_beta_flag_only_when_opted_in() {
+        let binding =
+            BlockBinding::new(crate::anthropic::controls::PrefixMismatchBehavior::DropBlock);
+        let model = AnthropicModel::new("claude-opus-5-5", "sk-test")
+            .with_adaptive_thinking()
+            .with_thinking_block_binding(binding);
+
+        let request = sent_non_streaming_request(model).await;
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+
+        assert_eq!(
+            header_values(&request.headers, "anthropic-beta"),
+            vec![THINKING_BINDING_BETA]
+        );
+        assert_eq!(
+            body["thinking"],
+            serde_json::json!({
+                "type": "adaptive",
+                "block_binding": {"prefix_mismatch_behavior": "drop_block"}
+            })
+        );
+
+        let legacy = sent_non_streaming_request(
+            AnthropicModel::new("claude-test", "sk-test").with_thinking(Some(1024)),
+        )
+        .await;
+        assert_eq!(
+            header_values(&legacy.headers, "anthropic-beta"),
+            vec!["interleaved-thinking-2025-05-14"]
+        );
+        let legacy_body: serde_json::Value = serde_json::from_slice(&legacy.body).unwrap();
+        assert!(legacy_body["thinking"].get("block_binding").is_none());
     }
 
     // -----------------------------------------------------------------
@@ -1152,14 +1540,14 @@ mod tests {
         server
     }
 
-    /// Headers of the single request the mock server received.
-    async fn only_received_headers(server: &wiremock::MockServer) -> HeaderMap {
-        let requests = server
+    /// The single request the mock server received.
+    async fn only_received_request(server: &wiremock::MockServer) -> wiremock::Request {
+        let mut requests = server
             .received_requests()
             .await
             .expect("mock server records requests");
         assert_eq!(requests.len(), 1, "expected exactly one captured request");
-        requests[0].headers.clone()
+        requests.remove(0)
     }
 
     /// All values sent for `name`, in order. Empty when the header is absent.
@@ -1175,8 +1563,8 @@ mod tests {
             .collect()
     }
 
-    /// Drive one non-streaming request and return the headers actually sent.
-    async fn headers_of_non_streaming_request(model: AnthropicModel) -> HeaderMap {
+    /// Drive one non-streaming request and return the request actually sent.
+    async fn sent_non_streaming_request(model: AnthropicModel) -> wiremock::Request {
         let server = messages_mock_server().await;
         model
             .with_base_url(server.uri())
@@ -1187,14 +1575,14 @@ mod tests {
             )
             .await
             .expect("mocked request succeeds");
-        only_received_headers(&server).await
+        only_received_request(&server).await
     }
 
-    /// Drive one streaming request and return the headers actually sent.
+    /// Drive one streaming request and return the request actually sent.
     ///
     /// `request_stream` only checks the status before handing back the parser,
     /// so the body is never polled here - the request is already captured.
-    async fn headers_of_streaming_request(model: AnthropicModel) -> HeaderMap {
+    async fn sent_streaming_request(model: AnthropicModel) -> wiremock::Request {
         let server = messages_mock_server().await;
         let _stream = model
             .with_base_url(server.uri())
@@ -1205,7 +1593,17 @@ mod tests {
             )
             .await
             .expect("mocked stream request succeeds");
-        only_received_headers(&server).await
+        only_received_request(&server).await
+    }
+
+    /// Drive one non-streaming request and return the headers actually sent.
+    async fn headers_of_non_streaming_request(model: AnthropicModel) -> HeaderMap {
+        sent_non_streaming_request(model).await.headers
+    }
+
+    /// Drive one streaming request and return the headers actually sent.
+    async fn headers_of_streaming_request(model: AnthropicModel) -> HeaderMap {
+        sent_streaming_request(model).await.headers
     }
 
     /// AC6 - default behavior: the three fixed headers, and no `anthropic-beta`.
@@ -1345,6 +1743,110 @@ mod tests {
             vec!["2", "1"],
             "a later append must keep the earlier set value"
         );
+    }
+
+    /// H1 - `without_header` removes a library header from BOTH paths, case-
+    /// insensitively, and also removes a value an earlier `with_header` set.
+    /// The other library headers stay untouched.
+    #[tokio::test]
+    async fn without_header_removes_library_header() {
+        let removed = || AnthropicModel::new("claude-test", "sk-test").without_header("x-api-key");
+
+        for headers in [
+            headers_of_non_streaming_request(removed()).await,
+            headers_of_streaming_request(removed()).await,
+        ] {
+            assert!(
+                header_values(&headers, "x-api-key").is_empty(),
+                "x-api-key must not be sent after without_header"
+            );
+            assert_eq!(
+                header_values(&headers, "anthropic-version"),
+                vec!["2023-06-01"]
+            );
+            assert_eq!(
+                header_values(&headers, "content-type"),
+                vec!["application/json"]
+            );
+        }
+
+        let set_then_removed = AnthropicModel::new("claude-test", "sk-test")
+            .with_header("x-api-key", "override")
+            .without_header("X-Api-Key");
+        let headers = headers_of_non_streaming_request(set_then_removed).await;
+        assert!(
+            header_values(&headers, "x-api-key").is_empty(),
+            "without_header must also remove a value set by an earlier with_header"
+        );
+    }
+
+    /// H1 - removal follows call order: a later `with_header` re-adds the name,
+    /// and removing a multi-valued header drops every value.
+    #[tokio::test]
+    async fn without_header_honors_call_order() {
+        let removed_then_set = AnthropicModel::new("claude-test", "sk-test")
+            .without_header("x-api-key")
+            .with_header("x-api-key", "again");
+        let headers = headers_of_non_streaming_request(removed_then_set).await;
+        assert_eq!(header_values(&headers, "x-api-key"), vec!["again"]);
+
+        let all_beta_removed = AnthropicModel::new("claude-test", "sk-test")
+            .with_thinking(Some(1024))
+            .with_caching()
+            .with_appended_header("anthropic-beta", "my-flag")
+            .without_header("anthropic-beta");
+        let headers = headers_of_non_streaming_request(all_beta_removed).await;
+        assert!(header_values(&headers, "anthropic-beta").is_empty());
+    }
+
+    /// H1 - an invalid name passed to `without_header` is a configuration
+    /// error like every other caller header, not a silent no-op.
+    #[test]
+    fn without_header_invalid_name_is_configuration_error() {
+        let model = AnthropicModel::new("claude-test", "sk-test").without_header("bad name");
+
+        let error = model.build_headers().expect_err("invalid name must error");
+
+        assert!(matches!(error, ModelError::Configuration(_)));
+        assert!(error.to_string().contains("bad name"));
+    }
+
+    /// H2 - query parameters reach BOTH messages paths, in call order and
+    /// URL-encoded; without a call the URL carries no query at all.
+    #[tokio::test]
+    async fn with_query_param_reaches_both_paths() {
+        let with_beta =
+            || AnthropicModel::new("claude-test", "sk-test").with_query_param("beta", "true");
+
+        for request in [
+            sent_non_streaming_request(with_beta()).await,
+            sent_streaming_request(with_beta()).await,
+        ] {
+            assert_eq!(request.url.path(), "/v1/messages");
+            assert_eq!(request.url.query(), Some("beta=true"));
+        }
+
+        let several = AnthropicModel::new("claude-test", "sk-test")
+            .with_query_param("beta", "true")
+            .with_query_param("note", "a b&c=d");
+        let request = sent_non_streaming_request(several).await;
+        assert_eq!(request.url.query(), Some("beta=true&note=a+b%26c%3Dd"));
+        let decoded: Vec<(String, String)> = request.url.query_pairs().into_owned().collect();
+        assert_eq!(
+            decoded,
+            vec![
+                ("beta".to_owned(), "true".to_owned()),
+                ("note".to_owned(), "a b&c=d".to_owned()),
+            ]
+        );
+
+        for request in [
+            sent_non_streaming_request(AnthropicModel::new("claude-test", "sk-test")).await,
+            sent_streaming_request(AnthropicModel::new("claude-test", "sk-test")).await,
+        ] {
+            assert_eq!(request.url.path(), "/v1/messages");
+            assert_eq!(request.url.query(), None, "no query without a call");
+        }
     }
 
     /// AC8 - an invalid header NAME is a real configuration error naming the

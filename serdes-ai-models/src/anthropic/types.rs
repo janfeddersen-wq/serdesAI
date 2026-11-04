@@ -2,6 +2,8 @@
 //!
 //! This module contains all the request/response types for the Anthropic Messages API.
 
+use super::controls::{BlockBinding, OutputConfig, ThinkingDisplay};
+use crate::refusal::{StopDetails, lenient_stop_details};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -48,6 +50,9 @@ pub struct MessagesRequest {
     /// Extended thinking configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<ThinkingConfig>,
+    /// Output configuration (`output_config.effort`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_config: Option<OutputConfig>,
 }
 
 impl MessagesRequest {
@@ -67,6 +72,7 @@ impl MessagesRequest {
             metadata: None,
             stream: None,
             thinking: None,
+            output_config: None,
         }
     }
 }
@@ -493,12 +499,19 @@ impl AnthropicToolChoice {
 /// Extended thinking configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThinkingConfig {
-    /// Thinking type: "enabled".
+    /// Thinking type: "enabled" or "adaptive".
     #[serde(rename = "type")]
     pub thinking_type: String,
-    /// Budget tokens for thinking.
+    /// Budget tokens for thinking (legacy "enabled" form only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<u64>,
+    /// How thinking is shown in the response (`thinking.display`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<ThinkingDisplay>,
+    /// Opt-in block binding (`thinking.block_binding`); needs the beta flag
+    /// [`THINKING_BINDING_BETA`](super::controls::THINKING_BINDING_BETA).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_binding: Option<BlockBinding>,
 }
 
 impl ThinkingConfig {
@@ -507,15 +520,39 @@ impl ThinkingConfig {
         Self {
             thinking_type: "enabled".to_string(),
             budget_tokens: None,
+            display: None,
+            block_binding: None,
         }
     }
 
     /// Create thinking config with budget.
     pub fn with_budget(budget: u64) -> Self {
         Self {
-            thinking_type: "enabled".to_string(),
             budget_tokens: Some(budget),
+            ..Self::enabled()
         }
+    }
+
+    /// Create adaptive thinking config (`{"type": "adaptive"}`, no budget).
+    pub fn adaptive() -> Self {
+        Self {
+            thinking_type: "adaptive".to_string(),
+            ..Self::enabled()
+        }
+    }
+
+    /// Set how thinking is shown in the response.
+    #[must_use]
+    pub fn with_display(mut self, display: impl Into<ThinkingDisplay>) -> Self {
+        self.display = Some(display.into());
+        self
+    }
+
+    /// Set the opt-in block binding.
+    #[must_use]
+    pub fn with_block_binding(mut self, block_binding: BlockBinding) -> Self {
+        self.block_binding = Some(block_binding);
+        self
     }
 }
 
@@ -551,6 +588,12 @@ pub struct MessagesResponse {
     pub stop_sequence: Option<String>,
     /// Token usage.
     pub usage: AnthropicUsage,
+    /// Why the model stopped (`type` and `category`; never `explanation`).
+    #[serde(default, deserialize_with = "lenient_stop_details")]
+    pub stop_details: Option<StopDetails>,
+    /// Raw `input_transformations` (thinking block binding beta).
+    #[serde(default)]
+    pub input_transformations: Option<JsonValue>,
 }
 
 /// Response content block.
@@ -642,6 +685,12 @@ pub enum StreamEvent {
         /// Usage.
         #[serde(default)]
         usage: Option<DeltaUsage>,
+        /// Stop details sent beside `delta` rather than inside it.
+        #[serde(default, deserialize_with = "lenient_stop_details")]
+        stop_details: Option<StopDetails>,
+        /// Raw `input_transformations` sent beside `delta`.
+        #[serde(default)]
+        input_transformations: Option<JsonValue>,
     },
     /// Message stop.
     MessageStop,
@@ -669,6 +718,9 @@ pub struct PartialMessage {
     /// Initial usage.
     #[serde(default)]
     pub usage: AnthropicUsage,
+    /// Raw `input_transformations` (thinking block binding beta).
+    #[serde(default)]
+    pub input_transformations: Option<JsonValue>,
 }
 
 /// Content block start.
@@ -734,6 +786,12 @@ pub struct MessageDelta {
     pub stop_reason: Option<String>,
     /// Stop sequence.
     pub stop_sequence: Option<String>,
+    /// Why the model stopped (`type` and `category`; never `explanation`).
+    #[serde(default, deserialize_with = "lenient_stop_details")]
+    pub stop_details: Option<StopDetails>,
+    /// Raw `input_transformations` (thinking block binding beta).
+    #[serde(default)]
+    pub input_transformations: Option<JsonValue>,
 }
 
 /// Usage delta.

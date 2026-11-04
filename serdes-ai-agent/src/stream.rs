@@ -17,7 +17,7 @@ use serdes_ai_core::messages::{
 use serdes_ai_core::{
     FinishReason, ModelRequest, ModelRequestPart, ModelResponse, ModelResponsePart, RequestUsage,
 };
-use serdes_ai_models::ModelRequestParameters;
+use serdes_ai_models::{ModelRequestParameters, refusal};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -947,10 +947,49 @@ impl AgentStream {
                             "stream ended without terminal StreamComplete; defaulting finish_reason=Stop"
                         );
                     }
+                    let reported_finish_reason = stream_finish_reason;
                     let stream_finish_reason = stream_finish_reason.unwrap_or(FinishReason::Stop);
+
+                    // A refusal that left no answer - nothing, or thinking only, the usual
+                    // shape on models that always think - is an error whose message carries
+                    // the finish reason and the stop details (see
+                    // `serdes_ai_models::refusal`). It runs before the empty-stream guard,
+                    // which a refusal's terminal metadata would otherwise pass as success.
+                    // A refusal after real text completes; its response carries
+                    // finish_reason ContentFilter and the stop details in vendor_details.
+                    if let Some(stop_details) = refusal::refusal_without_answer(
+                        stream_finish_reason,
+                        terminal_metadata.as_ref().and_then(|m| m.details.as_ref()),
+                        &response_parts,
+                    ) {
+                        let error = refusal::refusal_error(stream_finish_reason, &stop_details);
+                        checkpoint!(
+                            checkpoint_sink,
+                            run_id_clone,
+                            step,
+                            CheckpointBoundary::ModelFailed(error.model_failure().kind),
+                            messages,
+                            Some(&partial_response),
+                            usage,
+                            tx
+                        );
+                        let _ = tx
+                            .send(Ok(AgentStreamEvent::Error {
+                                message: error.to_string(),
+                            }))
+                            .await;
+                        let _ = tx.send(Err(AgentRunError::Model(error))).await;
+                        return;
+                    }
 
                     // If the stream produced no parts at all, treat it as an error
                     if response_parts.is_empty() && terminal_metadata.is_none() {
+                        let message = match reported_finish_reason {
+                            Some(reason) => format!(
+                                "model stream ended without producing any content (finish_reason={reason})"
+                            ),
+                            None => "model stream ended without producing any content".to_string(),
+                        };
                         checkpoint!(
                             checkpoint_sink,
                             run_id_clone,
@@ -965,15 +1004,12 @@ impl AgentStream {
                         );
                         let _ = tx
                             .send(Ok(AgentStreamEvent::Error {
-                                message: "model stream ended without producing any content"
-                                    .to_string(),
+                                message: message.clone(),
                             }))
                             .await;
                         let _ = tx
                             .send(Err(AgentRunError::Model(
-                                serdes_ai_models::ModelError::incomplete_stream(
-                                    "model stream ended without producing any content",
-                                ),
+                                serdes_ai_models::ModelError::incomplete_stream(message),
                             )))
                             .await;
                         return;
@@ -2411,6 +2447,148 @@ mod tests {
 
         assert!(!saw_run_complete, "empty stream must NOT emit RunComplete");
         assert!(saw_error, "empty stream must still produce an error");
+    }
+
+    /// The terminal event of an Anthropic refusal: ContentFilter plus the stop
+    /// details in the terminal metadata, as the Anthropic parser emits it.
+    fn refusal_complete() -> ModelResponseStreamEvent {
+        let stop_details = refusal::StopDetails {
+            stop_type: Some("refusal".into()),
+            category: Some("reasoning_extraction".into()),
+        };
+        let mut complete = StreamCompleteEvent::new(FinishReason::ContentFilter);
+        complete.metadata = Some(serdes_ai_core::messages::TerminalMetadata {
+            response_id: Some("msg_r".into()),
+            model: Some("claude-opus-5-5".into()),
+            details: refusal::terminal_details(Some("refusal"), Some(&stop_details), None),
+        });
+        ModelResponseStreamEvent::StreamComplete(complete)
+    }
+
+    /// The error of a refusal without answer: a ContentFiltered model error
+    /// whose message holds the documented refusal format.
+    async fn assert_refusal_error(model: FunctionModel, use_cancel: bool) {
+        let events = assert_stream_error_no_success(model, use_cancel).await;
+
+        let messages: Vec<&String> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentStreamEvent::Error { message } => Some(message),
+                _ => None,
+            })
+            .collect();
+        assert!(!messages.is_empty(), "expected an Error event");
+        for message in messages {
+            assert!(
+                message.contains(
+                    "refusal: type=refusal category=reasoning_extraction finish_reason=content_filter"
+                ),
+                "unexpected error text: {message}"
+            );
+            let stop = refusal::StopDetails::from_error_message(message).unwrap();
+            assert_eq!(stop.category.as_deref(), Some("reasoning_extraction"));
+        }
+    }
+
+    /// A refusal with 0 parts is an error with the finish reason and category.
+    #[tokio::test]
+    async fn test_refusal_without_parts_is_content_filtered_error() {
+        let model = FunctionModel::with_stream(|_messages, _settings| {
+            Box::pin(stream::iter(vec![Ok(refusal_complete())]))
+        });
+
+        assert_refusal_error(model, false).await;
+    }
+
+    /// Opus 5.5 always thinks: a thinking part (empty, signature only) before
+    /// the refusal must still end in the refusal error, not a silent success.
+    #[tokio::test]
+    async fn test_refusal_after_thinking_is_content_filtered_error() {
+        for use_cancel in [false, true] {
+            let model = FunctionModel::with_stream(|_messages, _settings| {
+                Box::pin(stream::iter(vec![
+                    Ok(ModelResponseStreamEvent::part_start(
+                        0,
+                        ModelResponsePart::Thinking(
+                            serdes_ai_core::messages::ThinkingPart::new("").with_signature("sig"),
+                        ),
+                    )),
+                    Ok(ModelResponseStreamEvent::part_end(0)),
+                    Ok(refusal_complete()),
+                ]))
+            });
+
+            assert_refusal_error(model, use_cancel).await;
+        }
+    }
+
+    /// A refusal after real text completes; the response in RunComplete carries
+    /// finish_reason ContentFilter and the stop details in vendor_details.
+    #[tokio::test]
+    async fn test_refusal_after_text_completes_with_stop_details() {
+        let model = FunctionModel::with_stream(|_messages, _settings| {
+            Box::pin(stream::iter(vec![
+                Ok(ModelResponseStreamEvent::part_start(
+                    0,
+                    ModelResponsePart::Text(TextPart::new("I started to")),
+                )),
+                Ok(ModelResponseStreamEvent::part_end(0)),
+                Ok(refusal_complete()),
+            ]))
+        });
+
+        let agentic = agent(model).build();
+        let mut stream = agentic
+            .run_stream("Hi", ())
+            .await
+            .expect("stream should start");
+
+        let mut run_complete_messages = None;
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(AgentStreamEvent::RunComplete { messages, .. }) => {
+                    run_complete_messages = Some(messages)
+                }
+                Ok(AgentStreamEvent::Error { message }) => panic!("unexpected error: {message}"),
+                Ok(_) => {}
+                Err(e) => panic!("unexpected error: {e:?}"),
+            }
+        }
+
+        let messages = run_complete_messages.expect("expected RunComplete");
+        let response = messages
+            .iter()
+            .flat_map(|request| &request.parts)
+            .filter_map(|part| match part {
+                ModelRequestPart::ModelResponse(response) => Some(response),
+                _ => None,
+            })
+            .next_back()
+            .expect("the refused response is in the history");
+        assert_eq!(response.finish_reason, Some(FinishReason::ContentFilter));
+        let stop = refusal::StopDetails::from_response(response).unwrap();
+        assert_eq!(stop.category.as_deref(), Some("reasoning_extraction"));
+    }
+
+    /// A 0-part stream whose terminal event carries no metadata reports the
+    /// provider's finish reason in the error text.
+    #[tokio::test]
+    async fn test_empty_stream_error_names_reported_finish_reason() {
+        let model = FunctionModel::with_stream(|_messages, _settings| {
+            Box::pin(stream::iter(vec![Ok(
+                ModelResponseStreamEvent::StreamComplete(StreamCompleteEvent::new(
+                    FinishReason::EndTurn,
+                )),
+            )]))
+        });
+
+        let events = assert_stream_error_no_success(model, false).await;
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentStreamEvent::Error { message }
+                if message.contains("without producing any content (finish_reason=end_turn)")
+        )));
     }
 
     /// RT4: the OpenAI-parser terminal shape (part_start + text_delta + part_end,
