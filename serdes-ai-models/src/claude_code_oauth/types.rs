@@ -4,7 +4,14 @@
 
 #![allow(missing_docs)] // DTO fields are self-documenting
 
+use crate::anthropic::controls::OutputConfig;
+use crate::refusal::{StopDetails, lenient_stop_details};
 use serde::{Deserialize, Serialize};
+
+/// Extended thinking configuration - the same type as the Anthropic adapter's,
+/// so both adapters send the same `thinking` object (legacy `enabled` with a
+/// budget, or `adaptive` with `display` and `block_binding`).
+pub use crate::anthropic::types::ThinkingConfig;
 
 /// Claude Code API configuration.
 #[derive(Debug, Clone)]
@@ -30,35 +37,6 @@ impl Default for ClaudeCodeConfig {
     }
 }
 
-/// Extended thinking configuration.
-#[derive(Debug, Clone, Serialize)]
-pub struct ThinkingConfig {
-    /// Thinking type: "enabled".
-    #[serde(rename = "type")]
-    pub thinking_type: String,
-    /// Budget tokens for thinking.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub budget_tokens: Option<u64>,
-}
-
-impl ThinkingConfig {
-    /// Create enabled thinking config without a budget.
-    pub fn enabled() -> Self {
-        Self {
-            thinking_type: "enabled".to_string(),
-            budget_tokens: None,
-        }
-    }
-
-    /// Create thinking config with a specific budget.
-    pub fn with_budget(budget: u64) -> Self {
-        Self {
-            thinking_type: "enabled".to_string(),
-            budget_tokens: Some(budget),
-        }
-    }
-}
-
 /// Request body for Claude messages API.
 #[derive(Debug, Serialize)]
 pub struct ClaudeRequest {
@@ -78,6 +56,9 @@ pub struct ClaudeRequest {
     /// Extended thinking configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<ThinkingConfig>,
+    /// Output configuration (`output_config.effort`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_config: Option<OutputConfig>,
 }
 
 /// Message in a Claude request.
@@ -184,6 +165,12 @@ pub struct ClaudeResponse {
     pub stop_reason: Option<String>,
     #[serde(default)]
     pub usage: Option<ClaudeUsage>,
+    /// Why the model stopped (`type` and `category`; never `explanation`).
+    #[serde(default, deserialize_with = "lenient_stop_details")]
+    pub stop_details: Option<StopDetails>,
+    /// Raw `input_transformations` (thinking block binding beta).
+    #[serde(default)]
+    pub input_transformations: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

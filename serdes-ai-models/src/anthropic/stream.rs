@@ -5,13 +5,16 @@
 use super::error::map_anthropic_error;
 use super::types::{ContentBlockDelta, ContentBlockStart, StreamEvent};
 use crate::error::ModelError;
+use crate::refusal::{STOP_DETAILS_KEY, StopDetails, terminal_details};
 use bytes::Bytes;
 use futures::Stream;
 use pin_project_lite::pin_project;
+use serde_json::Value as JsonValue;
 use serdes_ai_core::ModelResponsePart;
 use serdes_ai_core::messages::{
     FinishReason, ModelResponsePartDelta, ModelResponseStreamEvent, PartDeltaEvent, PartEndEvent,
-    PartStartEvent, StreamCompleteEvent, TextPart, ThinkingPart, ThinkingPartDelta, ToolCallPart,
+    PartStartEvent, StreamCompleteEvent, TerminalMetadata, TextPart, ThinkingPart,
+    ThinkingPartDelta, ToolCallPart,
 };
 use serdes_ai_streaming::{SseParser, StreamError};
 use std::collections::HashMap;
@@ -36,6 +39,10 @@ pin_project! {
         cache_read_tokens: Option<u64>,
         // Provider-reported stop reason from message_delta
         stop_reason: Option<String>,
+        // Provider-reported stop details from message_delta (never the explanation)
+        stop_details: Option<StopDetails>,
+        // Raw input_transformations from message_start or message_delta
+        input_transformations: Option<JsonValue>,
         // Whether message_stop was observed
         message_stop_seen: bool,
         // Finished
@@ -84,6 +91,8 @@ where
             cache_creation_tokens: None,
             cache_read_tokens: None,
             stop_reason: None,
+            stop_details: None,
+            input_transformations: None,
             message_stop_seen: false,
             done: false,
         }
@@ -95,6 +104,11 @@ where
     /// (i.e. `message_stop` was observed).
     pub fn stop_reason(&self) -> Option<&str> {
         self.stop_reason.as_deref()
+    }
+
+    /// The provider-reported stop details (from `message_delta`), if any.
+    pub fn stop_details(&self) -> Option<&StopDetails> {
+        self.stop_details.as_ref()
     }
 
     /// Whether `message_stop` was observed before the stream ended.
@@ -140,6 +154,8 @@ where
                     this.cache_creation_tokens,
                     this.cache_read_tokens,
                     this.stop_reason,
+                    this.stop_details,
+                    this.input_transformations,
                     this.message_stop_seen,
                     this.done,
                 ) {
@@ -218,6 +234,8 @@ fn process_event(
     cache_creation_tokens: &mut Option<u64>,
     cache_read_tokens: &mut Option<u64>,
     stop_reason: &mut Option<String>,
+    stop_details: &mut Option<StopDetails>,
+    input_transformations: &mut Option<JsonValue>,
     message_stop_seen: &mut bool,
     done: &mut bool,
 ) -> Option<Result<ModelResponseStreamEvent, ModelError>> {
@@ -225,10 +243,14 @@ fn process_event(
     let event: StreamEvent = match serde_json::from_str(data) {
         Ok(e) => e,
         Err(e) => {
-            return Some(Err(ModelError::invalid_response(format!(
-                "Failed to parse stream event: {} - data: {}",
-                e, data
-            ))));
+            // stop_details may carry an explanation that must never reach a
+            // log or an error message, so such data is not echoed.
+            let message = if data.contains(STOP_DETAILS_KEY) {
+                format!("Failed to parse stream event: {e} - data omitted (holds stop_details)")
+            } else {
+                format!("Failed to parse stream event: {} - data: {}", e, data)
+            };
+            return Some(Err(ModelError::invalid_response(message)));
         }
     };
 
@@ -239,6 +261,9 @@ fn process_event(
             *input_tokens = message.usage.input_tokens;
             *cache_creation_tokens = message.usage.cache_creation_input_tokens;
             *cache_read_tokens = message.usage.cache_read_input_tokens;
+            if message.input_transformations.is_some() {
+                *input_transformations = message.input_transformations;
+            }
             None
         }
 
@@ -358,9 +383,23 @@ fn process_event(
             })))
         }
 
-        StreamEvent::MessageDelta { delta, usage } => {
+        StreamEvent::MessageDelta {
+            delta,
+            usage,
+            stop_details: outer_stop_details,
+            input_transformations: outer_input_transformations,
+        } => {
             if let Some(reason) = &delta.stop_reason {
                 *stop_reason = Some(reason.clone());
+            }
+            // Accepted inside `delta` and beside it; inside wins.
+            if let Some(details) = delta.stop_details.or(outer_stop_details) {
+                *stop_details = Some(details);
+            }
+            if let Some(transformations) =
+                delta.input_transformations.or(outer_input_transformations)
+            {
+                *input_transformations = Some(transformations);
             }
             if let Some(u) = usage {
                 *output_tokens = u.output_tokens;
@@ -394,6 +433,19 @@ fn process_event(
             if let Some(tokens) = *cache_read_tokens {
                 event = event.with_cache_read_tokens(tokens);
             }
+            // Terminal metadata only when the provider sent stop details or
+            // input transformations: a normal end_turn keeps it None.
+            if let Some(details) = terminal_details(
+                stop_reason.as_deref(),
+                stop_details.as_ref(),
+                input_transformations.as_ref(),
+            ) {
+                event.metadata = Some(TerminalMetadata {
+                    response_id: message_id.clone(),
+                    model: model.clone(),
+                    details: Some(details),
+                });
+            }
 
             Some(Ok(ModelResponseStreamEvent::StreamComplete(event)))
         }
@@ -416,6 +468,7 @@ fn map_stop_reason(reason: Option<&str>) -> FinishReason {
         Some("stop_sequence") => FinishReason::StopSequence,
         Some("max_tokens") => FinishReason::Length,
         Some("tool_use") => FinishReason::ToolCall,
+        Some("refusal") => FinishReason::ContentFilter,
         _ => FinishReason::Stop,
     }
 }
@@ -428,6 +481,191 @@ mod tests {
 
     fn make_sse_bytes(event_type: &str, data: &str) -> Bytes {
         Bytes::from(format!("event: {}\ndata: {}\n\n", event_type, data))
+    }
+
+    const OPUS_MSG_START: &str = r#"{"type":"message_start","message":{"id":"msg_r","type":"message","role":"assistant","model":"claude-opus-5-5","usage":{"input_tokens":10,"output_tokens":0}}}"#;
+
+    /// A stream of `message_start`, the given middle events, then
+    /// `message_delta` with `msg_delta` and `message_stop`; all events.
+    async fn run_stream(
+        middle: &[(&str, &str)],
+        msg_delta: &str,
+    ) -> Vec<Result<ModelResponseStreamEvent, ModelError>> {
+        let mut bytes = vec![Ok(make_sse_bytes("message_start", OPUS_MSG_START))];
+        for (event_type, data) in middle {
+            bytes.push(Ok(make_sse_bytes(event_type, data)));
+        }
+        bytes.push(Ok(make_sse_bytes("message_delta", msg_delta)));
+        bytes.push(Ok(make_sse_bytes(
+            "message_stop",
+            r#"{"type":"message_stop"}"#,
+        )));
+        AnthropicStreamParser::new(stream::iter(bytes))
+            .collect()
+            .await
+    }
+
+    fn terminal(events: &[Result<ModelResponseStreamEvent, ModelError>]) -> &StreamCompleteEvent {
+        match events.last() {
+            Some(Ok(ModelResponseStreamEvent::StreamComplete(complete))) => complete,
+            other => panic!("expected StreamComplete last, got {other:?}"),
+        }
+    }
+
+    const REFUSAL_DELTA: &str = r#"{"type":"message_delta","delta":{"stop_reason":"refusal","stop_sequence":null,"stop_details":{"type":"refusal","category":"reasoning_extraction","explanation":"private text"}},"usage":{"output_tokens":3}}"#;
+
+    #[tokio::test]
+    async fn refusal_maps_to_content_filter_with_category_in_metadata() {
+        let events = run_stream(&[], REFUSAL_DELTA).await;
+
+        let complete = terminal(&events);
+        assert_eq!(complete.finish_reason, FinishReason::ContentFilter);
+        let metadata = complete
+            .metadata
+            .as_ref()
+            .expect("refusal carries metadata");
+        assert_eq!(metadata.response_id.as_deref(), Some("msg_r"));
+        let details = metadata.details.as_ref().unwrap();
+        assert_eq!(details["stop_reason"], "refusal");
+        assert_eq!(
+            details["stop_details"],
+            serde_json::json!({"type": "refusal", "category": "reasoning_extraction"})
+        );
+        assert!(!details.to_string().contains("private text"));
+    }
+
+    /// Opus 5.5 always thinks: the refusal usually follows a thinking block
+    /// with an empty text (display "omitted") and a signature.
+    #[tokio::test]
+    async fn refusal_after_thinking_block_keeps_the_part_and_the_category() {
+        let events = run_stream(
+            &[
+                (
+                    "content_block_start",
+                    r#"{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}"#,
+                ),
+                (
+                    "content_block_delta",
+                    r#"{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}"#,
+                ),
+                (
+                    "content_block_stop",
+                    r#"{"type":"content_block_stop","index":0}"#,
+                ),
+            ],
+            REFUSAL_DELTA,
+        )
+        .await;
+
+        assert!(matches!(
+            &events[0],
+            Ok(ModelResponseStreamEvent::PartStart(start))
+                if matches!(start.part, ModelResponsePart::Thinking(_))
+        ));
+        let complete = terminal(&events);
+        assert_eq!(complete.finish_reason, FinishReason::ContentFilter);
+        let details = complete
+            .metadata
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            StopDetails::from_details(details)
+                .unwrap()
+                .category
+                .as_deref(),
+            Some("reasoning_extraction")
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_details_beside_delta_are_read_too() {
+        let msg_delta = r#"{"type":"message_delta","delta":{"stop_reason":"refusal","stop_sequence":null},"stop_details":{"type":"refusal","category":"cyber"},"usage":{"output_tokens":1}}"#;
+
+        let events = run_stream(&[], msg_delta).await;
+
+        let complete = terminal(&events);
+        assert_eq!(complete.finish_reason, FinishReason::ContentFilter);
+        let details = complete
+            .metadata
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap();
+        assert_eq!(details["stop_details"]["category"], "cyber");
+    }
+
+    /// A stop_details shape the parser does not expect must neither fail the
+    /// stream nor leak the explanation.
+    #[tokio::test]
+    async fn odd_stop_details_shape_still_parses() {
+        let msg_delta = r#"{"type":"message_delta","delta":{"stop_reason":"refusal","stop_sequence":null,"stop_details":{"category":null,"type":7,"explanation":"private text"}},"usage":{"output_tokens":1}}"#;
+
+        let events = run_stream(&[], msg_delta).await;
+
+        let complete = terminal(&events);
+        assert_eq!(complete.finish_reason, FinishReason::ContentFilter);
+        let details = complete
+            .metadata
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap();
+        assert_eq!(details["stop_details"], serde_json::json!({}));
+        assert!(!details.to_string().contains("private text"));
+    }
+
+    #[tokio::test]
+    async fn parse_error_does_not_echo_stop_details() {
+        // `usage.output_tokens` has the wrong type, so the event fails to parse.
+        let msg_delta = r#"{"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"explanation":"private text"}},"usage":{"output_tokens":"x"}}"#;
+
+        let events = run_stream(&[], msg_delta).await;
+
+        let error = events
+            .iter()
+            .find_map(|e| e.as_ref().err())
+            .expect("parse error");
+        let message = error.to_string();
+        assert!(message.contains("Failed to parse stream event"));
+        assert!(!message.contains("private text"));
+    }
+
+    #[tokio::test]
+    async fn input_transformations_reach_the_metadata() {
+        let msg_delta = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"input_transformations":[{"type":"thinking_block_dropped","index":2}]},"usage":{"output_tokens":1}}"#;
+
+        let events = run_stream(&[], msg_delta).await;
+
+        let complete = terminal(&events);
+        assert_eq!(complete.finish_reason, FinishReason::EndTurn);
+        let details = complete
+            .metadata
+            .as_ref()
+            .unwrap()
+            .details
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            details["input_transformations"],
+            serde_json::json!([{"type": "thinking_block_dropped", "index": 2}])
+        );
+        assert!(details.get("stop_details").is_none());
+    }
+
+    #[tokio::test]
+    async fn normal_end_turn_keeps_metadata_none() {
+        let msg_delta = r#"{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":5}}"#;
+
+        let events = run_stream(&[], msg_delta).await;
+
+        let complete = terminal(&events);
+        assert_eq!(complete.finish_reason, FinishReason::EndTurn);
+        assert!(complete.metadata.is_none());
     }
 
     #[tokio::test]

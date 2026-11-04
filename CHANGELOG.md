@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Anthropic: claude-opus-5-5 controls and refusals
+- Add adaptive thinking to `AnthropicModel` and `ClaudeCodeOAuthModel`:
+  `with_adaptive_thinking()` sends `{"type":"adaptive"}` without a budget and
+  without the interleaved-thinking beta flag; the last call of it and
+  `with_thinking(..)` wins. `with_thinking(Some(budget))` sends the unchanged
+  legacy body.
+- Add `with_thinking_display(ThinkingDisplay)` (`thinking.display`, sent only
+  while thinking is on), `with_effort(Effort)` (`output_config.effort`) and the
+  opt-in `with_thinking_block_binding(BlockBinding)`, which adds the
+  `THINKING_BINDING_BETA` flag. An `anthropic-beta` override via `with_header`
+  replaces that flag too. `ThinkingDisplay` and `Effort` pass unknown values through.
+- Do not send empty or whitespace-only text as content blocks, or blank user
+  prompts; empty thinking blocks keep their signature.
+- Map `stop_reason: "refusal"` to `FinishReason::ContentFilter` (stream and
+  non-stream). `stop_details` (`type`, `category`; never `explanation`) and
+  `input_transformations` reach the caller via `TerminalMetadata.details` and
+  `vendor_details`; read them with `refusal::StopDetails::from_response` and
+  `refusal::input_transformations`.
+- The agent stream turns a refusal without answer (no parts, or thinking only)
+  into `ModelError::ContentFiltered` with the message
+  `refusal: type=<t> category=<c> finish_reason=content_filter`
+  (`refusal::StopDetails::from_error_message` reads it back). Other empty
+  streams name the reported finish reason in their error text.
+- Public struct literals of `ThinkingConfig`, `MessagesRequest`,
+  `MessagesResponse`, `MessageDelta`, `PartialMessage`, the
+  `StreamEvent::MessageDelta` variant, `ClaudeRequest` and `ClaudeResponse`
+  need the new fields. `claude_code_oauth::ThinkingConfig` is now the Anthropic type.
+
 ## [0.3.0] - 2026-09-26
 
 - serdes-ai-cli is not published to crates.io in this release (`publish = false`;

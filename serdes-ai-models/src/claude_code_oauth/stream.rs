@@ -79,6 +79,39 @@ mod tests {
         Bytes::from(format!("event: {}\ndata: {}\n\n", event_type, data))
     }
 
+    /// The OAuth adapter inherits the refusal mapping of the Anthropic parser.
+    #[tokio::test]
+    async fn refusal_reaches_the_terminal_event_with_its_category() {
+        let msg_start = r#"{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-5","usage":{"input_tokens":10,"output_tokens":0}}}"#;
+        let msg_delta = r#"{"type":"message_delta","delta":{"stop_reason":"refusal","stop_sequence":null,"stop_details":{"type":"refusal","category":"reasoning_extraction","explanation":"private text"}},"usage":{"output_tokens":1}}"#;
+        let bytes = vec![
+            Ok(make_sse_bytes("message_start", msg_start)),
+            Ok(make_sse_bytes("message_delta", msg_delta)),
+            Ok(make_sse_bytes("message_stop", r#"{"type":"message_stop"}"#)),
+        ];
+
+        let events: Vec<_> = ClaudeCodeStreamParser::new(stream::iter(bytes))
+            .collect()
+            .await;
+
+        match events.last() {
+            Some(Ok(ModelResponseStreamEvent::StreamComplete(complete))) => {
+                assert_eq!(complete.finish_reason, FinishReason::ContentFilter);
+                let details = complete
+                    .metadata
+                    .as_ref()
+                    .unwrap()
+                    .details
+                    .as_ref()
+                    .unwrap();
+                let stop = crate::refusal::StopDetails::from_details(details).unwrap();
+                assert_eq!(stop.category.as_deref(), Some("reasoning_extraction"));
+                assert!(!details.to_string().contains("private text"));
+            }
+            other => panic!("expected terminal StreamComplete last, got {:?}", other),
+        }
+    }
+
     /// The wrapper passes the wrapped Anthropic parser's terminal
     /// StreamComplete through unchanged: exactly one terminal event,
     /// emitted last, with the usage fields the Anthropic stream reported.

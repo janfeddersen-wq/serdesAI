@@ -1,9 +1,13 @@
 //! Claude Code OAuth model implementation.
 
 use super::types::*;
+use crate::anthropic::controls::{
+    BlockBinding, Effort, THINKING_BINDING_BETA, ThinkingControls, ThinkingDisplay, ThinkingMode,
+};
 use crate::error::ModelError;
 use crate::model::{Model, ModelRequestParameters, StreamedResponse, ToolChoice};
 use crate::profile::{ModelProfile, anthropic_claude_profile};
+use crate::refusal::terminal_details;
 use async_trait::async_trait;
 use base64::Engine;
 use reqwest::Client;
@@ -26,6 +30,14 @@ const CLAUDE_CODE_INSTRUCTIONS: &str = "You are Claude Code, Anthropic's officia
 /// Tools must be prefixed on outgoing requests and unprefixed on incoming responses.
 const TOOL_PREFIX: &str = "cp_";
 
+/// The `anthropic-beta` flags every Claude Code OAuth request sends.
+const OAUTH_BETA_FLAGS: &str = "oauth-2025-04-20,interleaved-thinking-2025-05-14";
+
+/// Whether a text is empty or whitespace only - the API rejects such a text block.
+fn is_blank(text: &str) -> bool {
+    text.trim().is_empty()
+}
+
 /// Claude Code OAuth model.
 ///
 /// Uses OAuth access tokens to authenticate with the Anthropic API.
@@ -36,10 +48,8 @@ pub struct ClaudeCodeOAuthModel {
     client: Client,
     config: ClaudeCodeConfig,
     profile: ModelProfile,
-    /// Enable extended thinking.
-    enable_thinking: bool,
-    /// Thinking budget tokens.
-    thinking_budget: Option<u64>,
+    /// Thinking form, display, effort and block binding.
+    thinking: ThinkingControls,
 }
 
 impl ClaudeCodeOAuthModel {
@@ -62,19 +72,67 @@ impl ClaudeCodeOAuthModel {
             client,
             config,
             profile,
-            enable_thinking: false,
-            thinking_budget: None,
+            thinking: ThinkingControls::default(),
         }
     }
 
-    /// Enable extended thinking.
+    /// Enable extended thinking in the legacy form
+    /// `{"type": "enabled", "budget_tokens": ...}`.
+    ///
+    /// The last call of this and [`with_adaptive_thinking`](Self::with_adaptive_thinking)
+    /// wins. Models that reject the legacy form (claude-opus-5-5) need adaptive thinking.
     #[must_use]
     pub fn with_thinking(mut self, budget: Option<u64>) -> Self {
-        self.enable_thinking = true;
-        self.thinking_budget = budget;
+        self.thinking.mode = ThinkingMode::Enabled { budget };
         // Update profile to indicate reasoning support
         self.profile.supports_reasoning = true;
         self
+    }
+
+    /// Enable adaptive thinking: `{"type": "adaptive"}` without a budget,
+    /// steered by [`with_effort`](Self::with_effort).
+    ///
+    /// The last call of this and [`with_thinking`](Self::with_thinking) wins.
+    #[must_use]
+    pub fn with_adaptive_thinking(mut self) -> Self {
+        self.thinking.mode = ThinkingMode::Adaptive;
+        self.profile.supports_reasoning = true;
+        self
+    }
+
+    /// Set `thinking.display` (`"summarized"`, `"omitted"` or any other
+    /// string). It is sent with whichever thinking form is on, and not at all
+    /// while thinking is off.
+    #[must_use]
+    pub fn with_thinking_display(mut self, display: impl Into<ThinkingDisplay>) -> Self {
+        self.thinking.display = Some(display.into());
+        self
+    }
+
+    /// Set `output_config.effort` (`"low"` ... `"max"` or any other string).
+    /// It is sent whether thinking is on or not.
+    #[must_use]
+    pub fn with_effort(mut self, effort: impl Into<Effort>) -> Self {
+        self.thinking.effort = Some(effort.into());
+        self
+    }
+
+    /// Opt in to `thinking.block_binding`. Sent only while thinking is on, and
+    /// then together with the `anthropic-beta` flag [`THINKING_BINDING_BETA`].
+    #[must_use]
+    pub fn with_thinking_block_binding(mut self, block_binding: BlockBinding) -> Self {
+        self.thinking.block_binding = Some(block_binding);
+        self
+    }
+
+    /// The `anthropic-beta` header value of a request - one source for the
+    /// streaming and the non-streaming path.
+    fn anthropic_beta(&self) -> String {
+        if self.thinking.sends_block_binding() {
+            format!("{OAUTH_BETA_FLAGS},{THINKING_BINDING_BETA}")
+        } else {
+            OAUTH_BETA_FLAGS.to_string()
+        }
     }
 
     /// Set a custom config.
@@ -132,6 +190,15 @@ impl ClaudeCodeOAuthModel {
                             let system_prefix = collected_system_prompts.join("\n\n");
                             content = self.prepend_to_content(content, &system_prefix);
                             first_user_message_processed = true;
+                        }
+
+                        // The API rejects empty text, and a blank prompt carries nothing.
+                        let blank = match &content {
+                            ClaudeContent::Text(text) => is_blank(text),
+                            ClaudeContent::Blocks(blocks) => blocks.is_empty(),
+                        };
+                        if blank {
+                            continue;
                         }
 
                         messages.push(ClaudeMessage {
@@ -208,6 +275,7 @@ impl ClaudeCodeOAuthModel {
                 let blocks: Vec<ContentBlock> = parts
                     .iter()
                     .filter_map(|part| match part {
+                        UserContentPart::Text { text } if is_blank(text) => None,
                         UserContentPart::Text { text } => Some(ContentBlock::Text {
                             text: text.clone(),
                             cache_control: None,
@@ -302,16 +370,6 @@ impl ClaudeCodeOAuthModel {
             Some(self.convert_tools(&params.tools))
         };
 
-        // Build thinking config if enabled
-        let thinking = if self.enable_thinking {
-            Some(match self.thinking_budget {
-                Some(budget) => ThinkingConfig::with_budget(budget),
-                None => ThinkingConfig::enabled(),
-            })
-        } else {
-            None
-        };
-
         ClaudeRequest {
             model: self.model_name.clone(),
             messages: api_messages,
@@ -334,12 +392,18 @@ impl ClaudeCodeOAuthModel {
                     "name": name
                 }),
             }),
-            thinking,
+            thinking: self.thinking.thinking_config(),
+            output_config: self.thinking.output_config(),
         }
     }
 
     fn convert_response(&self, response: ClaudeResponse) -> ModelResponse {
         let mut parts = Vec::new();
+        let vendor_details = terminal_details(
+            response.stop_reason.as_deref(),
+            response.stop_details.as_ref(),
+            response.input_transformations.as_ref(),
+        );
 
         for block in &response.content {
             match block {
@@ -377,6 +441,7 @@ impl ClaudeCodeOAuthModel {
             "end_turn" | "stop" => FinishReason::Stop,
             "max_tokens" => FinishReason::Length,
             "tool_use" => FinishReason::ToolCall,
+            "refusal" => FinishReason::ContentFilter,
             _ => FinishReason::Stop,
         });
 
@@ -396,7 +461,7 @@ impl ClaudeCodeOAuthModel {
             finish_reason,
             usage,
             vendor_id: Some(response.id),
-            vendor_details: None,
+            vendor_details,
             kind: "response".to_string(),
         }
     }
@@ -412,6 +477,9 @@ impl ClaudeCodeOAuthModel {
 
         for part in &response.parts {
             match part {
+                // Blank text is not sent; thinking blocks below are kept even
+                // when empty, their signature must be replayed.
+                ModelResponsePart::Text(text) if is_blank(&text.content) => {}
                 ModelResponsePart::Text(text) => {
                     blocks.push(ContentBlock::Text {
                         text: text.content.clone(),
@@ -503,7 +571,8 @@ impl Model for ClaudeCodeOAuthModel {
         );
         headers.insert(
             HeaderName::from_static("anthropic-beta"),
-            HeaderValue::from_static("oauth-2025-04-20,interleaved-thinking-2025-05-14"),
+            HeaderValue::from_str(&self.anthropic_beta())
+                .map_err(|e| ModelError::api(format!("Invalid beta header: {}", e)))?,
         );
         headers.insert(
             HeaderName::from_static("x-app"),
@@ -588,7 +657,8 @@ impl Model for ClaudeCodeOAuthModel {
         );
         headers.insert(
             HeaderName::from_static("anthropic-beta"),
-            HeaderValue::from_static("oauth-2025-04-20,interleaved-thinking-2025-05-14"),
+            HeaderValue::from_str(&self.anthropic_beta())
+                .map_err(|e| ModelError::api(format!("Invalid beta header: {}", e)))?,
         );
         headers.insert(
             HeaderName::from_static("x-app"),
@@ -640,3 +710,7 @@ impl Model for ClaudeCodeOAuthModel {
         &self.profile
     }
 }
+
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;
